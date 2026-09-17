@@ -64,15 +64,20 @@ pub(crate) fn prelude_nodes(name_ctxt: &NameCtxt, config: PreludeConfig) -> Vec<
     let Poly = str_to_node(POLY);
     #[allow(non_snake_case)]
     let Height = str_to_node(T_HEIGHT);
+    // Neutral (solver-standard) prelude: emit the axiomatised partial order instead of
+    // Z3's `(_ partial-order 0)` special relation, so the identical text is valid for both
+    // solvers (design 05 §2.1). Opt-in via VERUS_NEUTRAL_PRELUDE so we can measure the cost
+    // for Z3 alone (risk 1) without changing the default.
+    let neutral_prelude = std::env::var("VERUS_NEUTRAL_PRELUDE").is_ok();
     let height_axioms = match config.solver {
-        SmtSolver::Z3 => nodes_vec!(
+        SmtSolver::Z3 if !neutral_prelude => nodes_vec!(
         (axiom (forall ((x [Height]) (y [Height])) (!
             (= ([height_lt] x y) (and ([height_le] x y) (not (= x y))))
             :pattern (([height_lt] x y))
             :qid prelude_height_lt
             :skolemid skolem_prelude_height_lt
             )))),
-        SmtSolver::Cvc5 => nodes_vec!(
+        SmtSolver::Cvc5 | SmtSolver::Z3 => nodes_vec!(
                     (declare-fun partial-order ([Height] [Height]) Bool)
                     (axiom (forall ((x [Height])) (!
                         (partial-order x x)
