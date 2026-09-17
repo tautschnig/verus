@@ -1,5 +1,74 @@
 use crate::ast::{AssertId, Command, CommandX, Commands, QueryX, Stmt, StmtX};
+use crate::messages::ArcDynMessage;
 use std::sync::Arc;
+
+/// Collect every labeled assertion site (those carrying an `AssertId`) in a structured,
+/// not-yet-lowered query assertion, together with its diagnostic message. Used by the
+/// `-V vacuity-checks` obligation-reachability probe to enumerate the sites to test.
+pub fn collect_assert_ids(stmt: &Stmt, out: &mut Vec<(AssertId, ArcDynMessage)>) {
+    match &**stmt {
+        StmtX::Assert(Some(assert_id), msg, _filter, _e) => {
+            out.push((assert_id.clone(), msg.clone()));
+        }
+        StmtX::Assert(None, ..)
+        | StmtX::Assume(..)
+        | StmtX::Havoc(..)
+        | StmtX::Assign(..)
+        | StmtX::Snapshot(..)
+        | StmtX::Break(..) => {}
+        StmtX::DeadEnd(s) | StmtX::Breakable(_, s) => collect_assert_ids(s, out),
+        StmtX::Block(stmts) | StmtX::Switch(stmts) => {
+            for s in stmts.iter() {
+                collect_assert_ids(s, out);
+            }
+        }
+    }
+}
+
+/// Build an obligation-reachability probe query assertion for a single site.
+///
+/// This focuses the path leading to the assertion identified by `assert_id` (dropping all
+/// other assertions, later statements, and unrelated `Switch` branches, exactly as
+/// `focus_stmt_on_assert_id` does) and then replaces the asserted expression at that site with
+/// `false`. The resulting `CheckValid` query is *valid* exactly when the path condition reaching
+/// the site is unsatisfiable together with the entry assumptions — i.e. the obligation is
+/// unreachable and therefore only vacuously verified. Returns `None` if the id is not found.
+pub fn reachability_probe_assertion(stmt: &Stmt, assert_id: &AssertId) -> Option<Stmt> {
+    let (focused, found) = focus_stmt_on_assert_id(stmt, assert_id);
+    if !found {
+        return None;
+    }
+    Some(replace_assert_with_false(&focused, assert_id))
+}
+
+fn replace_assert_with_false(stmt: &Stmt, assert_id: &AssertId) -> Stmt {
+    match &**stmt {
+        StmtX::Assert(Some(id), msg, filter, _e) if id == assert_id => Arc::new(StmtX::Assert(
+            Some(id.clone()),
+            msg.clone(),
+            filter.clone(),
+            crate::ast_util::mk_false(),
+        )),
+        StmtX::Assert(..)
+        | StmtX::Assume(..)
+        | StmtX::Havoc(..)
+        | StmtX::Assign(..)
+        | StmtX::Snapshot(..)
+        | StmtX::Break(..) => stmt.clone(),
+        StmtX::DeadEnd(s) => {
+            Arc::new(StmtX::DeadEnd(replace_assert_with_false(s, assert_id)))
+        }
+        StmtX::Breakable(label, s) => {
+            Arc::new(StmtX::Breakable(label.clone(), replace_assert_with_false(s, assert_id)))
+        }
+        StmtX::Block(stmts) => Arc::new(StmtX::Block(Arc::new(
+            stmts.iter().map(|s| replace_assert_with_false(s, assert_id)).collect(),
+        ))),
+        StmtX::Switch(stmts) => Arc::new(StmtX::Switch(Arc::new(
+            stmts.iter().map(|s| replace_assert_with_false(s, assert_id)).collect(),
+        ))),
+    }
+}
 
 pub fn focus_commands_on_assert_id(commands: &Commands, assert_id: &AssertId) -> Commands {
     Arc::new(commands.iter().filter_map(|c| focus_command_on_assert_id(c, assert_id)).collect())
