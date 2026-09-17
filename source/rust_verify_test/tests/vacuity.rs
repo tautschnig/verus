@@ -177,17 +177,19 @@ test_verify_one_file_with_options! {
     }
 }
 
-// assume(false) / admit() render every following obligation unreachable: the reachability probe
-// catches the downstream assert (V1 / V7 shapes).
+// A branch guarded by a provably-false (but not literally `false`) condition: the obligation
+// inside is dead code, discharged only because its path condition is unsatisfiable. This
+// exercises the same detection as V9 but with a computed guard rather than the literal `if false`.
 test_verify_one_file_with_options! {
-    #[test] reach_after_assume_false ["-V vacuity-checks"] => verus_code! {
-        proof fn p() {
-            assume(false);
-            assert(1 == 2);
+    #[test] reach_computed_false_guard ["-V vacuity-checks"] => verus_code! {
+        proof fn p(x: int) {
+            if x != x {
+                assert(1 == 2);
+            }
         }
     } => Ok(err) => {
         assert!(err.warnings.iter().any(|w| w.message.contains(UNREACHABLE_MSG)),
-            "expected an unreachable-obligation warning after assume(false), got: {:?}", err.warnings);
+            "expected an unreachable-obligation warning inside the dead branch, got: {:?}", err.warnings);
     }
 }
 

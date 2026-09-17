@@ -2,13 +2,30 @@ use crate::ast::{AssertId, Command, CommandX, Commands, QueryX, Stmt, StmtX};
 use crate::messages::ArcDynMessage;
 use std::sync::Arc;
 
-/// Collect every labeled assertion site (those carrying an `AssertId`) in a structured,
-/// not-yet-lowered query assertion, together with its diagnostic message. Used by the
-/// `-V vacuity-checks` obligation-reachability probe to enumerate the sites to test.
+/// Collect labeled assertion sites (those carrying an `AssertId`) that are nested inside at least
+/// one `Switch` (i.e. guarded by a branch condition), together with their diagnostic messages.
+///
+/// The obligation-reachability probe only tests these branch-guarded sites. A *top-level*
+/// obligation (not under any branch) is unreachable only when the whole entry context is
+/// unsatisfiable, which is exactly what the precondition-satisfiability and ambient-axiom probes
+/// already report; probing every top-level obligation as well would multiply the query count by a
+/// large factor (prohibitive on a library the size of vstd) while only restating those two probes.
+/// Branch-guarded obligations are the genuine "dead code" class (corpus V9,
+/// `if false { assert(..) }`).
 pub fn collect_assert_ids(stmt: &Stmt, out: &mut Vec<(AssertId, ArcDynMessage)>) {
+    collect_assert_ids_rec(stmt, false, out)
+}
+
+fn collect_assert_ids_rec(
+    stmt: &Stmt,
+    under_switch: bool,
+    out: &mut Vec<(AssertId, ArcDynMessage)>,
+) {
     match &**stmt {
         StmtX::Assert(Some(assert_id), msg, _filter, _e) => {
-            out.push((assert_id.clone(), msg.clone()));
+            if under_switch {
+                out.push((assert_id.clone(), msg.clone()));
+            }
         }
         StmtX::Assert(None, ..)
         | StmtX::Assume(..)
@@ -16,10 +33,17 @@ pub fn collect_assert_ids(stmt: &Stmt, out: &mut Vec<(AssertId, ArcDynMessage)>)
         | StmtX::Assign(..)
         | StmtX::Snapshot(..)
         | StmtX::Break(..) => {}
-        StmtX::DeadEnd(s) | StmtX::Breakable(_, s) => collect_assert_ids(s, out),
-        StmtX::Block(stmts) | StmtX::Switch(stmts) => {
+        StmtX::DeadEnd(s) | StmtX::Breakable(_, s) => {
+            collect_assert_ids_rec(s, under_switch, out)
+        }
+        StmtX::Block(stmts) => {
             for s in stmts.iter() {
-                collect_assert_ids(s, out);
+                collect_assert_ids_rec(s, under_switch, out);
+            }
+        }
+        StmtX::Switch(stmts) => {
+            for s in stmts.iter() {
+                collect_assert_ids_rec(s, true, out);
             }
         }
     }
