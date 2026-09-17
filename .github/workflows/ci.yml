@@ -199,6 +199,16 @@ jobs:
         run: |
           # check cvc5
           cargo run --release -p rust_verify -- -V cvc5 ../examples/assorted_demo.rs
+          # a by(bit_vector) proof: these query contexts run prelude-free, so they
+          # need their own (set-logic ALL) for cvc5
+          cargo run --release -p rust_verify -- -V cvc5 ../examples/bitvector_basic.rs
+          # Multi-error reporting reads the assertion labels out of the model, and
+          # cvc5 returns total models, so these two binaries exercise the label
+          # confirmation path. (Run at low parallelism: cvc5's rlimit is sensitive
+          # to CPU contention. `slices` is deliberately excluded: it has known
+          # cvc5 incompleteness failures unrelated to error reporting.)
+          VERUS_EXTRA_ARGS="-V cvc5" cargo nextest run --release -p rust_verify_test \
+            -E 'binary(bitvector) | binary(mut_refs_slices_arrays)' -j 4
           CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true cargo nextest run --release -p air
           CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true cargo nextest run --release -p rust_verify_test
 
