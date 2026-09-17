@@ -12,6 +12,75 @@ Every claim below is tagged **VERIFIED** (I ran it here) or **UNEXECUTED**.
 
 ---
 
+## Harness generator (`generate.py`) — coverage
+
+**VERIFIED.** `generate.py` mechanically translates the inline-scalar subset of
+the `assume_specification` contracts in `num.rs, cmp.rs, ops.rs, bits.rs,
+result.rs, option.rs` into Kani harnesses in `src/generated.rs`, and logs a
+per-item skip reason for everything it does not translate
+(`GENERATED_REPORT.md`). The translation rules (R1–R6) are documented in the
+`generate.py` module docstring; nothing is ever approximated.
+
+**56 harnesses generated**, all from `num.rs`. A full `cargo kani` run over the
+crate (generated + 19 hand-written) is **75 / 75 successful, 0 failures, 98 s
+total** (`( ulimit -v 16777216; timeout 2400 cargo kani --output-format terse )`;
+Kani 0.67.0). Every current vstd spec in the translatable subset agrees with real
+std — the expected oracle result, which confirms the translator introduces **no
+false disagreement**. (The historical-bug regression harnesses `r2603_*_old_*`
+and `r2674_old_*` still fire, so the #2603/#2674 catch is preserved.)
+
+### Coverage over `num.rs`
+
+`num.rs` = 52 textual `assume_specification` sites inside the `num_specs!` macro,
+instantiated over 6 integer pairs = **312 concrete specs**. Disposition:
+
+| bucket | count | why |
+|---|---|---|
+| **emitted & verified** | **56** | inline arithmetic postcondition, CBMC-tractable width |
+| translatable, skipped for width/tractability (R5/R6) | 51 | 128-bit or 64-bit-multiply exceed i128 widening; div/rem tractable only ≤8-bit, multiply ≤16-bit under the CI budget |
+| not mechanically translatable | 205 | no inline postcondition (108, contract on extension trait); delegates to a vstd `wrapping`/spec module (72); references `checked_div`/`rust_div`/`rust_rem`/`next_multiple_of` (25) |
+
+So of the **107 `num.rs` specs whose postcondition is inline arithmetic**, 56
+(≈52 %) are both translated and cheap enough to verify; the other 51 are
+translatable but skipped purely for CBMC cost (R5/R6), not soundness.
+
+Emitted by method: `checked_add`×10, `checked_sub`×10, `saturating_add`/`sub`×5
+each, `checked_add_unsigned`/`checked_sub_unsigned`/`checked_add_signed`×5 each,
+`checked_mul`×4, `saturating_mul`×2, `checked_rem_euclid`×2, `checked_rem`/
+`checked_div_euclid`/`is_multiple_of`×1 each (div/rem capped at 8-bit).
+
+### The other five files: 0 emitted (honest)
+
+`cmp.rs`, `ops.rs`, `bits.rs`, `result.rs`, `option.rs` yield **0** harnesses,
+because the `assume_specification` *item itself* carries no mechanically
+translatable inline scalar postcondition:
+- `ops.rs` (13) and `cmp.rs` (24): the contract lives on an extension trait
+  (`ensures Self::obeys_*_spec() ==> ret == self.*_spec()`), plus float uninterp
+  specs — nothing inline on the item (R1);
+- `bits.rs` (16): `ensures r == u8_trailing_zeros(i)` references a recursive spec
+  fn — inlining a recursive spec body is out of scope (would risk a
+  translator-introduced false disagreement) (R3);
+- `result.rs` (10) / `option.rs` (23): reference spec fns (`is_variant`,
+  `spec_unwrap_or`, `cloned`, …), are generic over `T`/`E`, or higher-order
+  (`f.ensures`) (R2/R3).
+
+This is stricter than the survey's ~100 % *semantic* translatability rating for
+these files: the survey judged the contract's *meaning* first-order, whereas the
+generator only emits when the item's inline postcondition is mechanically
+translatable without inlining or generic instantiation. The representative
+option/result scalar contracts (`is_some`/`is_none`/`is_ok`/`is_err`/`unwrap_or`)
+are instead covered by the hand-written harnesses in `src/lib.rs`.
+
+### Reproduce
+
+```sh
+cd tools/vstd-kani
+python3 generate.py                                   # -> src/generated.rs, GENERATED_REPORT.md
+( ulimit -v 16777216; timeout 2400 cargo kani --output-format terse )   # 75/75 green, ~98 s
+```
+
+---
+
 ## Headline result (Q4) — both historical spec bugs are caught
 
 **VERIFIED.** A single `cargo kani` run over `vstd-kani/` produced:
