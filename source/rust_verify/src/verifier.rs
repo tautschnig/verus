@@ -48,7 +48,22 @@ use vir::def::{CommandContext, CommandsWithContext, CommandsWithContextX, SnapPo
 use vir::prelude::PreludeConfig;
 
 const RLIMIT_PER_SECOND_Z3: f32 = 3000000f32;
-const RLIMIT_PER_SECOND_CVC5: f32 = 333333f32; // ~= 5s
+// Calibrated for cvc5 1.3.4 so that `--rlimit N` is roughly N seconds of cvc5 solving
+// (Verus documents rlimit as "roughly in seconds"; default is DEFAULT_RLIMIT_SECS = 10).
+// Measured on two workloads that spin on quantifier instantiation
+// (recursion::decrease_through_my_map_imap and
+// user_defined_type_invariants::test_with_generics) by fixing `--rlimit-per` at several
+// budgets and reading cvc5's `global::totalTime`:
+//   250k units -> ~5.7/6.2 s   (~44k/41k u/s)
+//   500k units -> ~13.0/13.8 s (~38k/36k u/s)
+//     1M units -> ~29.1/31.1 s (~34k/32k u/s)
+//     2M units -> ~69.1 s      (~29k u/s)
+// The rate is not constant: cvc5 slows as its state grows (~47k u/s under 2 s, ~29k u/s
+// by ~70 s). Calibrating at the documented 10 s default (~37.5-40k u/s on both workloads)
+// gives 40000: a 10 s budget then takes ~10.5-11 s of cvc5 solving, longer budgets stay
+// within ~1.4x of nominal. Rounded slightly high so the budget errs toward completeness.
+// (The former value 333333 made a nominal 10 s budget run ~148 s before rlimit-exceeded.)
+const RLIMIT_PER_SECOND_CVC5: f32 = 40000f32;
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub(crate) struct ProgressBarId(String);
