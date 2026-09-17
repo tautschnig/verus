@@ -328,6 +328,13 @@ impl Context {
         self.smt_log.log_set_option(option, value);
     }
 
+    /// cvc5 needs a logic declaration before any command (otherwise it warns on stderr
+    /// and falls back to ALL anyway); it must also be told to run incrementally.
+    fn set_cvc5_logic(&mut self) {
+        self.smt_log.log_node(&node!((set-logic {str_to_node("ALL")})));
+        self.set_solver_option_bool("incremental", true, true);
+    }
+
     pub(crate) fn set_solver_option_bool(
         &mut self,
         option: &str,
@@ -348,9 +355,13 @@ impl Context {
                     self.set_solver_option_bool("rewriter.sort_disjunctions", false, true);
                 }
                 SmtSolver::Cvc5 => {
-                    self.smt_log.log_node(&node!((set-logic {str_to_node("ALL")})));
-                    self.set_solver_option_bool("incremental", true, true);
+                    self.set_cvc5_logic();
                 }
+            }
+        } else if option == "cvc5_logic_only" && value {
+            // Logic declaration without the Z3-oriented tuning preset; a no-op for Z3.
+            if matches!(self.solver, SmtSolver::Cvc5) {
+                self.set_cvc5_logic();
             }
         } else if option == "single_check_query" && value {
             self.single_check_query = true;
