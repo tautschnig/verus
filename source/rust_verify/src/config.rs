@@ -98,6 +98,7 @@ pub struct ArgsX {
     pub multiple_errors: u32,
     pub expand_errors: bool,
     pub log_dir: Option<String>,
+    pub emit_certificate: Option<String>,
     pub log_all: bool,
     pub log_args: LogArgs,
     pub show_triggers: ShowTriggers,
@@ -153,6 +154,7 @@ impl ArgsX {
             multiple_errors: Default::default(),
             expand_errors: Default::default(),
             log_dir: Default::default(),
+            emit_certificate: Default::default(),
             log_all: Default::default(),
             log_args: Default::default(),
             show_triggers: Default::default(),
@@ -342,7 +344,7 @@ pub fn parse_args_with_imports(
     const OPT_EXPAND_ERRORS: &str = "expand-errors";
 
     const OPT_LOG_DIR: &str = "log-dir";
-    const OPT_LOG_ALL: &str = "log-all";
+    const OPT_EMIT_CERTIFICATE: &str = "emit-certificate";    const OPT_LOG_ALL: &str = "log-all";
     const OPT_LOG_MULTI: &str = "log";
 
     const LOG_VIR: &str = "vir";
@@ -574,6 +576,12 @@ pub fn parse_args_with_imports(
         "DIRECTORY_NAME",
     );
     opts.optflag("", OPT_LOG_ALL, "Log everything");
+    opts.optopt(
+        "",
+        OPT_EMIT_CERTIFICATE,
+        "On a successful run, write a proof certificate (cert.json + SOURCES.sha256) to DIRECTORY",
+        "DIRECTORY",
+    );
     opts.optmulti(
         "",
         OPT_LOG_MULTI,
@@ -776,6 +784,7 @@ pub fn parse_args_with_imports(
             .unwrap_or(2),
         expand_errors: matches.opt_present(OPT_EXPAND_ERRORS),
         log_dir: matches.opt_str(OPT_LOG_DIR),
+        emit_certificate: matches.opt_str(OPT_EMIT_CERTIFICATE),
         log_all: matches.opt_present(OPT_LOG_ALL),
         log_args: LogArgs {
             log_vir: log.contains_key(LOG_VIR),
