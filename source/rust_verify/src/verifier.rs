@@ -1963,6 +1963,78 @@ impl Verifier {
                                 }
                             }
 
+                            // Vacuity lint (`-V vacuity-checks`): obligation-reachability probe.
+                            // For each assertion / postcondition site in the function body, test
+                            // whether the path condition reaching it is satisfiable together with
+                            // the entry assumptions. We reuse `focus_stmt_on_assert_id` to isolate
+                            // the path to the site (dropping other assertions, later statements,
+                            // and unrelated branches) and then assert `false` there: the query is
+                            // *valid* exactly when that path is unsatisfiable, i.e. the obligation
+                            // is unreachable and only vacuously verified. Each probe is a focused
+                            // check-sat on the isolated `vac` context, so it never perturbs the
+                            // canonical verdict. This detects dead-code obligations such as
+                            // `if false { assert(..) }` (corpus V9).
+                            if self.args.vacuity_checks {
+                                if let Some(vac) = vacuity_air_context.as_mut() {
+                                    for cmds in commands_with_context_list.iter() {
+                                        if cmds.prover_choice
+                                            != vir::def::ProverChoice::DefaultProver
+                                        {
+                                            continue;
+                                        }
+                                        for command in cmds.commands.iter() {
+                                            let CommandX::CheckValid(query) = &**command else {
+                                                continue;
+                                            };
+                                            let mut sites: Vec<(AssertId, ArcDynMessage)> =
+                                                Vec::new();
+                                            air::focus::collect_assert_ids(
+                                                &query.assertion,
+                                                &mut sites,
+                                            );
+                                            for (assert_id, msg) in sites.iter() {
+                                                let Some(probe_assertion) =
+                                                    air::focus::reachability_probe_assertion(
+                                                        &query.assertion,
+                                                        assert_id,
+                                                    )
+                                                else {
+                                                    continue;
+                                                };
+                                                let probe_query =
+                                                    std::sync::Arc::new(air::ast::QueryX {
+                                                        local: query.local.clone(),
+                                                        assertion: probe_assertion,
+                                                    });
+                                                let probe_cmd = std::sync::Arc::new(
+                                                    CommandX::CheckValid(probe_query),
+                                                );
+                                                let result = vac.command(
+                                                    &*message_interface,
+                                                    reporter,
+                                                    &probe_cmd,
+                                                    Default::default(),
+                                                );
+                                                if let ValidityResult::Valid(_) = result {
+                                                    let span: vir::messages::Span = msg
+                                                        .downcast_ref::<MessageX>()
+                                                        .and_then(|m| m.spans.first().cloned())
+                                                        .unwrap_or_else(|| function.span.clone());
+                                                    reporter.report(
+                                                        &warning(
+                                                            &span,
+                                                            "obligation is unreachable: it is only vacuously verified (the path condition reaching it is unsatisfiable) (vacuity-checks)",
+                                                        )
+                                                        .to_any(),
+                                                    );
+                                                }
+                                                vac.finish_query();
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             if (any_invalid
                                 && !self.args.no_auto_recommends_check
                                 && !any_timed_out)
@@ -2016,6 +2088,53 @@ impl Verifier {
                     }
                 }
             }
+        }
+        // Vacuity lint (`-V vacuity-checks`): ambient-axiom consistency probe. Once per bucket,
+        // after every context batch (prelude, datatype/function axioms, broadcast lemmas) has been
+        // mirrored into the isolated `vac` context, check-sat the installed axioms alone (empty
+        // local context, assert `false`). If the query is *valid*, `false` is derivable from the
+        // ambient axioms with no function context at all: the theory is inconsistent and every
+        // proof in the bucket is unsound. This is emitted at error level because it is a
+        // soundness-critical signal (e.g. a broadcast `ensures false` under external_body).
+        if let Some(vac) = vacuity_air_context.as_mut() {
+            let assertion = std::sync::Arc::new(air::ast::StmtX::Assert(
+                None,
+                air::messages::MessageInterface::empty(&*message_interface),
+                None,
+                air::ast_util::mk_false(),
+            ));
+            let query = std::sync::Arc::new(air::ast::QueryX {
+                // Assert `fuel_defaults` so the connecting axiom
+                // `forall id. fuel_bool(id) == fuel_bool_default(id)` is active: this is exactly
+                // what every function-body query does (via `set_fuel`) and is what makes the
+                // module's default reveals / broadcast lemmas count as "installed". Without it,
+                // the ambient theory would omit the very broadcast axioms we want to check.
+                local: std::sync::Arc::new(vec![std::sync::Arc::new(air::ast::DeclX::Axiom(
+                    air::ast::Axiom {
+                        named: None,
+                        expr: std::sync::Arc::new(air::ast::ExprX::Var(std::sync::Arc::new(
+                            vir::def::FUEL_DEFAULTS.to_string(),
+                        ))),
+                    },
+                ))]),
+                assertion,
+            });
+            let cmd = std::sync::Arc::new(CommandX::CheckValid(query));
+            let result =
+                vac.command(&*message_interface, reporter, &cmd, Default::default());
+            if let ValidityResult::Valid(_) = result {
+                reporter.report(
+                    &vir::messages::error_bare(format!(
+                        "ambient axioms are inconsistent in bucket `{}`: `false` is provable \
+                         from the installed axioms / broadcast lemmas alone (no function \
+                         context), so every proof in this bucket is vacuous and unsound \
+                         (vacuity-checks)",
+                        bucket_id.friendly_name(),
+                    ))
+                    .to_any(),
+                );
+            }
+            vac.finish_query();
         }
         // if spinning off all, the regular profile loop inside has already profiled everything
         if let (Some(profile_all_file_name), false) = (profile_all_file_name, self.args.spinoff_all)
@@ -2787,6 +2906,38 @@ impl Verifier {
                 pattern specified by one of the quantifier's triggers.)\
                 ";
             reporter.report(&note(&span, msg).to_any());
+        }
+
+        // Vacuity lint (`-V vacuity-checks`): trusted-construct inventory. A "verified" verdict is
+        // only as trustworthy as the constructs the verifier trusts rather than proves. Emit a
+        // plain-text table (as a single note, so it renders on stderr and is machine-collectable)
+        // of every assume / admit site, external_body function, assume_specification proxy, and
+        // external item in the crate, with spans where available.
+        if self.args.vacuity_checks {
+            let local_crate_id = self.crate_id.clone().expect("crate_id");
+            let inventory = vir::vacuity::collect_trusted_constructs(&krate, &local_crate_id);
+            let mut table = String::new();
+            table.push_str(&format!(
+                "vacuity-checks: trusted-construct inventory ({} item(s)).\n",
+                inventory.len()
+            ));
+            table.push_str(
+                "A \"verified\" verdict trusts, and does not prove, each of the following:\n",
+            );
+            table.push_str(&format!("{:<22}  {:<60}  {}\n", "KIND", "ITEM", "LOCATION"));
+            for entry in inventory.iter() {
+                let loc = match &entry.span {
+                    Some(span) => span.as_string.clone(),
+                    None => "<no span>".to_string(),
+                };
+                table.push_str(&format!(
+                    "{:<22}  {:<60}  {}\n",
+                    entry.kind.label(),
+                    entry.name,
+                    loc
+                ));
+            }
+            reporter.report(&note_bare(table).to_any());
         }
 
         Ok(())
