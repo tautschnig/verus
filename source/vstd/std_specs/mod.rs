@@ -13,6 +13,8 @@ pub mod convert;
 pub mod core;
 pub mod default;
 pub mod fmt;
+#[cfg(feature = "std")]
+pub mod io;
 pub mod iter;
 pub mod manually_drop;
 pub mod maybe_uninit;
