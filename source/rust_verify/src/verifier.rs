@@ -1517,6 +1517,32 @@ impl Verifier {
         // Insert initial bucket context.
         self.run_command_batches(bucket_id, reporter, &mut air_context, &bucket_context);
 
+        // Dedicated air context for the `-V vacuity-checks` lint.
+        //
+        // The precondition-satisfiability probes run on this isolated solver instead of the
+        // canonical `air_context`. This guarantees the lint cannot perturb the incremental SMT
+        // state of the canonical verification (Z3's learned clauses / heuristic counters persist
+        // across queries in one process), and therefore cannot change any verification verdict.
+        // It is initialized with, and kept in sync with, the same module `bucket_context` so the
+        // probes see exactly the ambient axioms that the real function bodies see.
+        let mut vacuity_air_context = if self.args.vacuity_checks {
+            let mut vac = self.new_air_context_with_prelude(
+                ctx,
+                message_interface.clone(),
+                reporter,
+                bucket_id,
+                None,
+                false,
+                PreludeConfig { arch_word_bits: ctx.arch_word_bits, solver: self.args.solver },
+                None,
+                vir::def::ProverChoice::DefaultProver,
+            )?;
+            self.run_command_batches(bucket_id, reporter, &mut vac, &bucket_context);
+            Some(vac)
+        } else {
+            None
+        };
+
         let bucket = self.get_bucket(bucket_id);
         let lowering_provenance_mode =
             vir::observer::LoweringProvenanceMode::for_observer(&self.observer);
@@ -1577,6 +1603,9 @@ impl Verifier {
                             owner,
                         );
                         self.run_command_batch(bucket_id, reporter, &mut air_context, &batch);
+                        if let Some(vac) = vacuity_air_context.as_mut() {
+                            self.run_command_batch(bucket_id, reporter, vac, &batch);
+                        }
                         bucket_context.push(batch);
                     }
                     OpKind::Query {
@@ -1897,7 +1926,9 @@ impl Verifier {
                             // all ambient axioms installed). It is a warning and never changes the
                             // verification verdict: it does not touch count_verified/count_errors.
                             if self.args.vacuity_checks {
-                                if let Some(func_check_sst) = func_check_sst {
+                                if let (Some(vac), Some(func_check_sst)) =
+                                    (vacuity_air_context.as_mut(), func_check_sst)
+                                {
                                     let vacuity_cmds =
                                         vir::sst_to_air_func::func_sst_to_vacuity_air(
                                             function_opgen.ctx(),
@@ -1906,7 +1937,7 @@ impl Verifier {
                                         )?;
                                     if let Some(vacuity_cmds) = vacuity_cmds {
                                         for command in vacuity_cmds.commands.iter() {
-                                            let result = air_context.command(
+                                            let result = vac.command(
                                                 &*message_interface,
                                                 reporter,
                                                 command,
@@ -1926,7 +1957,7 @@ impl Verifier {
                                                     .to_any(),
                                                 );
                                             }
-                                            air_context.finish_query();
+                                            vac.finish_query();
                                         }
                                     }
                                 }
