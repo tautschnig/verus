@@ -340,7 +340,7 @@ pub fn run(
             Ok(())
         } else {
             let do_compile = verifier.compile || verifier.via_cargo_args.is_some();
-            run_with_erase_macro_compile(rustc_args, do_compile, verifier.args.vstd)
+            run_with_erase_macro_compile(rustc_args.clone(), do_compile, verifier.args.vstd)
         };
 
     let time2 = Instant::now();
@@ -355,6 +355,21 @@ pub fn run(
     // Run borrow checker and compiler with #[exec] (not #[proof])
     if let Err(_) = compile_status {
         return (verifier, stats, Err(()));
+    }
+
+    // Emit a proof certificate on a fully successful run (Task 3, leg D1 +
+    // Option A). `rustc_args` here is the pre-cfg erase-pass arg vector; the
+    // certificate module adds the erase cfgs itself when reproducing the
+    // expansion.
+    if let Some(dir) = &verifier.args.emit_certificate {
+        if verifier.count_errors == 0 && !verifier.encountered_error {
+            let verus_sha = crate::util::verus_build_info().sha;
+            crate::certificate::emit_certificate(dir, &verifier, &rustc_args, verus_sha);
+        } else {
+            eprintln!(
+                "note: not emitting proof certificate because verification did not succeed"
+            );
+        }
     }
 
     (verifier, stats, Ok(()))
