@@ -1878,9 +1878,8 @@ test_verify_one_file! {
     #[test] print_ok verus_code! {
         use vstd::*;
 
-        // TODO: add std::io::* specs in general to vstd
-        // For now, users can add their own (e.g. with "requires true"):
-        pub assume_specification [std::io::_print] (_0: std::fmt::Arguments<'_>);
+        // `std::io::_print` is now specified in vstd (`std_specs::io`), so no
+        // per-project `assume_specification` is needed to use `println!`.
 
         fn test() {
             println!("ok");

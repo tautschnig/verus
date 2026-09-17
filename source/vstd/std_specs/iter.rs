@@ -2,7 +2,7 @@ use super::super::prelude::*;
 use super::super::seq::{
     group_seq_lemmas, lemma_seq_empty, lemma_seq_subrange_index, lemma_seq_subrange_len,
 };
-use core::iter::{Filter, FromIterator, Iterator, Rev, Skip, Take, Zip};
+use core::iter::{Filter, FromIterator, Iterator, Rev, Skip, StepBy, Take, Zip};
 
 use verus as verus_skip_verusfmt;
 verus_skip_verusfmt! {
@@ -224,6 +224,16 @@ pub trait ExIterator {
         where Self: Sized,
         ensures
             self.obeys_prophetic_iter_laws() ==> skip_post(self, n, s),
+    ;
+
+    // We can't provide the ensures directly here, since Rust doesn't think that StepBy<Self> is an iterator.
+    // `step` must be nonzero (the std implementation panics if `step == 0`).
+    fn step_by(self, step: usize) -> (s: StepBy<Self>)
+        where Self: Sized,
+        requires
+            step > 0,
+        ensures
+            self.obeys_prophetic_iter_laws() ==> step_by_post(self, step, s),
     ;
 
     fn take(self, n: usize) -> (t: Take<Self>)
@@ -663,6 +673,63 @@ impl <I> DoubleEndedIteratorSpecImpl for Skip<I>
 }
 
 /********************************************************************************
+ * Definitions for `step_by()`
+ ********************************************************************************/
+#[verifier::external_body]
+#[verifier::external_type_specification]
+#[verifier::reject_recursive_types(I)]
+pub struct ExStepBy<I>(StepBy<I>);
+
+// Ghost accessor for the inner iterator (as it was when `step_by` was called)
+pub uninterp spec fn step_by_iter<I>(s: StepBy<I>) -> I;
+
+// Ghost accessor for the step size
+pub uninterp spec fn step_by_step<I>(s: StepBy<I>) -> usize;
+
+/// The subsequence of `s` obtained by keeping the elements at indices
+/// `0, step, 2*step, ...`. This is exactly the sequence `(0..n).step_by(step)`
+/// yields when applied to `s`, whose length is `ceil(s.len() / step)`.
+pub open spec fn spec_seq_step_by<T>(s: Seq<T>, step: int) -> Seq<T> {
+    Seq::new(((s.len() + step - 1) / step) as nat, |i: int| s[i * step])
+}
+
+// Ideally, we would write this postcondition directly on the definition of Iterator::step_by above.
+pub uninterp spec fn step_by_post<I>(i: I, step: usize, s: StepBy<I>) -> bool;
+
+pub broadcast axiom fn step_by_postcondition<I: IteratorSpec>(i: I, step: usize, r: StepBy<I>)
+    requires
+        i.obeys_prophetic_iter_laws(),
+        step > 0,
+        #[trigger] step_by_post(i, step, r),
+    ensures
+        IteratorSpec::remaining(&r) == spec_seq_step_by(i.remaining(), step as int),
+        step_by_iter(r) == i,
+        step_by_step(r) == step,
+        IteratorSpec::will_return_none(&r) <==> i.will_return_none(),
+        IteratorSpec::decrease(&r) is Some == i.decrease() is Some,
+;
+
+impl<I> IteratorSpecImpl for StepBy<I> where I: Iterator {
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool {
+        step_by_iter(*self).obeys_prophetic_iter_laws()
+    }
+
+    #[verifier::prophetic]
+    uninterp spec fn remaining(&self) -> Seq<Self::Item>;
+
+    #[verifier::prophetic]
+    uninterp spec fn will_return_none(&self) -> bool;
+
+    uninterp spec fn decrease(&self) -> Option<nat>;
+
+    open spec fn peek(&self, index: int) -> Option<Self::Item> {
+        // The i-th element `step_by` yields is the inner iterator's `(i*step)`-th
+        // element (`peek` returns None automatically once that index is out of range).
+        step_by_iter(*self).peek(index * step_by_step(*self))
+    }
+}
+
+/********************************************************************************
  * Definitions for `take()`
  ********************************************************************************/
 #[verifier::external_body]
@@ -934,6 +1001,7 @@ pub broadcast group group_iter_axioms {
     filter_postcondition,
     take_postcondition,
     skip_postcondition,
+    step_by_postcondition,
     map_postcondition,
 }
 
