@@ -117,6 +117,7 @@ pub struct ArgsX {
     pub report_long_running: bool,
     pub use_crate_name: bool,
     pub solver: SmtSolver,
+    pub cross_check: air::solver_set::CrossCheckPolicy,
     pub axiom_usage_info: bool,
     pub check_api_safety: bool,
     pub no_bv_simplify: bool,
@@ -166,6 +167,7 @@ impl ArgsX {
             report_long_running: Default::default(),
             use_crate_name: Default::default(),
             solver: Default::default(),
+            cross_check: Default::default(),
             axiom_usage_info: Default::default(),
             check_api_safety: Default::default(),
             no_bv_simplify: Default::default(),
@@ -410,6 +412,8 @@ pub fn parse_args_with_imports(
     const EXTENDED_SPINOFF_ALL: &str = "spinoff-all";
     const EXTENDED_CAPTURE_PROFILES: &str = "capture-profiles";
     const EXTENDED_CVC5: &str = "cvc5";
+    const EXTENDED_CROSS_CHECK: &str = "cross-check";
+    const EXTENDED_CROSS_CHECK_STRICT: &str = "cross-check-strict";
     const EXTENDED_ALLOW_INLINE_AIR: &str = "allow-inline-air";
     const EXTENDED_USE_CRATE_NAME: &str = "use-crate-name";
     const EXTENDED_AXIOM_USAGE_INFO: &str = "axiom-usage-info";
@@ -428,6 +432,14 @@ pub fn parse_args_with_imports(
             "Always collect prover performance data, but don't generate output reports",
         ),
         (EXTENDED_CVC5, "Use the cvc5 SMT solver, rather than the default (Z3)"),
+        (
+            EXTENDED_CROSS_CHECK,
+            "Cross-check each query with a second solver (warn mode): use the primary verdict but warn if the secondary cannot confirm a proof, and hard-error on an unsat/sat disagreement. (Skeleton: parsed but not yet wired into the verification pipeline.)",
+        ),
+        (
+            EXTENDED_CROSS_CHECK_STRICT,
+            "Like cross-check, but also hard-error when the secondary solver cannot independently confirm a proof. (Skeleton: parsed but not yet wired.)",
+        ),
         (EXTENDED_ALLOW_INLINE_AIR, "Allow the POTENTIALLY UNSOUND use of inline_air_stmt"),
         (
             EXTENDED_USE_CRATE_NAME,
@@ -836,6 +848,13 @@ pub fn parse_args_with_imports(
         report_long_running: !matches.opt_present(OPT_NO_REPORT_LONG_RUNNING),
         use_crate_name: extended.contains_key(EXTENDED_USE_CRATE_NAME),
         solver: if extended.contains_key(EXTENDED_CVC5) { SmtSolver::Cvc5 } else { SmtSolver::Z3 },
+        cross_check: if extended.contains_key(EXTENDED_CROSS_CHECK_STRICT) {
+            air::solver_set::CrossCheckPolicy::Strict
+        } else if extended.contains_key(EXTENDED_CROSS_CHECK) {
+            air::solver_set::CrossCheckPolicy::Warn
+        } else {
+            air::solver_set::CrossCheckPolicy::Off
+        },
         axiom_usage_info: extended.contains_key(EXTENDED_AXIOM_USAGE_INFO),
         check_api_safety: extended.contains_key(EXTENDED_CHECK_API_SAFETY),
         no_bv_simplify: extended.contains_key(EXTENDED_NO_BV_SIMPLIFY),
