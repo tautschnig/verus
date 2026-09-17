@@ -297,6 +297,8 @@ pub struct Verifier {
     pub count_errors: u64,
     /// Functions that failed to verify
     pub func_fails: HashSet<Fun>,
+    /// Functions that had at least one successfully-discharged query (for --emit-certificate)
+    pub func_verifieds: HashSet<Fun>,
     pub args: Args,
     /// Proof-coverage tap layer: at most one registered passive observer,
     /// registered from the executable wiring layer via `register_observer`;
@@ -532,6 +534,7 @@ impl Verifier {
             count_verified: 0,
             count_errors: 0,
             func_fails: HashSet::new(),
+            func_verifieds: HashSet::new(),
             args,
             observer: None,
             user_filter: None,
@@ -582,6 +585,7 @@ impl Verifier {
             count_verified: 0,
             count_errors: 0,
             func_fails: HashSet::new(),
+            func_verifieds: HashSet::new(),
             args: self.args.clone(),
             observer: self.observer.clone(),
             user_filter: self.user_filter.clone(),
@@ -626,6 +630,7 @@ impl Verifier {
         self.count_verified += other.count_verified;
         self.count_errors += other.count_errors;
         self.func_fails.extend(other.func_fails);
+        self.func_verifieds.extend(other.func_verifieds);
         self.time_vir += other.time_vir;
         self.time_vir_rust_to_vir += other.time_vir_rust_to_vir;
         self.bucket_stats.extend(other.bucket_stats);
@@ -906,6 +911,7 @@ impl Verifier {
                             assert!(used_axioms.replace(axioms).is_none());
                         }
                     }
+                    self.func_verifieds.insert(context.fun.clone());
                     break;
                 }
                 ValidityResult::TypeError(err) => {
