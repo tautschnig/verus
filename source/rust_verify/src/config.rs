@@ -125,6 +125,7 @@ pub struct ArgsX {
     pub neutral_prelude: bool,
     pub emit_smt_proofs: Option<String>,
     pub proof_coverage: bool,
+    pub vacuity_checks: bool,
 }
 
 impl ArgsX {
@@ -179,6 +180,7 @@ impl ArgsX {
             neutral_prelude: Default::default(),
             emit_smt_proofs: Default::default(),
             proof_coverage: Default::default(),
+            vacuity_checks: Default::default(),
         }
     }
 }
@@ -431,6 +433,7 @@ pub fn parse_args_with_imports(
     const EXTENDED_NEUTRAL_PRELUDE: &str = "neutral-prelude";
     const EXTENDED_EMIT_SMT_PROOFS: &str = "emit-smt-proofs";
     const EXTENDED_PROOF_COVERAGE: &str = "proof-coverage";
+    const EXTENDED_VACUITY_CHECKS: &str = "vacuity-checks";
     const EXTENDED_KEYS: &[(&str, &str)] = &[
         (EXTENDED_IGNORE_UNEXPECTED_SMT, "Ignore unexpected SMT output"),
         (EXTENDED_DEBUG, "Enable debugging of proof failures"),
@@ -481,6 +484,8 @@ pub fn parse_args_with_imports(
         (
             EXTENDED_PROOF_COVERAGE,
             "Observe the verification pipeline and emit proof-coverage provenance records. Experimental.",
+            EXTENDED_VACUITY_CHECKS,
+            "Warn (do not error) when a verified function's `requires` clauses are unsatisfiable, making every obligation in it vacuous. A lint; it never changes a verification verdict.",
         ),
     ];
 
@@ -903,6 +908,7 @@ pub fn parse_args_with_imports(
             }
         },
         proof_coverage: extended.contains_key(EXTENDED_PROOF_COVERAGE),
+        vacuity_checks: extended.contains_key(EXTENDED_VACUITY_CHECKS),
     };
 
     if args.compile && args.no_erasure_check {

@@ -3665,6 +3665,84 @@ pub(crate) fn body_stm_to_air(
     Ok((state.commands, state.snap_map))
 }
 
+/// Build a "precondition satisfiability" probe query for the vacuity lint (`-V vacuity-checks`).
+///
+/// The query installs exactly the assumptions that hold at the entry of the function body:
+/// type-parameter constants, local declarations, fuel, trait bounds, parameter type invariants,
+/// and the `requires` clauses. It then asserts `false`. The AIR CheckValid query is *valid*
+/// (the assertion of `false` is discharged) exactly when those assumptions are jointly
+/// unsatisfiable — i.e. no caller can ever satisfy the preconditions, so every obligation in the
+/// function body is vacuously verified.
+///
+/// This is a plain check-sat over the entry context: it adds one extra query per function with a
+/// `requires` clause and never affects the canonical verification verdict (the caller reports a
+/// warning when the probe is valid and does nothing otherwise). Returns `None` for functions with
+/// no `requires` clauses (nothing to report).
+pub(crate) fn precondition_satisfiability_to_air(
+    ctx: &Ctx,
+    func_span: &Span,
+    typ_params: &Idents,
+    typ_bounds: &crate::ast::GenericBounds,
+    params: &Pars,
+    func_check_sst: &FuncCheckSst,
+    hidden: &Vec<Fun>,
+) -> Result<Option<CommandsWithContext>, VirErr> {
+    let FuncCheckSst { reqs, local_decls, .. } = func_check_sst;
+
+    if reqs.len() == 0 {
+        return Ok(None);
+    }
+
+    let mut local: Vec<Decl> = Vec::new();
+
+    for x in typ_params.iter() {
+        for (x, t) in crate::def::suffix_typ_param_ids_types(x) {
+            local.push(Arc::new(DeclX::Const(x.lower(), str_typ(t))));
+        }
+    }
+    for decl in local_decls.iter() {
+        local.push(if decl.kind.is_mutable() {
+            Arc::new(DeclX::Var(suffix_local_unique_id(&decl.ident), typ_to_air(ctx, &decl.typ)))
+        } else {
+            Arc::new(DeclX::Const(suffix_local_unique_id(&decl.ident), typ_to_air(ctx, &decl.typ)))
+        });
+    }
+
+    set_fuel(ctx, &mut local, hidden);
+
+    for e in crate::traits::trait_bounds_to_air(ctx, typ_bounds) {
+        local.push(Arc::new(DeclX::Axiom(air::ast::Axiom { named: None, expr: e })));
+    }
+
+    for param in params.iter() {
+        let typ_inv = typ_invariant(ctx, &param.x.typ, &ident_var(&param.x.name.lower()));
+        if let Some(expr) = typ_inv {
+            local.push(mk_unnamed_axiom(expr));
+        }
+    }
+
+    for req in reqs.iter() {
+        let expr_ctxt = &ExprCtxt::new_mode(ExprMode::BodyPre);
+        let e = exp_to_expr(ctx, &req, expr_ctxt)?;
+        local.push(mk_unnamed_axiom(e));
+    }
+
+    let err = error(func_span, "precondition satisfiability probe (vacuity-checks)");
+    let assertion = Arc::new(StmtX::Assert(None, err, None, air::ast_util::mk_false()));
+
+    let query = Arc::new(QueryX { local: Arc::new(local), assertion });
+    let commands = vec![Arc::new(CommandX::CheckValid(query))];
+    let cmds = CommandsWithContextX::new(
+        ctx.fun.as_ref().expect("function expected here").current_fun.clone(),
+        func_span.clone(),
+        "precondition satisfiability check".to_string(),
+        Arc::new(commands),
+        ProverChoice::DefaultProver,
+        true,
+    );
+    Ok(Some(cmds))
+}
+
 /// At function returns, we need to tell the SMT solver that the
 /// future (impl Future<Output = T>) created by the async function will return the return value of
 /// the function body if await() is called on it.

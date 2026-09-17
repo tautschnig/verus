@@ -1972,6 +1972,49 @@ impl Verifier {
                         }
 
                         if matches!(query_op, QueryOp::Body(Style::Normal)) {
+                            // Vacuity lint (`-V vacuity-checks`): probe whether the function's
+                            // `requires` clauses are jointly satisfiable. An unsatisfiable
+                            // precondition means every obligation in the function is vacuously
+                            // verified. This is one extra check-sat query per function with a
+                            // `requires` clause, run on the module air context (which already has
+                            // all ambient axioms installed). It is a warning and never changes the
+                            // verification verdict: it does not touch count_verified/count_errors.
+                            if self.args.vacuity_checks {
+                                if let Some(func_check_sst) = func_check_sst {
+                                    let vacuity_cmds =
+                                        vir::sst_to_air_func::func_sst_to_vacuity_air(
+                                            function_opgen.ctx(),
+                                            function,
+                                            &**func_check_sst,
+                                        )?;
+                                    if let Some(vacuity_cmds) = vacuity_cmds {
+                                        for command in vacuity_cmds.commands.iter() {
+                                            let result = air_context.command(
+                                                &*message_interface,
+                                                reporter,
+                                                command,
+                                                Default::default(),
+                                            );
+                                            if let ValidityResult::Valid(_) = result {
+                                                reporter.report(
+                                                    &warning(
+                                                        &function.span,
+                                                        format!(
+                                                            "the `requires` clauses of `{}` are unsatisfiable: every obligation in this function is vacuously verified (vacuity-checks)",
+                                                            fun_as_friendly_rust_name(
+                                                                &function.x.name
+                                                            ),
+                                                        ),
+                                                    )
+                                                    .to_any(),
+                                                );
+                                            }
+                                            air_context.finish_query();
+                                        }
+                                    }
+                                }
+                            }
+
                             if (any_invalid
                                 && !self.args.no_auto_recommends_check
                                 && !any_timed_out)

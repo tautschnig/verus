@@ -333,6 +333,9 @@ pub fn run_verus(
         } else if *option == "-V cross-check-inject-disagreement" {
             verus_args.push("-V".to_string());
             verus_args.push("cross-check-inject-disagreement".to_string());
+        } else if *option == "-V vacuity-checks" {
+            verus_args.push("-V".to_string());
+            verus_args.push("vacuity-checks".to_string());
         } else if *option == "--is-core" {
             verus_args.push("--is-core".to_string());
             is_core = true;
