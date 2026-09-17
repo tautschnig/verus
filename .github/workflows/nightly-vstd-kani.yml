@@ -1,0 +1,84 @@
+# =============================================================================
+# Nightly falsification-test of vstd `assume_specification` contracts against
+# the real Rust std, using Kani (CBMC-based bounded model checker).
+#
+# Modelled on .github/workflows/nightly-verita.yml.
+#
+# IMPORTANT toolchain caveat (see STUDY.md Q1): Kani pins its OWN nightly
+# (nightly-2025-11-21 for Kani 0.67.0) which ships a std DIFFERENT from the std of
+# Verus' pinned stable 1.98.1. This job therefore tests a *nearby* std, not the
+# exact std vstd targets. That is sufficient to catch spec-vs-documented-
+# semantics errors (#2674, #2603 classes) but NOT std-version-specific drift.
+# =============================================================================
+name: nightly-vstd-kani
+
+on:
+  schedule:
+    # 06:00 UTC, offset from nightly-verita (08:00) to avoid runner contention.
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  vstd-kani:
+    if: github.repository == 'verus-lang/verus'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: checkout verus
+        uses: actions/checkout@v6
+
+      # Kani brings its own toolchain (rust-toolchain.toml inside the Kani
+      # release). We do NOT install Verus' 1.98.1 here because these harnesses
+      # only exercise std, not the Verus verifier. See STUDY.md Q1.
+      - name: install kani
+        run: |
+          # Pin the Kani version for reproducibility; bump deliberately.
+          cargo install --locked kani-verifier --version 0.67.0
+          cargo kani setup
+          cargo kani --version
+
+      # OPTIONAL (future): regenerate harnesses for the mechanically
+      # translatable subset from vstd sources, so new specs are covered
+      # automatically. Kept off by default; the checked-in harnesses under
+      # tools/vstd-kani/ are the source of truth for the prototype.
+      # - name: generate harnesses
+      #   run: python3 tools/vstd-kani/generate.py source/vstd/std_specs tools/vstd-kani/src/generated.rs
+
+      - name: run kani harnesses (resource-bounded)
+        working-directory: ./tools/vstd-kani
+        run: |
+          # Bound BOTH memory and wall-clock: a runaway CBMC query can exhaust
+          # RAM long before any time limit fires. 12 GiB address space, 40 min.
+          ( ulimit -v 12582912; timeout 2400 \
+              cargo kani --output-format terse 2>&1 | tee kani-run.log )
+
+      - name: summarise
+        if: always()
+        working-directory: ./tools/vstd-kani
+        run: |
+          {
+            echo '## vstd Kani nightly results'
+            echo ''
+            echo 'Each harness re-implements a vstd `assume_specification`'
+            echo 'postcondition as executable Rust and checks it against real std.'
+            echo 'The suite is expected to be GREEN: the three `should_panic`'
+            echo 'harnesses pin historical spec bugs (#2674, #2603) and must keep'
+            echo 'failing their assertions; every other harness must verify.'
+            echo ''
+            echo '```'
+            grep -E 'Complete -|Verification failed for' kani-run.log || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: vstd-kani-results
+          path: ${{ github.workspace }}/tools/vstd-kani/kani-run.log
+          retention-days: 90
