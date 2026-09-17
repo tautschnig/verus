@@ -22,6 +22,11 @@
 
 #![allow(clippy::all)]
 
+/// Auto-generated harnesses (see `generate.py`). Kept in a submodule so the
+/// hand-written regression harnesses above and the generated scalar sweep are
+/// discovered by the same `cargo kani` run.
+pub mod generated;
+
 use std::ops::{Bound, RangeBounds, RangeInclusive};
 
 // ===========================================================================
