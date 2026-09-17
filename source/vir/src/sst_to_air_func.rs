@@ -1038,3 +1038,21 @@ pub fn func_sst_to_air(
 
     Ok((Arc::new(commands), snap_map))
 }
+
+/// Build the precondition-satisfiability probe query for the `-V vacuity-checks` lint.
+/// Returns `None` when the function has no `requires` clauses.
+pub fn func_sst_to_vacuity_air(
+    ctx: &Ctx,
+    function: &FunctionSst,
+    func_check_sst: &FuncCheckSst,
+) -> Result<Option<CommandsWithContext>, VirErr> {
+    crate::sst_to_air::precondition_satisfiability_to_air(
+        ctx,
+        &function.span,
+        &function.x.typ_params,
+        &function.x.typ_bounds,
+        &function.x.pars,
+        func_check_sst,
+        &function.x.attrs.hidden,
+    )
+}

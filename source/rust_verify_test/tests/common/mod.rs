@@ -324,6 +324,9 @@ pub fn run_verus(
         } else if *option == "-V spinoff-all" {
             verus_args.push("-V".to_string());
             verus_args.push("spinoff-all".to_string());
+        } else if *option == "-V vacuity-checks" {
+            verus_args.push("-V".to_string());
+            verus_args.push("vacuity-checks".to_string());
         } else if *option == "--is-core" {
             verus_args.push("--is-core".to_string());
             is_core = true;

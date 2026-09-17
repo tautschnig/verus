@@ -121,6 +121,7 @@ pub struct ArgsX {
     pub check_api_safety: bool,
     pub no_bv_simplify: bool,
     pub proof_coverage: bool,
+    pub vacuity_checks: bool,
 }
 
 impl ArgsX {
@@ -171,6 +172,7 @@ impl ArgsX {
             check_api_safety: Default::default(),
             no_bv_simplify: Default::default(),
             proof_coverage: Default::default(),
+            vacuity_checks: Default::default(),
         }
     }
 }
@@ -418,6 +420,7 @@ pub fn parse_args_with_imports(
     const EXTENDED_CHECK_API_SAFETY: &str = "check-api-safety";
     const EXTENDED_NO_BV_SIMPLIFY: &str = "no-bv-simplify";
     const EXTENDED_PROOF_COVERAGE: &str = "proof-coverage";
+    const EXTENDED_VACUITY_CHECKS: &str = "vacuity-checks";
     const EXTENDED_KEYS: &[(&str, &str)] = &[
         (EXTENDED_IGNORE_UNEXPECTED_SMT, "Ignore unexpected SMT output"),
         (EXTENDED_DEBUG, "Enable debugging of proof failures"),
@@ -448,6 +451,8 @@ pub fn parse_args_with_imports(
         (
             EXTENDED_PROOF_COVERAGE,
             "Observe the verification pipeline and emit proof-coverage provenance records. Experimental.",
+            EXTENDED_VACUITY_CHECKS,
+            "Warn (do not error) when a verified function's `requires` clauses are unsatisfiable, making every obligation in it vacuous. A lint; it never changes a verification verdict.",
         ),
     ];
 
@@ -847,6 +852,7 @@ pub fn parse_args_with_imports(
         check_api_safety: extended.contains_key(EXTENDED_CHECK_API_SAFETY),
         no_bv_simplify: extended.contains_key(EXTENDED_NO_BV_SIMPLIFY),
         proof_coverage: extended.contains_key(EXTENDED_PROOF_COVERAGE),
+        vacuity_checks: extended.contains_key(EXTENDED_VACUITY_CHECKS),
     };
 
     if args.compile && args.no_erasure_check {
