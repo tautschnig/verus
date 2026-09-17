@@ -102,17 +102,27 @@ fn reader_thread(
 impl SmtProcess {
     pub fn launch(solver: &SmtSolver, transcript_log: Option<Box<dyn std::io::Write>>) -> Self {
         let solver_info = SolverInfo::new(solver);
+        let mut base_args: Vec<String> = match solver {
+            SmtSolver::Z3 => vec!["-smt2".to_string(), "-in".to_string()],
+            SmtSolver::Cvc5 => vec![
+                "--no-interactive".to_string(),    // We don't need a human interface
+                "--produce-models".to_string(),    // Needed for error reporting
+                "--quant-dsplit=none".to_string(), // Recommended by Andrew Reynolds (@ajreynol)
+                "--no-cbqi".to_string(),           // Recommended by Andrew Reynolds (@ajreynol)
+                "--user-pat=strict".to_string(),   // Recommended by Andrew Reynolds (@ajreynol)
+            ],
+        };
+        // Triage hook: append extra solver flags from the environment (cvc5 takes the last
+        // value for repeated options, so e.g. VERUS_CVC5_EXTRA_ARGS="--user-pat=use" wins).
+        let extra_var = match solver {
+            SmtSolver::Z3 => "VERUS_Z3_EXTRA_ARGS",
+            SmtSolver::Cvc5 => "VERUS_CVC5_EXTRA_ARGS",
+        };
+        if let Ok(extra) = std::env::var(extra_var) {
+            base_args.extend(extra.split_whitespace().map(|s| s.to_string()));
+        }
         let mut child = match std::process::Command::new(solver_info.executable())
-            .args(match solver {
-                SmtSolver::Z3 => vec!["-smt2", "-in"],
-                SmtSolver::Cvc5 => vec![
-                    "--no-interactive",    // We don't need a human interface
-                    "--produce-models",    // Needed for error reporting
-                    "--quant-dsplit=none", // Recommended by Andrew Reynolds (@ajreynol)
-                    "--no-cbqi",           // Recommended by Andrew Reynolds (@ajreynol)
-                    "--user-pat=strict",   // Recommended by Andrew Reynolds (@ajreynol)
-                ],
-            })
+            .args(&base_args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .spawn()
