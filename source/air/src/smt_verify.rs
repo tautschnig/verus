@@ -454,13 +454,70 @@ fn confirm_label(context: &mut Context, infos: &Vec<AssertionInfo>, i: usize) ->
     result
 }
 
+/// Check whether the premise (axiom) labelled `target` is genuinely the clause whose
+/// failure produced the counterexample for assertion `infos[assertion]`. A callee's
+/// requires axiom has the shape `req%f(args) == (G_1 => c_1) && .. && (G_n => c_n)`, so
+/// `req%f` can be false only via a clause `c_k` whose label `G_k` is true. Z3's partial
+/// model leaves the irrelevant `G_k` unconstrained (at most one true); cvc5's total model
+/// assigns every constant, so several `G_k` come back true and the genuine one must be
+/// distinguished.
+///
+/// The test isolates a single clause: keep the chosen assertion active (disable every
+/// other still-enabled assertion label), force `target` true and every other candidate
+/// premise label false, then re-run `check-sat`. With the other premise labels off their
+/// clauses are vacuous, so `req%f` collapses to exactly `c_target`, and:
+///   * `sat` — `c_target` on its own can still make the assertion fail, so it is a
+///     genuine culprit: keep the label (return `true`).
+///   * `unsat` — with only `c_target` active the assertion can no longer fail, so
+///     `c_target` holds and the label is spurious (return `false`).
+///   * anything else (unknown, timeout, unexpected output) — treated conservatively as
+///     genuine, so an informative label is never dropped on a solver hiccup.
+/// Note the polarity matches `confirm_label` (`sat` confirms), but the extra assumptions
+/// differ: here we pin one premise clause on and the rest off, rather than pinning one
+/// assertion on and the rest off.
+fn confirm_axiom_label(
+    context: &mut Context,
+    infos: &Vec<AssertionInfo>,
+    assertion: usize,
+    target: &Ident,
+    other_candidates: &[Ident],
+) -> bool {
+    context.smt_log.log_push();
+    for (j, info) in infos.iter().enumerate() {
+        if j != assertion && !info.disabled {
+            context.smt_log.log_assert(&None, &mk_not(&ident_var(&info.label)));
+        }
+    }
+    context.smt_log.log_assert(&None, &ident_var(target));
+    for other in other_candidates {
+        context.smt_log.log_assert(&None, &mk_not(&ident_var(other)));
+    }
+    if matches!(context.solver, SmtSolver::Z3) {
+        context.smt_log.log_set_option("rlimit", &context.rlimit.to_string());
+    }
+    context.smt_log.log_word("check-sat");
+    if matches!(context.solver, SmtSolver::Z3) {
+        context.smt_log.log_set_option("rlimit", "0");
+    }
+    context.smt_log.log_pop();
+    let smt_data = context.smt_log.take_pipe_data();
+    let smt_output = context.get_smt_process().send_commands(smt_data);
+    let mut result = true;
+    for line in smt_output {
+        if line == "unsat" {
+            result = false;
+        } else if line == "sat" {
+            result = true;
+        }
+    }
+    result
+}
+
 fn smt_get_model(
     context: &mut Context,
     mut infos: Vec<AssertionInfo>,
     air_model: Model,
 ) -> ValidityResult {
-    let mut discovered_error: Option<AssertionInfo> = None;
-    let mut discovered_assert_id: Option<Option<Arc<Vec<u64>>>> = None;
     let mut discovered_additional_info: Vec<ArcDynMessage> = Vec::new();
 
     context.smt_log.log_word("get-model");
@@ -498,40 +555,76 @@ fn smt_get_model(
         .collect();
     let needs_confirmation = candidates.len() > 1;
     let mut spurious: usize = 0;
+    // Select the failing assertion, but defer disabling its label: the axiom-label
+    // confirmation below needs to re-run `check-sat` with this assertion still active
+    // (isolated) so it can test which premise the failure genuinely depends on.
+    let mut chosen: Option<usize> = None;
     for i in candidates {
         if needs_confirmation && !confirm_label(context, &infos, i) {
             spurious += 1;
             continue;
         }
-        let info = &mut infos[i];
-        discovered_error = Some(info.clone());
-        discovered_assert_id = Some(info.assert_id.clone());
-
-        // Disable this label in subsequent check-sat calls to get additional errors
-        info.disabled = true;
-        let disable_label = mk_not(&ident_var(&info.label));
-        context.smt_log.log_assert(&None, &disable_label);
-
+        chosen = Some(i);
         break;
     }
     if context.debug && spurious > 0 {
         println!("ignored {} spuriously true assertion label(s) in model", spurious);
     }
-    let discovered_error = discovered_error.expect("discovered_error");
+    let chosen = chosen.expect("discovered_error");
+    let discovered_error = infos[chosen].clone();
+    let discovered_assert_id = infos[chosen].assert_id.clone();
+
     let mut axiom_infos: Vec<Arc<AxiomInfo>> =
         context.axiom_infos.map().values().cloned().collect();
     axiom_infos.sort_by_key(|info| info.label.clone());
     // stabilize order
-    for info in axiom_infos {
-        if let Some(def) = model_defs.get(&info.label) {
-            if *def.body == "true"
+    // Axiom (premise) labels attribute additional info to the error, e.g. which
+    // precondition of a callee failed. A callee's requires axiom has the shape
+    // `req%f(args) == (G_1 => c_1) && .. && (G_n => c_n)`, so a model sets `G_k = true`
+    // only when clause `c_k` participates in the counterexample. Z3's partial model
+    // leaves the irrelevant `G_k` unconstrained, so at most one is true; cvc5's total
+    // model assigns every constant, so several `G_k` can be true and the first in sorted
+    // order may be a premise that actually holds — dropping the genuine `proof_note`
+    // label. When more than one candidate premise label is true, `confirm_axiom_label`
+    // isolates each clause to find the genuine culprit (see its doc comment).
+    let axiom_candidates: Vec<usize> = axiom_infos
+        .iter()
+        .enumerate()
+        .filter(|(_, info)| {
+            model_defs.get(&info.label).map(|def| *def.body == "true").unwrap_or(false)
                 && (info.filter.is_none() || info.filter == discovered_error.filter)
-            {
-                discovered_additional_info.append(&mut info.labels.clone());
-                break;
+        })
+        .map(|(i, _)| i)
+        .collect();
+    let needs_axiom_confirmation = axiom_candidates.len() > 1;
+    let candidate_labels: Vec<Ident> =
+        axiom_candidates.iter().map(|&i| axiom_infos[i].label.clone()).collect();
+    let mut spurious_axioms: usize = 0;
+    for (pos, &i) in axiom_candidates.iter().enumerate() {
+        if needs_axiom_confirmation {
+            let others: Vec<Ident> = candidate_labels
+                .iter()
+                .enumerate()
+                .filter(|(p, _)| *p != pos)
+                .map(|(_, l)| l.clone())
+                .collect();
+            if !confirm_axiom_label(context, &infos, chosen, &axiom_infos[i].label, &others) {
+                spurious_axioms += 1;
+                continue;
             }
         }
+        discovered_additional_info.append(&mut axiom_infos[i].labels.clone());
+        break;
     }
+    if context.debug && spurious_axioms > 0 {
+        println!("ignored {} spuriously true axiom label(s) in model", spurious_axioms);
+    }
+
+    // Disable the chosen assertion's label so subsequent check-sat calls surface the
+    // remaining errors.
+    infos[chosen].disabled = true;
+    let disable_label = mk_not(&ident_var(&infos[chosen].label));
+    context.smt_log.log_assert(&None, &disable_label);
 
     if context.debug {
         println!("Z3 model: {:?}", model);
@@ -547,7 +640,7 @@ fn smt_get_model(
     let error = discovered_error.error;
     let e = context.message_interface.append_labels(&error, &discovered_additional_info);
     context.state = ContextState::FoundInvalid(infos, Some(air_model.clone()));
-    ValidityResult::Invalid(Some(air_model), Some(e), discovered_assert_id.unwrap())
+    ValidityResult::Invalid(Some(air_model), Some(e), discovered_assert_id)
 }
 
 pub(crate) fn smt_check_query<'ctx>(
