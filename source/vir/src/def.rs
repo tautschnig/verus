@@ -46,15 +46,15 @@ const SUFFIX_REC_PARAM: &str = "!$";
 const SUFFIX_PATH: &str = ".";
 const PREFIX_ESCAPE: &str = "$~";
 const PREFIX_FUEL_ID: &str = "fuel%";
-const PREFIX_FUEL_NAT: &str = "fuel_nat%";
-const PREFIX_REQUIRES: &str = "req%";
-const PREFIX_ENSURES: &str = "ens%";
+pub const PREFIX_FUEL_NAT: &str = "fuel_nat%";
+pub const PREFIX_REQUIRES: &str = "req%";
+pub const PREFIX_ENSURES: &str = "ens%";
 const PREFIX_ENSURES_ASYNC_RET: &str = "VERUS_ASYNC_FUNC_RETURN_VALUE_";
 const PREFIX_OPEN_INV: &str = "openinv%";
 const PREFIX_NO_UNWIND_WHEN: &str = "no_unwind_when%";
 const PREFIX_RECURSIVE: &str = "rec%";
 const PREFIX_SIMPLIFY_TEMP_VAR: &str = "tmp%%";
-const PREFIX_TEMP_VAR: &str = "tmp%";
+pub const PREFIX_TEMP_VAR: &str = "tmp%";
 pub const PREFIX_EXPAND_ERRORS_TEMP_VAR: &str = "expand%";
 const PREFIX_PRE_VAR: &str = "pre%";
 const PREFIX_BOX: &str = "Poly%";
@@ -77,9 +77,13 @@ pub(crate) const PREFIX_DEFAULT_TYP_PARAM: &str = "def_typ_param%";
 pub(crate) const PROJECT_POINTEE_METADATA: &str = "pointee_metadata%";
 pub(crate) const PROJECT_POINTEE_METADATA_DECORATION: &str = "pointee_metadata%%";
 const PREFIX_PROJECT_PARAM: &str = "Proj%";
-const PREFIX_TRAIT_BOUND: &str = "tr_bound%";
+pub const PREFIX_TRAIT_BOUND: &str = "tr_bound%";
+/// User-facing message for pattern-refutability obligations
+/// (ast_simplify); exported so external observers can key on the exact
+/// constant instead of a copied string.
+pub const PATTERN_MATCH_FAIL_MESSAGE: &str = "unable to prove this pattern will successfully match";
 const PREFIX_TO_DYN: &str = "to_dyn%";
-pub(crate) const SIZED_BOUND: &str = "sized";
+pub const SIZED_BOUND: &str = "sized";
 const PREFIX_STATIC: &str = "static%";
 const PREFIX_BREAK_LABEL: &str = "break_label%";
 const SLICE_TYPE: &str = "slice%";
@@ -989,6 +993,9 @@ pub struct CommandsWithContextX {
     pub commands: Commands,
     pub prover_choice: ProverChoice,
     pub skip_recommends: bool,
+    /// Passive SST-to-AIR provenance for structured AIR statements in these
+    /// commands. Canonical verification never reads this sidecar.
+    pub lowering_provenance: Arc<crate::observer::LoweringProvenance>,
 }
 
 impl CommandsWithContextX {
@@ -1005,6 +1012,7 @@ impl CommandsWithContextX {
             commands,
             prover_choice,
             skip_recommends,
+            lowering_provenance: Arc::new(crate::observer::LoweringProvenance::empty()),
         })
     }
 }

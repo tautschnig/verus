@@ -216,6 +216,54 @@ pub enum CallTarget {
 
 pub type Stm = Arc<Spanned<StmX>>;
 pub type Stms = Arc<Vec<Stm>>;
+
+/// Passive provenance tag recording the construction site of an `Assume`
+/// statement. It has no effect on verification; it is metadata for the
+/// proof-coverage observer, which classifies assumptions by their origin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, ToDebugSNode)]
+pub enum AssumeIntent {
+    /// `assume(e)` written by the user
+    UserAssume,
+    /// the proposition of a user assertion (incl. assert-compute), assumed after being checked
+    AssertedProposition,
+    /// a condition lowering checks with an assert/assume pair (e.g. borrow/place requirements)
+    CheckedCondition,
+    /// `has_type`-style type fact for a variable
+    HasType,
+    /// resolution fact (`HasResolved`) for two-phase updates / mutable references
+    HasResolved,
+    /// user-defined type invariant condition
+    TypeInvariant,
+    /// path termination: `assume(false)` after return/break/unreachable
+    PathTermination,
+    /// hypothesis of an `assert forall ... by` body
+    AssertForallRequire,
+    /// conclusion of an `assert forall ... by`, assumed after the sub-proof
+    AssertForallEnsures,
+    /// requires assumed inside an isolated assert-query body
+    AssertQueryRequire,
+    /// ensures of an isolated assert-query, assumed outside it
+    AssertQueryEnsures,
+    /// contents of an opened invariant
+    OpenedInvariant,
+    /// atomic-update machinery context facts
+    AtomicUpdate,
+    /// atomic-update postcondition after the update
+    AtomicUpdateEnsures,
+    /// exec-closure specification facts
+    ClosureSpec,
+    /// closure body assuming its requires
+    ClosureRequires,
+    /// function requires assumed (spec-precondition checking mode)
+    FunctionRequires,
+    /// current-value fact for a mutable reference
+    MutRefCurrent,
+    /// equality binding a variable to a value (initialization, substitution)
+    VarEquality,
+    /// assert/assume pair introduced by expand-errors splitting
+    ExpandErrorsSplit,
+}
+
 #[derive(Debug, ToDebugSNode, Clone)]
 pub enum StmX {
     /// Call to exec/proof function (or spec function when checking preconditions).
@@ -252,8 +300,10 @@ pub enum StmX {
     },
     /// Assertion checked by verification-time computation/interpretation
     AssertCompute(Option<AssertId>, Exp, crate::ast::ComputeMode),
-    /// Add assumption to verification context (trusted, not checked)
-    Assume(Exp),
+    /// Add assumption to verification context (trusted, not checked).
+    /// The `AssumeIntent` records the construction site for provenance; it has
+    /// no effect on verification.
+    Assume(AssumeIntent, Exp),
     /// Assignment to a mutable variable or location
     Assign { lhs: Dest, rhs: Exp },
     /// Set fuel level for a recursive function (controls unrolling depth)

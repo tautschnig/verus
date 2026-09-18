@@ -9,6 +9,7 @@ use vir::ast::{Fun, FunctionKind, ImplPath, ItemKind, Mode, Path, TraitImpl, Vir
 use vir::ast_to_sst_func::{mk_fun_ctx, mk_fun_ctx_dec};
 use vir::ast_util::{fun_as_friendly_rust_name, is_body_visible_to};
 use vir::def::{CommandsWithContext, SnapPos};
+use vir::observer::LoweringProvenanceMode;
 use vir::recursion::Node;
 use vir::sst::{FuncCheckSst, FunctionSst};
 
@@ -71,6 +72,7 @@ pub struct OpGenerator<'a> {
     trait_impl_map: HashMap<Path, TraitImpl>,
 
     scc_idx: usize,
+    lowering_provenance_mode: LoweringProvenanceMode,
 }
 
 pub struct FunctionOpGenerator<'a: 'b, 'b> {
@@ -80,7 +82,12 @@ pub struct FunctionOpGenerator<'a: 'b, 'b> {
 }
 
 impl<'a> OpGenerator<'a> {
-    pub fn new(ctx: &'a mut vir::context::Ctx, krate: &vir::sst::KrateSst, bucket: Bucket) -> Self {
+    pub fn new(
+        ctx: &'a mut vir::context::Ctx,
+        krate: &vir::sst::KrateSst,
+        bucket: Bucket,
+        lowering_provenance_mode: LoweringProvenanceMode,
+    ) -> Self {
         let mut func_map: HashMap<Fun, FunctionSst> = HashMap::new();
         for function in &krate.functions {
             assert!(!func_map.contains_key(&function.x.name));
@@ -93,7 +100,7 @@ impl<'a> OpGenerator<'a> {
             trait_impl_map.insert(imp.x.impl_path.clone(), imp.clone());
         }
 
-        OpGenerator { ctx, func_map, trait_impl_map, bucket, scc_idx: 0 }
+        OpGenerator { ctx, func_map, trait_impl_map, bucket, scc_idx: 0, lowering_provenance_mode }
     }
 
     pub fn next<'b>(&'b mut self) -> Result<Option<FunctionOpGenerator<'a, 'b>>, VirErr>
@@ -219,6 +226,7 @@ impl<'a> OpGenerator<'a> {
                 self.ctx,
                 function,
                 is_body_visible_to(&function.x.body_visibility, &module),
+                self.lowering_provenance_mode,
             )?;
             self.ctx.fun = None;
 
@@ -290,8 +298,12 @@ impl<'a> OpGenerator<'a> {
             return Ok(vec![]);
         };
 
-        let (commands, snap_map) =
-            vir::sst_to_air_func::func_sst_to_air(self.ctx, &function, func_check_sst)?;
+        let (commands, snap_map) = vir::sst_to_air_func::func_sst_to_air(
+            self.ctx,
+            &function,
+            func_check_sst,
+            self.lowering_provenance_mode,
+        )?;
 
         self.ctx.fun = None;
 
@@ -312,8 +324,12 @@ impl<'a> OpGenerator<'a> {
     ) -> Result<Op, VirErr> {
         self.ctx.fun = mk_fun_ctx(&function, false /*recommend*/);
 
-        let (commands, snap_map) =
-            vir::sst_to_air_func::func_sst_to_air(self.ctx, &function, &expanded_function_sst)?;
+        let (commands, snap_map) = vir::sst_to_air_func::func_sst_to_air(
+            self.ctx,
+            &function,
+            &expanded_function_sst,
+            self.lowering_provenance_mode,
+        )?;
         let commands = focus_commands_with_context_on_assert_id(commands, assert_id);
 
         self.ctx.fun = None;

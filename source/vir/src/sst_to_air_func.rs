@@ -11,6 +11,7 @@ use crate::def::{
     prefix_requires, suffix_global_id, suffix_typ_param_ids,
 };
 use crate::messages::{MessageLabel, Span};
+use crate::observer::LoweringProvenanceMode;
 use crate::sst::FuncCheckSst;
 use crate::sst::{BndX, ExpX, Exps, FunctionSst, ParPurpose, ParX, Pars};
 use crate::sst_to_air::{
@@ -236,6 +237,7 @@ fn func_body_to_air(
     check_commands: &mut Vec<CommandsWithContext>,
     function: &FunctionSst,
     func_body_sst: &crate::sst::FuncSpecBodySst,
+    lowering_provenance_mode: LoweringProvenanceMode,
 ) -> Result<(), VirErr> {
     let crate::sst::FuncSpecBodySst { decrease_when, termination_check, body_exp } = func_body_sst;
     let pars = &function.x.pars;
@@ -305,6 +307,7 @@ fn func_body_to_air(
             false,
             false,
             false,
+            lowering_provenance_mode,
         )?;
         check_commands.extend(termination_commands.iter().cloned());
     }
@@ -814,6 +817,7 @@ pub fn func_axioms_to_air(
     ctx: &mut Ctx,
     function: &FunctionSst,
     public_body: bool,
+    lowering_provenance_mode: LoweringProvenanceMode,
 ) -> Result<(Commands, Vec<CommandsWithContext>), VirErr> {
     let typ_to_ids = |typ| typ_to_ids(ctx, typ);
     let func_axioms_sst = &function.x.axioms;
@@ -831,6 +835,7 @@ pub fn func_axioms_to_air(
                         &mut check_commands,
                         function,
                         func_body_sst,
+                        lowering_provenance_mode,
                     )?;
                 }
                 if let FunctionKind::TraitMethodImpl {
@@ -1015,6 +1020,7 @@ pub fn func_sst_to_air(
     ctx: &Ctx,
     function: &FunctionSst,
     func_check_sst: &FuncCheckSst,
+    lowering_provenance_mode: LoweringProvenanceMode,
 ) -> Result<(Arc<Vec<CommandsWithContext>>, Vec<(Span, SnapPos)>), VirErr> {
     let (commands, snap_map) = crate::sst_to_air::body_stm_to_air(
         ctx,
@@ -1027,6 +1033,7 @@ pub fn func_sst_to_air(
         function.x.attrs.integer_ring,
         function.x.attrs.bit_vector,
         function.x.attrs.nonlinear,
+        lowering_provenance_mode,
     )?;
 
     Ok((Arc::new(commands), snap_map))

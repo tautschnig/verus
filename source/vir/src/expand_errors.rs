@@ -447,7 +447,7 @@ fn expand_exp_rec(
         let e = if negate { sst_not(&exp.span, &e) } else { e };
         let assert_id = state.get_next_assert_id();
         let stm1 = mk_stm(StmX::Assert(Some(assert_id.clone()), None, e.clone()));
-        let stm2 = mk_stm(StmX::Assume(e.clone()));
+        let stm2 = mk_stm(StmX::Assume(crate::sst::AssumeIntent::ExpandErrorsSplit, e.clone()));
         let stm = mk_stm(StmX::Block(Arc::new(vec![stm1, stm2])));
         let tree = ExpansionTree::Leaf(assert_id, e, can_expand_further);
         (stm, tree)
@@ -651,7 +651,8 @@ fn expand_exp_rec(
                 let sstm = mk_stm(StmX::Block(Arc::new(stms)));
 
                 let dead_end = mk_stm(StmX::DeadEnd(sstm));
-                let assume_stm = mk_stm(StmX::Assume(exp.clone()));
+                let assume_stm =
+                    mk_stm(StmX::Assume(crate::sst::AssumeIntent::ExpandErrorsSplit, exp.clone()));
                 let full_stm = mk_stm(StmX::Block(Arc::new(vec![dead_end, assume_stm])));
 
                 (full_stm, ExpansionTree::Intro(intro, Box::new(tree)))

@@ -120,6 +120,7 @@ pub struct ArgsX {
     pub axiom_usage_info: bool,
     pub check_api_safety: bool,
     pub no_bv_simplify: bool,
+    pub proof_coverage: bool,
 }
 
 impl ArgsX {
@@ -169,6 +170,7 @@ impl ArgsX {
             axiom_usage_info: Default::default(),
             check_api_safety: Default::default(),
             no_bv_simplify: Default::default(),
+            proof_coverage: Default::default(),
         }
     }
 }
@@ -415,6 +417,7 @@ pub fn parse_args_with_imports(
     const EXTENDED_AXIOM_USAGE_INFO: &str = "axiom-usage-info";
     const EXTENDED_CHECK_API_SAFETY: &str = "check-api-safety";
     const EXTENDED_NO_BV_SIMPLIFY: &str = "no-bv-simplify";
+    const EXTENDED_PROOF_COVERAGE: &str = "proof-coverage";
     const EXTENDED_KEYS: &[(&str, &str)] = &[
         (EXTENDED_IGNORE_UNEXPECTED_SMT, "Ignore unexpected SMT output"),
         (EXTENDED_DEBUG, "Enable debugging of proof failures"),
@@ -441,6 +444,10 @@ pub fn parse_args_with_imports(
         (
             EXTENDED_NO_BV_SIMPLIFY,
             "internal option to disable simplification of bit-vector assertions before sending to the SMT solver",
+        ),
+        (
+            EXTENDED_PROOF_COVERAGE,
+            "Observe the verification pipeline and emit proof-coverage provenance records. Experimental.",
         ),
     ];
 
@@ -839,6 +846,7 @@ pub fn parse_args_with_imports(
         axiom_usage_info: extended.contains_key(EXTENDED_AXIOM_USAGE_INFO),
         check_api_safety: extended.contains_key(EXTENDED_CHECK_API_SAFETY),
         no_bv_simplify: extended.contains_key(EXTENDED_NO_BV_SIMPLIFY),
+        proof_coverage: extended.contains_key(EXTENDED_PROOF_COVERAGE),
     };
 
     if args.compile && args.no_erasure_check {

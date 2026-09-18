@@ -298,6 +298,11 @@ pub struct Verifier {
     /// Functions that failed to verify
     pub func_fails: HashSet<Fun>,
     pub args: Args,
+    /// Proof-coverage tap layer: at most one registered passive observer,
+    /// registered from the executable wiring layer via `register_observer`;
+    /// the core verifier depends only on `vir::observer::VerificationObserver`,
+    /// shared across worker threads. `None` unless `-V proof-coverage`.
+    pub observer: vir::observer::ObserverHandle,
     pub user_filter: Option<UserFilter>,
     pub erasure_hints: Option<crate::erase::ErasureHints>,
     pub(crate) verus_items: Option<Arc<VerusItems>>,
@@ -478,15 +483,40 @@ impl From<VirErr> for VerifyErr {
 struct CommandBatch {
     title: String,
     commands: Commands,
+    /// `Some((op, owner))` if these commands are axioms owned by a function
+    /// processed earlier in the SCC schedule (an `OpKind::Context` op).
+    function_context: Option<(String, String)>,
 }
 
 impl CommandBatch {
     fn new(title: impl Into<String>, commands: Commands) -> Self {
-        CommandBatch { title: title.into(), commands }
+        CommandBatch { title: title.into(), commands, function_context: None }
+    }
+
+    fn new_function_context(
+        title: impl Into<String>,
+        commands: Commands,
+        op: String,
+        owner: String,
+    ) -> Self {
+        CommandBatch { title: title.into(), commands, function_context: Some((op, owner)) }
     }
 }
 
 impl Verifier {
+    /// Register a passive verification observer (e.g. the proof-coverage
+    /// consumer). Must be called before verification runs. The verifier
+    /// itself never constructs an observer.
+    pub fn register_observer(
+        &mut self,
+        observer: std::sync::Arc<std::sync::Mutex<dyn vir::observer::VerificationObserver>>,
+    ) {
+        assert!(
+            self.observer.is_none(),
+            "a verification observer is already registered; at most one is supported"
+        );
+        self.observer = Some(observer);
+    }
     pub fn new(
         args: Args,
         via_cargo_args: Option<CargoVerusArgs>,
@@ -503,6 +533,7 @@ impl Verifier {
             count_errors: 0,
             func_fails: HashSet::new(),
             args,
+            observer: None,
             user_filter: None,
             erasure_hints: None,
             verus_items: None,
@@ -552,6 +583,7 @@ impl Verifier {
             count_errors: 0,
             func_fails: HashSet::new(),
             args: self.args.clone(),
+            observer: self.observer.clone(),
             user_filter: self.user_filter.clone(),
             erasure_hints: self.erasure_hints.clone(),
             verus_items: self.verus_items.clone(),
@@ -742,6 +774,7 @@ impl Verifier {
     /// If `level` is None, do not report errors.
     fn check_result_validity(
         &mut self,
+        observer_query_instance: Option<vir::observer::QueryInstanceId>,
         bucket_id: &BucketId,
         reporter: &impl Diagnostics,
         source_map: Option<&SourceMap>,
@@ -750,6 +783,7 @@ impl Verifier {
         air_context: &mut air::context::Context,
         assign_map: &HashMap<*const vir::messages::Span, HashSet<Arc<std::string::String>>>,
         snap_map: &Vec<(vir::messages::Span, SnapPos)>,
+        lowering_provenance: &vir::observer::LoweringProvenance,
         command: &Command,
         context: &CommandContext,
         prover_choice: vir::def::ProverChoice,
@@ -804,6 +838,17 @@ impl Verifier {
             (std::time::Duration::from_secs(2), report_fn)
         };
         let is_check_valid = matches!(**command, CommandX::CheckValid(_));
+        let observer_solver_config = air_context.replay_config();
+        vir::observer::notify(&self.observer, |o| {
+            o.on_query(
+                observer_query_instance,
+                air_context.context_id,
+                context,
+                &observer_solver_config,
+                lowering_provenance,
+                command,
+            );
+        });
         let time0 = Instant::now();
         #[cfg(feature = "singular")]
         let mut result = if !is_singular {
@@ -842,6 +887,14 @@ impl Verifier {
         let mut timed_out = false;
         let mut used_axioms = None;
         loop {
+            vir::observer::notify(&self.observer, |o| {
+                o.on_query_result(
+                    observer_query_instance,
+                    air_context.context_id,
+                    context,
+                    &result,
+                );
+            });
             match result {
                 ValidityResult::Valid(usage_info) => {
                     if (is_check_valid && is_first_check && level == Some(MessageLevel::Error))
@@ -1019,6 +1072,22 @@ impl Verifier {
             air_context.blank_line();
             air_context.comment(&batch.title);
         }
+        let observer_solver_config = air_context.replay_config();
+        vir::observer::notify(&self.observer, |o| {
+            let reason = match &batch.function_context {
+                Some((op, owner)) => vir::observer::ContextInstallReason::FunctionContext {
+                    op: op.clone(),
+                    owner: owner.clone(),
+                },
+                None => vir::observer::ContextInstallReason::Setup(batch.title.clone()),
+            };
+            o.on_context_installed(
+                air_context.context_id,
+                &observer_solver_config,
+                &reason,
+                &batch.commands,
+            );
+        });
         for command in batch.commands.iter() {
             let time0 = Instant::now();
             Self::check_internal_result(air_context.command(
@@ -1052,6 +1121,7 @@ impl Verifier {
     /// not_skipped : whether a nontrivial validity check was performed or not
     fn run_commands_queries(
         &mut self,
+        observer_query_instance: Option<vir::observer::QueryInstanceId>,
         reporter: &impl Diagnostics,
         source_map: Option<&SourceMap>,
         level: Option<MessageLevel>,
@@ -1083,8 +1153,13 @@ impl Verifier {
             not_skipped: false,
             used_axioms: None,
         };
-        let CommandsWithContextX { context, commands, prover_choice, skip_recommends: _ } =
-            &*commands_with_context;
+        let CommandsWithContextX {
+            context,
+            commands,
+            prover_choice,
+            skip_recommends: _,
+            lowering_provenance,
+        } = &*commands_with_context;
         let context = context.with_desc_prefix(desc_prefix);
         if commands.len() > 0 {
             air_context.blank_line();
@@ -1094,6 +1169,7 @@ impl Verifier {
         for command in commands.iter() {
             result = result
                 + self.check_result_validity(
+                    observer_query_instance,
                     bucket_id,
                     reporter,
                     source_map,
@@ -1102,6 +1178,7 @@ impl Verifier {
                     air_context,
                     assign_map,
                     snap_map,
+                    lowering_provenance,
                     &command,
                     &context,
                     *prover_choice,
@@ -1441,7 +1518,9 @@ impl Verifier {
         self.run_command_batches(bucket_id, reporter, &mut air_context, &bucket_context);
 
         let bucket = self.get_bucket(bucket_id);
-        let mut opgen = OpGenerator::new(ctx, krate, bucket.clone());
+        let lowering_provenance_mode =
+            vir::observer::LoweringProvenanceMode::for_observer(&self.observer);
+        let mut opgen = OpGenerator::new(ctx, krate, bucket.clone(), lowering_provenance_mode);
         while let Some(mut function_opgen) = opgen.next()? {
             let diagnostics_to_report: std::cell::RefCell<
                 Option<PanicOnDropVec<(Message, MessageLevel)>>,
@@ -1485,8 +1564,18 @@ impl Verifier {
                     break;
                 };
                 match &op.kind {
-                    OpKind::Context(_context_op, commands) => {
-                        let batch = CommandBatch::new(op.to_air_comment(), commands.clone());
+                    OpKind::Context(context_op, commands) => {
+                        let owner = op
+                            .function
+                            .as_ref()
+                            .map(|f| vir::ast_util::fun_as_friendly_rust_name(&f.x.name))
+                            .unwrap_or_default();
+                        let batch = CommandBatch::new_function_context(
+                            op.to_air_comment(),
+                            commands.clone(),
+                            format!("{:?}", context_op),
+                            owner,
+                        );
                         self.run_command_batch(bucket_id, reporter, &mut air_context, &batch);
                         bucket_context.push(batch);
                     }
@@ -1506,6 +1595,19 @@ impl Verifier {
                             QueryOp::Body(Style::CheckApiSafety) => MessageLevel::Error,
                         };
                         let function = &op.get_function();
+                        let observer_query_instance = func_check_sst
+                            .as_ref()
+                            .map(|check| Arc::as_ptr(check) as vir::observer::QueryInstanceId);
+                        vir::observer::notify(&self.observer, |o| {
+                            if let Some(check) = func_check_sst {
+                                o.on_function_sst(
+                                    observer_query_instance
+                                        .expect("FuncCheckSst must have a query instance"),
+                                    function,
+                                    check,
+                                );
+                            }
+                        });
                         let is_recommend = query_op.is_recommend();
                         self.expand_flag = query_op.is_expanded();
 
@@ -1622,6 +1724,7 @@ impl Verifier {
                                 not_skipped: command_not_skipped,
                                 used_axioms: command_used_axioms,
                             } = self.run_commands_queries(
+                                observer_query_instance,
                                 reporter,
                                 source_map,
                                 (!profile_rerun).then(|| level),
@@ -1963,6 +2066,7 @@ impl Verifier {
             resolved_typs.unwrap(),
             self.args.debugger,
         )?;
+        vir::observer::notify(&self.observer, |o| o.on_krate(&pruned_krate, &ctx.name_ctxt));
         if self.args.log_all || self.args.log_args.log_vir_poly {
             let mut file =
                 self.create_log_file(Some(&bucket_id), crate::config::VIR_POLY_FILE_SUFFIX)?;
@@ -2054,6 +2158,10 @@ impl Verifier {
             self.args.no_bv_simplify,
             self.args.report_long_running,
         )?;
+        vir::observer::notify(&self.observer, |o| {
+            o.on_krate_pre_simplify(&krate, self.crate_id.as_ref().expect("crate_id"))
+        });
+
         vir::recursive_types::check_traits(&krate, &global_ctx)?;
         let krate = vir::ast_simplify::simplify_krate(&mut global_ctx, &krate)?;
 
@@ -2624,6 +2732,8 @@ impl Verifier {
             Ok(())
         };
 
+        vir::observer::notify(&self.observer, |o| o.on_finish());
+
         let time_verify_crate_end = Instant::now();
         self.time_verify_crate = time_verify_crate_end - time_verify_crate_start;
 
@@ -2656,6 +2766,7 @@ impl Verifier {
                 id: 0,
                 data: vec![],
                 as_string: "no location".to_string(),
+                proof_coverage_generated: false,
             })
         };
 
