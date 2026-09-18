@@ -443,11 +443,11 @@ pub fn parse_args_with_imports(
         (EXTENDED_CVC5, "Use the cvc5 SMT solver, rather than the default (Z3)"),
         (
             EXTENDED_CROSS_CHECK,
-            "Cross-check each query with a second solver (warn mode): run the identical solver-neutral query on a cvc5 secondary alongside the Z3 primary, use the primary verdict but warn if the secondary cannot confirm a proof, and hard-error (dumping both transcripts to .verus-solver-log) on an unsat/sat disagreement.",
+            "Cross-check each query with a second solver (warn mode): run the identical solver-neutral query on a cvc5 secondary alongside the Z3 primary, use the primary verdict but warn if the secondary cannot confirm a proof, and hard-error (dumping both transcripts to .verus-solver-log) on an unsat/sat disagreement. Experimental.",
         ),
         (
             EXTENDED_CROSS_CHECK_STRICT,
-            "Like cross-check, but also hard-error when the secondary solver cannot independently confirm a proof.",
+            "Like cross-check, but also hard-error when the secondary solver cannot independently confirm a proof. Experimental.",
         ),
         (
             EXTENDED_CROSS_CHECK_INJECT_DISAGREEMENT,
@@ -469,11 +469,11 @@ pub fn parse_args_with_imports(
         ),
         (
             EXTENDED_NEUTRAL_PRELUDE,
-            "Emit the solver-neutral (axiomatised) partial-order height prelude even under Z3, so the emitted SMT-LIB contains no Z3-proprietary `(_ partial-order 0)` special relation (design 05 §2.1). Also settable via VERUS_NEUTRAL_PRELUDE.",
+            "Emit the solver-neutral (axiomatised) partial-order height prelude even under Z3, so the emitted SMT-LIB contains no Z3-proprietary `(_ partial-order 0)` special relation (design 05 §2.1). Also settable via VERUS_NEUTRAL_PRELUDE. Experimental.",
         ),
         (
             EXTENDED_EMIT_SMT_PROOFS,
-            "Write the exact cvc5-clean SMT-LIB query stream for each module to the given directory (-V emit-smt-proofs=DIR), for offline CPC proof generation and Ethos checking. Implies the neutral prelude and requires -V cvc5.",
+            "Write the exact cvc5-clean SMT-LIB query stream for each module to the given directory (-V emit-smt-proofs=DIR), for offline CPC proof generation and Ethos checking. Implies the neutral prelude and requires -V cvc5. Experimental.",
         ),
     ];
 
