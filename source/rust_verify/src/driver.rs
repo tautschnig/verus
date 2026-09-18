@@ -200,6 +200,127 @@ pub(crate) fn run_with_erase_macro_compile(
     run_compiler(rustc_args, true, true, &mut callbacks)
 }
 
+/// D1 Option C (C2) spike. Instead of re-expanding the source in a second rustc run
+/// (`run_with_erase_macro_compile`), reuse the *verify* pass's post-expansion crate:
+///
+///   1. Re-run expansion under the verify cfgs (`verus_keep_ghost_body` set) and
+///      pretty-print the expanded crate via rustc's `-Zunpretty=expanded` to a file.
+///      Because cfg-stripping happens during expansion, every `#[cfg(verus_keep_ghost_body)]`
+///      site is already resolved to its verify-pass branch and the `not(...)` branch is gone.
+///   2. Compile *that text*. It contains no macro invocations, so no proc macro (honest or
+///      malicious) re-runs, and there is no `cfg(verus_keep_ghost_body)` left to observe.
+///
+/// This closes the Task 2c Channel 1 attack: the malicious `element!` macro's safe branch is
+/// the only one present in the shared expansion. It is NOT a general erasure solution — the
+/// verify expansion keeps ghost code (`verus!` ran in Keep mode), which a stock compile cannot
+/// erase; see cert/d1/OPTION-C-DESIGN.md for why only C1 (Verus-internal THIR erasure) is a
+/// sound end state. The dumped expansion is emitted regardless, as the decisive evidence.
+pub(crate) fn run_compile_from_expansion(
+    rustc_args_verify: Vec<String>,
+    rustc_args_base: Vec<String>,
+    do_compile: bool,
+    vstd: Vstd,
+) -> Result<(), ()> {
+    let tmp_dir = std::env::temp_dir().join(format!("verus-compile-from-expansion-{}", std::process::id()));
+    if let Err(e) = std::fs::create_dir_all(&tmp_dir) {
+        eprintln!("error: [compile-from-expansion] could not create temp dir: {}", e);
+        return Err(());
+    }
+    let expanded_path = tmp_dir.join("expanded.rs");
+
+    // Step 1: capture the verify-pass expansion. Drop any caller-supplied `-o <path>`
+    // (that is the final binary path, used by the compile step below) so it does not
+    // collide with the `-o` we point at the pretty-printed expansion.
+    let mut cap_args: Vec<String> = Vec::with_capacity(rustc_args_verify.len());
+    let mut skip_next = false;
+    for a in rustc_args_verify.into_iter() {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if a == "-o" {
+            skip_next = true;
+            continue;
+        }
+        if a.starts_with("-o=") || a.starts_with("--out-dir") {
+            continue;
+        }
+        cap_args.push(a);
+    }
+    cap_args.extend(
+        ["-Zunpretty=expanded", "-o", &expanded_path.display().to_string()].map(|s| s.to_string()),
+    );
+    struct DumpCallbacks;
+    impl rustc_driver::Callbacks for DumpCallbacks {}
+    let mut dump_cb = DumpCallbacks;
+    let cap_status = run_compiler(cap_args, true, false, &mut dump_cb);
+    if cap_status.is_err() {
+        eprintln!("error: [compile-from-expansion] expansion capture failed");
+        return Err(());
+    }
+    eprintln!(
+        "note: [compile-from-expansion] wrote shared expansion to {}",
+        expanded_path.display()
+    );
+
+    if !do_compile {
+        // No compile requested: capturing the shared expansion is all that is asked.
+        return Ok(());
+    }
+
+    // Step 2: compile the shared expansion. Invoke rustc directly (NOT through
+    // `run_compiler`, which would re-inject `-Zcrate-attr` feature/register_tool attributes
+    // that the pretty-printed crate already carries in its header, causing duplicates).
+    let mut comp_args: Vec<String> = rustc_args_base
+        .into_iter()
+        .map(|a| {
+            if a.ends_with(".rs") { expanded_path.display().to_string() } else { a }
+        })
+        .collect();
+    comp_args.extend(["--cfg", "verus_only", "--cfg", "verus_keep_ghost"].map(|s| s.to_string()));
+    if matches!(vstd, Vstd::IsCore | Vstd::ImportedViaCore) {
+        comp_args.extend(["--cfg", "verus_verify_core"].map(|s| s.to_string()));
+    } else if vstd == Vstd::NoVstd {
+        comp_args.extend(["--cfg", "verus_no_vstd"].map(|s| s.to_string()));
+    }
+    for a in &[
+        "unused_imports",
+        "unused_variables",
+        "unused_assignments",
+        "unreachable_patterns",
+        "unused_parens",
+        "unused_braces",
+        "dead_code",
+        "unreachable_code",
+        "unused_mut",
+        "unused_labels",
+        "unused_attributes",
+        "non_shorthand_field_patterns",
+    ] {
+        comp_args.extend(["-A", a].map(|s| s.to_string()));
+    }
+    let mut callbacks = CompilerCallbacksEraseMacro {
+        do_compile,
+        override_stability: matches!(vstd, Vstd::IsCore | Vstd::ImportedViaCore),
+    };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        rustc_driver::run_compiler(&comp_args, &mut callbacks)
+    }));
+    match result {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            eprintln!(
+                "error: [compile-from-expansion] compiling the shared expansion failed \
+                 (expected for crates that carry ghost code; see cert/d1/OPTION-C-DESIGN.md). \
+                 The attack still does not survive: the shared expansion at {} contains only the \
+                 verify-pass branch.",
+                expanded_path.display()
+            );
+            Err(())
+        }
+    }
+}
+
 pub struct VerusRoot {
     pub path: std::path::PathBuf,
     in_vargo: bool,
@@ -340,7 +461,16 @@ pub fn run(
             Ok(())
         } else {
             let do_compile = verifier.compile || verifier.via_cargo_args.is_some();
-            run_with_erase_macro_compile(rustc_args, do_compile, verifier.args.vstd)
+            if verifier.args.compile_from_expansion {
+                run_compile_from_expansion(
+                    rustc_args_verify,
+                    rustc_args,
+                    do_compile,
+                    verifier.args.vstd,
+                )
+            } else {
+                run_with_erase_macro_compile(rustc_args, do_compile, verifier.args.vstd)
+            }
         };
 
     let time2 = Instant::now();
