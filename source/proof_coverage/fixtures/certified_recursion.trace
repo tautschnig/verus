@@ -1,0 +1,64 @@
+explain pc%6%7  —  Complete
+#1 recursion_contracts::odd_p#ens[0] @ function.ensures  [ensures] proof_coverage/probes/recursion_contracts.rs:26:13: 26:23 (#0)  —  Complete
+    provenance: elaborates from recursion_contracts::odd_p#ens[0]  [attribution: msg.obligation_note]  [join: join.clause_span]
+    ← #2 [TerminalOf: conjunction of the obligation's terminals]
+#2 pc%6%t%2%0  [terminal]   —  Complete
+    ← #18 AND #13 AND #12 AND #11 AND #10 AND #9 AND #8 AND #7 AND #6 AND #5 AND #4 AND #3 [SupportedBy: focused query 9 unsat core]
+#3 β:9  —  Complete
+    root
+#4 recursion_contracts::even_p  [ambient:ReqEns] pc_a%ef46838fbb40f10454c4c1f73899a3eb  —  Complete
+    ambient encoding axiom (ReqEns), owner recursion_contracts::even_p
+    root
+#5 recursion_contracts::parity  [ambient:SpecDefinition] pc_a%8be4cdd30509721805761c238e738f2d  —  Complete
+    ambient encoding axiom (SpecDefinition), owner recursion_contracts::parity
+    root
+#6 recursion_contracts::parity  [ambient:SpecDefinition] pc_a%6df74c35dd998bd95b9c4cc456b6a494  —  Complete
+    ambient encoding axiom (SpecDefinition), owner recursion_contracts::parity
+    root
+#7 recursion_contracts::parity  [ambient:SpecDefinition] pc_a%444f1d048d0e7b16b9583cddf894161f  —  Complete
+    ambient encoding axiom (SpecDefinition), owner recursion_contracts::parity
+    root
+#8 recursion_contracts::parity  [ambient:SpecDefinition] pc_a%05e0e06dcbb2ff900dcab9944a2abd91  —  Complete
+    ambient encoding axiom (SpecDefinition), owner recursion_contracts::parity
+    root
+#9 recursion_contracts::odd_p#req[0] @ function.requires  [requires[0]] proof_coverage/probes/recursion_contracts.rs:25:14: 25:24 (#0)  —  Complete
+    provenance: elaborates from recursion_contracts::odd_p#req[0]  [attribution: sst.emitted_local_axiom]  [join: join.emitted_clause]
+    root
+#10 pc%6%local%1  [type_invariant] proof_coverage/probes/recursion_contracts.rs:24:16: 24:22 (#0)  —  Complete
+    provenance: [attribution: sst.emitted_local_axiom]
+    root
+#11 pc%6%local%0  [fuel] proof_coverage/probes/recursion_contracts.rs:24:7: 24:23 (#0)  —  Complete
+    provenance: [attribution: sst.emitted_local_axiom]
+    root
+#12 recursion_contracts::odd_p#branch.src0 @ control.branch_arm:1  [branch_condition] proof_coverage/probes/recursion_contracts.rs:29:5: 29:41 (#0)  —  Complete
+    provenance: elaborates from recursion_contracts::odd_p#branch.src0  [attribution: sst.emitted_slot]  [join: join.source_provenance]
+    root
+#13 recursion_contracts::even_p#ens @ call.post  [ensures_of:recursion_contracts::even_p] proof_coverage/probes/recursion_contracts.rs:29:16: 29:38 (#0)  —  Complete
+    provenance: elaborates from recursion_contracts::even_p#ens  [attribution: air.callee_ensures]  [join: join.contract_aggregate]
+    ← #20 AND #14 [Demand: call-local induction at r.b1.b0.b0.t.b0.b1.b1: decrease guard + precondition checks]
+#14 recursion_contracts::even_p#req @ call.pre  [requires_of:recursion_contracts::even_p] proof_coverage/probes/recursion_contracts.rs:29:16: 29:38 (#0)  —  Complete
+    provenance: elaborates from recursion_contracts::even_p#req  [attribution: air.callee_requires]  [join: join.contract_aggregate]
+    ← #15 [TerminalOf: conjunction of the obligation's terminals]
+#15 pc%6%t%1%0  [terminal]   —  Complete
+    ← #19 AND #18 AND #10 AND #9 AND #17 AND #16 [SupportedBy: focused query 8 unsat core]
+#16 β:8  —  Complete
+    root
+#17 recursion_contracts::even_p  [ambient:ReqEns] pc_a%ed3b25b4fac0c422debe560448eacda7  —  Complete
+    ambient encoding axiom (ReqEns), owner recursion_contracts::even_p
+    root
+#18 pc%6%2  [sst:VarEquality] proof_coverage/probes/recursion_contracts.rs:29:23: 29:30 (#0)  —  Complete
+    provenance: [attribution: sst.exact_lowering]
+    root
+#19 recursion_contracts::odd_p#branch.src0 @ control.branch_arm:0  [branch_condition] proof_coverage/probes/recursion_contracts.rs:29:5: 29:41 (#0)  —  Complete
+    provenance: elaborates from recursion_contracts::odd_p#branch.src0  [attribution: sst.emitted_slot]  [join: join.source_provenance]
+    root
+#20 recursion_contracts::odd_p#dec @ function.termination  [decreases] proof_coverage/probes/recursion_contracts.rs:29:16: 29:38 (#0)  —  Complete
+    provenance: elaborates from recursion_contracts::odd_p#dec  [attribution: msg.obligation_note]  [join: join.decreases_measure]
+    ← #21 [TerminalOf: conjunction of the obligation's terminals]
+#21 pc%6%t%0%0  [terminal]   —  Complete
+    ← #23 AND #19 AND #18 AND #22 [SupportedBy: focused query 7 unsat core]
+#22 β:7  —  Complete
+    root
+#23 pc%6%0  [sst:VarEquality] proof_coverage/probes/recursion_contracts.rs:28:1: 30:2 (#0)  —  Complete
+    provenance: [attribution: sst.exact_lowering]
+    root

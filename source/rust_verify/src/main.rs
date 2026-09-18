@@ -137,8 +137,26 @@ pub fn main() {
     // TODO: Audit that the environment access only happens in single-threaded code.
     unsafe { std::env::set_var("RUSTC_BOOTSTRAP", "1") };
 
-    let verifier =
+    let mut verifier =
         rust_verify::verifier::Verifier::new(our_args, via_cargo, via_cargo_compile, dep_tracker);
+
+    // Executable wiring layer: the proof-coverage consumer is registered
+    // here (and only here); the core verifier depends only on the
+    // VerificationObserver trait.
+    #[cfg(feature = "proof-coverage")]
+    if verifier.args.proof_coverage {
+        verifier.register_observer(std::sync::Arc::new(std::sync::Mutex::new(
+            proof_coverage::CoverageProducer::new(),
+        )));
+    }
+    #[cfg(not(feature = "proof-coverage"))]
+    if verifier.args.proof_coverage {
+        eprintln!(
+            "error: this build does not include the proof-coverage consumer \
+             (rust_verify was compiled without the `proof-coverage` feature)"
+        );
+        std::process::exit(1);
+    }
 
     let (verifier, stats, status) = rust_verify::driver::run(
         verifier,

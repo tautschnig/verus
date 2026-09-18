@@ -1,0 +1,34 @@
+explain pc%3%1  —  Complete
+#1 call_residue::add_one#ens @ call.post  [ensures_of:call_residue::add_one] proof_coverage/probes/call_residue.rs:9:13: 9:23 (#0)  —  Complete
+    provenance: elaborates from call_residue::add_one#ens  [attribution: air.callee_ensures]  [join: join.contract_aggregate]
+    ← #7 AND #2 [Demand: call-local contract at r.b0.b0: callee proof + precondition checks]
+#2 call_residue::add_one#req @ call.pre  [requires_of:call_residue::add_one] proof_coverage/probes/call_residue.rs:9:13: 9:23 (#0)  —  Complete
+    provenance: elaborates from call_residue::add_one#req  [attribution: air.callee_requires]  [join: join.contract_aggregate]
+    ← #3 [TerminalOf: conjunction of the obligation's terminals]
+#3 pc%3%t%0%0  [terminal]   —  Complete
+    ← #6 AND #5 AND #4 [SupportedBy: focused query 4 unsat core]
+#4 β:4  —  Complete
+    root
+#5 call_residue::add_one  [ambient:ReqEns] pc_a%74c198ccefb4b7ec6490dfb20378f297  —  Complete
+    ambient encoding axiom (ReqEns), owner call_residue::add_one
+    root
+#6 call_residue::double_calls#req[0] @ function.requires  [requires[0]] proof_coverage/probes/call_residue.rs:6:14: 6:20 (#0)  —  Complete
+    provenance: elaborates from call_residue::double_calls#req[0]  [attribution: sst.emitted_local_axiom]  [join: join.emitted_clause]
+    root
+#7 call_residue::add_one#ens  [ensures_aggregate]   —  Complete
+    ← #8 [Aggregates: conjunction of the aggregate's clauses]
+#8 call_residue::add_one#ens[0]  [ensures_clause] proof_coverage/probes/call_residue.rs:16:13: 16:23 (#0)  —  Complete
+    ← #9 [CertifiedBy: contract: callee's ensures checks license call_residue::add_one#ens[0]]
+#9 call_residue::add_one#ens[0] @ function.ensures  [ensures] proof_coverage/probes/call_residue.rs:16:13: 16:23 (#0)  —  Complete
+    provenance: elaborates from call_residue::add_one#ens[0]  [attribution: msg.obligation_note]  [join: join.clause_span]
+    ← #10 [TerminalOf: conjunction of the obligation's terminals]
+#10 pc%0%t%1%0  [terminal]   —  Complete
+    ← #13 AND #12 AND #11 [SupportedBy: focused query 2 unsat core]
+#11 β:2  —  Complete
+    root
+#12 call_residue::add_one#return.src0  [sst:VarEquality] proof_coverage/probes/call_residue.rs:18:5: 18:10 (#0)  —  Complete
+    provenance: elaborates from call_residue::add_one#return.src0  [attribution: sst.exact_lowering]  [join: join.source_provenance]
+    root
+#13 pc%0%1  [type_invariant] proof_coverage/probes/call_residue.rs:18:5: 18:10 (#0)  —  Complete
+    provenance: [attribution: air.type_invariant]
+    root

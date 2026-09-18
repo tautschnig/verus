@@ -1,0 +1,2977 @@
+{
+  "schema": "verus-proof-coverage/1",
+  "artifact_version": "0.1",
+  "functions": [
+    {
+      "variant": "pc_fv%4a90d3bd6b24c6c3feb679524839ebf5afca52e244c857082ecc22627bf04136",
+      "fun": "recursion::even_p",
+      "cfg": {
+        "entry": "entry",
+        "exit": "exit",
+        "nodes": [
+          {
+            "id": "entry",
+            "kind": "entry"
+          },
+          {
+            "id": "exit",
+            "kind": "exit"
+          },
+          {
+            "id": "r.b0",
+            "kind": "assign",
+            "span": "proof_coverage/studies/analysis_v01/recursion.rs:25:1: 29:2 (#0)"
+          },
+          {
+            "id": "r.b1.b0.b0",
+            "kind": "branch",
+            "span": "proof_coverage/studies/analysis_v01/recursion.rs:26:5: 28:6 (#0)"
+          },
+          {
+            "id": "r.b1.b0.b0.j",
+            "kind": "join"
+          },
+          {
+            "id": "r.b1.b0.b0.t.b0.b0",
+            "kind": "assign",
+            "span": "proof_coverage/studies/analysis_v01/recursion.rs:27:15: 27:22 (#0)"
+          },
+          {
+            "id": "r.b1.b0.b0.t.b0.b1.b0",
+            "kind": "assert",
+            "span": "proof_coverage/studies/analysis_v01/recursion.rs:27:9: 27:30 (#0)"
+          },
+          {
+            "id": "r.b1.b0.b0.t.b0.b1.b1",
+            "kind": "call",
+            "span": "proof_coverage/studies/analysis_v01/recursion.rs:27:9: 27:30 (#0)"
+          },
+          {
+            "id": "r.b1.b1",
+            "kind": "return",
+            "span": "proof_coverage/studies/analysis_v01/recursion.rs:26:5: 28:6 (#0)"
+          }
+        ],
+        "edges": [
+          {
+            "from": "entry",
+            "to": "r.b0",
+            "kind": "next"
+          },
+          {
+            "from": "r.b0",
+            "to": "r.b1.b0.b0",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1.b0.b0",
+            "to": "r.b1.b0.b0.t.b0.b0",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1.b0.b0.t.b0.b0",
+            "to": "r.b1.b0.b0.t.b0.b1.b0",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1.b0.b0.t.b0.b1.b0",
+            "to": "r.b1.b0.b0.t.b0.b1.b1",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1.b0.b0.t.b0.b1.b1",
+            "to": "r.b1.b0.b0.j",
+            "kind": "join"
+          },
+          {
+            "from": "r.b1.b0.b0",
+            "to": "r.b1.b0.b0.j",
+            "kind": "join"
+          },
+          {
+            "from": "r.b1.b0.b0.j",
+            "to": "r.b1.b1",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1.b1",
+            "to": "exit",
+            "kind": "return"
+          },
+          {
+            "from": "r.b1.b1",
+            "to": "exit",
+            "kind": "next"
+          }
+        ]
+      },
+      "call_sites": [
+        [
+          "r.b1.b0.b0.t.b0.b1.b1",
+          "proof_coverage/studies/analysis_v01/recursion.rs:27:9: 27:30 (#0)",
+          "recursion::odd_p"
+        ]
+      ],
+      "sst_assumes": [
+        {
+          "intent": "VarEquality",
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:25:1: 29:2 (#0)",
+          "recognizable": false,
+          "node": "r.b0",
+          "sig": "eq(var,var)"
+        },
+        {
+          "intent": "VarEquality",
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:27:15: 27:22 (#0)",
+          "recognizable": false,
+          "node": "r.b1.b0.b0.t.b0.b0",
+          "sig": "eq(var,binop(var,const))"
+        }
+      ],
+      "recursive_calls": [
+        {
+          "callee": "recursion::odd_p",
+          "call_node": "r.b1.b0.b0.t.b0.b1.b1",
+          "guard_node": "r.b1.b0.b0.t.b0.b1.b0",
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:27:9: 27:30 (#0)"
+        }
+      ],
+      "ens_spans": [
+        "proof_coverage/studies/analysis_v01/recursion.rs:23:9: 23:18 (#0)"
+      ],
+      "req_spans": [
+        "proof_coverage/studies/analysis_v01/recursion.rs:21:9: 21:19 (#0)"
+      ],
+      "branches": [
+        [
+          "r.b1.b0.b0",
+          "proof_coverage/studies/analysis_v01/recursion.rs:26:8: 26:13 (#0)"
+        ]
+      ],
+      "synthetic_bindings": [
+        "r.b0",
+        "r.b1.b0.b0.t.b0.b0"
+      ],
+      "param_spans": [
+        "proof_coverage/studies/analysis_v01/recursion.rs:19:17: 19:23 (#0)"
+      ],
+      "loops": []
+    },
+    {
+      "variant": "pc_fv%9aff905762b21be38fbc0de4a3f463ff595582b46f10a536a053489972e654ab",
+      "fun": "recursion::odd_p",
+      "cfg": {
+        "entry": "entry",
+        "exit": "exit",
+        "nodes": [
+          {
+            "id": "entry",
+            "kind": "entry"
+          },
+          {
+            "id": "exit",
+            "kind": "exit"
+          },
+          {
+            "id": "r.b0",
+            "kind": "assign",
+            "span": "proof_coverage/studies/analysis_v01/recursion.rs:37:1: 41:2 (#0)"
+          },
+          {
+            "id": "r.b1.b0.b0",
+            "kind": "branch",
+            "span": "proof_coverage/studies/analysis_v01/recursion.rs:38:5: 40:6 (#0)"
+          },
+          {
+            "id": "r.b1.b0.b0.j",
+            "kind": "join"
+          },
+          {
+            "id": "r.b1.b0.b0.t.b0.b0",
+            "kind": "assign",
+            "span": "proof_coverage/studies/analysis_v01/recursion.rs:39:16: 39:23 (#0)"
+          },
+          {
+            "id": "r.b1.b0.b0.t.b0.b1.b0",
+            "kind": "assert",
+            "span": "proof_coverage/studies/analysis_v01/recursion.rs:39:9: 39:31 (#0)"
+          },
+          {
+            "id": "r.b1.b0.b0.t.b0.b1.b1",
+            "kind": "call",
+            "span": "proof_coverage/studies/analysis_v01/recursion.rs:39:9: 39:31 (#0)"
+          },
+          {
+            "id": "r.b1.b1",
+            "kind": "return",
+            "span": "proof_coverage/studies/analysis_v01/recursion.rs:38:5: 40:6 (#0)"
+          }
+        ],
+        "edges": [
+          {
+            "from": "entry",
+            "to": "r.b0",
+            "kind": "next"
+          },
+          {
+            "from": "r.b0",
+            "to": "r.b1.b0.b0",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1.b0.b0",
+            "to": "r.b1.b0.b0.t.b0.b0",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1.b0.b0.t.b0.b0",
+            "to": "r.b1.b0.b0.t.b0.b1.b0",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1.b0.b0.t.b0.b1.b0",
+            "to": "r.b1.b0.b0.t.b0.b1.b1",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1.b0.b0.t.b0.b1.b1",
+            "to": "r.b1.b0.b0.j",
+            "kind": "join"
+          },
+          {
+            "from": "r.b1.b0.b0",
+            "to": "r.b1.b0.b0.j",
+            "kind": "join"
+          },
+          {
+            "from": "r.b1.b0.b0.j",
+            "to": "r.b1.b1",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1.b1",
+            "to": "exit",
+            "kind": "return"
+          },
+          {
+            "from": "r.b1.b1",
+            "to": "exit",
+            "kind": "next"
+          }
+        ]
+      },
+      "call_sites": [
+        [
+          "r.b1.b0.b0.t.b0.b1.b1",
+          "proof_coverage/studies/analysis_v01/recursion.rs:39:9: 39:31 (#0)",
+          "recursion::even_p"
+        ]
+      ],
+      "sst_assumes": [
+        {
+          "intent": "VarEquality",
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:37:1: 41:2 (#0)",
+          "recognizable": false,
+          "node": "r.b0",
+          "sig": "eq(var,var)"
+        },
+        {
+          "intent": "VarEquality",
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:39:16: 39:23 (#0)",
+          "recognizable": false,
+          "node": "r.b1.b0.b0.t.b0.b0",
+          "sig": "eq(var,binop(var,const))"
+        }
+      ],
+      "recursive_calls": [
+        {
+          "callee": "recursion::even_p",
+          "call_node": "r.b1.b0.b0.t.b0.b1.b1",
+          "guard_node": "r.b1.b0.b0.t.b0.b1.b0",
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:39:9: 39:31 (#0)"
+        }
+      ],
+      "ens_spans": [
+        "proof_coverage/studies/analysis_v01/recursion.rs:35:9: 35:19 (#0)"
+      ],
+      "req_spans": [
+        "proof_coverage/studies/analysis_v01/recursion.rs:33:9: 33:19 (#0)"
+      ],
+      "branches": [
+        [
+          "r.b1.b0.b0",
+          "proof_coverage/studies/analysis_v01/recursion.rs:38:8: 38:13 (#0)"
+        ]
+      ],
+      "synthetic_bindings": [
+        "r.b0",
+        "r.b1.b0.b0.t.b0.b0"
+      ],
+      "param_spans": [
+        "proof_coverage/studies/analysis_v01/recursion.rs:31:16: 31:22 (#0)"
+      ],
+      "loops": []
+    },
+    {
+      "variant": "pc_fv%e00276cf850b123e3e5813a1f41b7ae6464da09d0d780dd1d8265558be20adb5",
+      "fun": "recursion::self_count",
+      "cfg": {
+        "entry": "entry",
+        "exit": "exit",
+        "nodes": [
+          {
+            "id": "entry",
+            "kind": "entry"
+          },
+          {
+            "id": "exit",
+            "kind": "exit"
+          },
+          {
+            "id": "r.b0",
+            "kind": "assign",
+            "span": "proof_coverage/studies/analysis_v01/recursion.rs:9:1: 11:2 (#0)"
+          },
+          {
+            "id": "r.b1.b0.b0",
+            "kind": "branch",
+            "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:5: 10:47 (#0)"
+          },
+          {
+            "id": "r.b1.b0.b0.j",
+            "kind": "join"
+          },
+          {
+            "id": "r.b1.b0.b0.t",
+            "kind": "assign",
+            "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:5: 10:47 (#0)"
+          },
+          {
+            "id": "r.b1.b0.b0.e.b0.b0",
+            "kind": "assert",
+            "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:39: 10:44 (#0)"
+          },
+          {
+            "id": "r.b1.b0.b0.e.b0.b1",
+            "kind": "assume",
+            "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:39: 10:44 (#0)"
+          },
+          {
+            "id": "r.b1.b0.b0.e.b0.b2.b0",
+            "kind": "assign",
+            "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:39: 10:44 (#0)"
+          },
+          {
+            "id": "r.b1.b0.b0.e.b0.b2.b1.b0",
+            "kind": "assert",
+            "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:28: 10:45 (#0)"
+          },
+          {
+            "id": "r.b1.b0.b0.e.b0.b2.b1.b1",
+            "kind": "call",
+            "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:28: 10:45 (#0)"
+          },
+          {
+            "id": "r.b1.b0.b0.e.b1",
+            "kind": "assign",
+            "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:5: 10:47 (#0)"
+          },
+          {
+            "id": "r.b1.b1",
+            "kind": "return",
+            "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:5: 10:47 (#0)"
+          }
+        ],
+        "edges": [
+          {
+            "from": "entry",
+            "to": "r.b0",
+            "kind": "next"
+          },
+          {
+            "from": "r.b0",
+            "to": "r.b1.b0.b0",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1.b0.b0",
+            "to": "r.b1.b0.b0.t",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1.b0.b0.t",
+            "to": "r.b1.b0.b0.j",
+            "kind": "join"
+          },
+          {
+            "from": "r.b1.b0.b0",
+            "to": "r.b1.b0.b0.e.b0.b0",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1.b0.b0.e.b0.b0",
+            "to": "r.b1.b0.b0.e.b0.b1",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1.b0.b0.e.b0.b1",
+            "to": "r.b1.b0.b0.e.b0.b2.b0",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1.b0.b0.e.b0.b2.b0",
+            "to": "r.b1.b0.b0.e.b0.b2.b1.b0",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1.b0.b0.e.b0.b2.b1.b0",
+            "to": "r.b1.b0.b0.e.b0.b2.b1.b1",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1.b0.b0.e.b0.b2.b1.b1",
+            "to": "r.b1.b0.b0.e.b1",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1.b0.b0.e.b1",
+            "to": "r.b1.b0.b0.j",
+            "kind": "join"
+          },
+          {
+            "from": "r.b1.b0.b0.j",
+            "to": "r.b1.b1",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1.b1",
+            "to": "exit",
+            "kind": "return"
+          },
+          {
+            "from": "r.b1.b1",
+            "to": "exit",
+            "kind": "next"
+          }
+        ]
+      },
+      "call_sites": [
+        [
+          "r.b1.b0.b0.e.b0.b2.b1.b1",
+          "proof_coverage/studies/analysis_v01/recursion.rs:10:28: 10:45 (#0)",
+          "recursion::self_count"
+        ]
+      ],
+      "sst_assumes": [
+        {
+          "intent": "VarEquality",
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:9:1: 11:2 (#0)",
+          "recognizable": false,
+          "node": "r.b0",
+          "sig": "eq(var,var)"
+        },
+        {
+          "intent": "VarEquality",
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:5: 10:47 (#0)",
+          "recognizable": false,
+          "node": "r.b1.b0.b0.t",
+          "sig": "eq(var,const)"
+        },
+        {
+          "intent": "CheckedCondition",
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:39: 10:44 (#0)",
+          "recognizable": true,
+          "node": "r.b1.b0.b0.e.b0.b1",
+          "sig": "app"
+        },
+        {
+          "intent": "VarEquality",
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:39: 10:44 (#0)",
+          "recognizable": false,
+          "node": "r.b1.b0.b0.e.b0.b2.b0",
+          "sig": "eq(var,binop(var,const))"
+        },
+        {
+          "intent": "VarEquality",
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:5: 10:47 (#0)",
+          "recognizable": false,
+          "node": "r.b1.b0.b0.e.b1",
+          "sig": "eq(var,var)"
+        },
+        {
+          "intent": "VarEquality",
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:5: 10:47 (#0)",
+          "recognizable": false,
+          "node": "r.b1.b1",
+          "sig": "eq(var,var)"
+        }
+      ],
+      "recursive_calls": [
+        {
+          "callee": "recursion::self_count",
+          "call_node": "r.b1.b0.b0.e.b0.b2.b1.b1",
+          "guard_node": "r.b1.b0.b0.e.b0.b2.b1.b0",
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:28: 10:45 (#0)"
+        }
+      ],
+      "ens_spans": [
+        "proof_coverage/studies/analysis_v01/recursion.rs:7:9: 7:15 (#0)"
+      ],
+      "req_spans": [],
+      "branches": [
+        [
+          "r.b1.b0.b0",
+          "proof_coverage/studies/analysis_v01/recursion.rs:10:8: 10:14 (#0)"
+        ]
+      ],
+      "synthetic_bindings": [
+        "r.b0",
+        "r.b1.b0.b0.t",
+        "r.b1.b0.b0.e.b0.b2.b0",
+        "r.b1.b0.b0.e.b1"
+      ],
+      "param_spans": [
+        "proof_coverage/studies/analysis_v01/recursion.rs:5:15: 5:21 (#0)"
+      ],
+      "loops": []
+    }
+  ],
+  "source_functions": [
+    {
+      "fun": "vstd::function::axiom_fn_mut_call_requires",
+      "friendly": "vstd::function::axiom_fn_mut_call_requires",
+      "krate": "vstd",
+      "local": false,
+      "mode": "proof",
+      "kind": {
+        "kind": "static"
+      },
+      "item": "function",
+      "module": "vstd::function",
+      "visibility": {
+        "scope": "public"
+      },
+      "body_visibility": {
+        "body": "visible",
+        "visibility": {
+          "scope": "restricted",
+          "module": "vstd::function"
+        }
+      },
+      "opaqueness": {
+        "opaqueness": "opaque"
+      },
+      "has_body": false,
+      "external_body": true,
+      "broadcast": true,
+      "span": "vstd/function.rs:135:1: 138:2 (#0)"
+    },
+    {
+      "fun": "vstd::function::axiom_fn_mut_call_ensures",
+      "friendly": "vstd::function::axiom_fn_mut_call_ensures",
+      "krate": "vstd",
+      "local": false,
+      "mode": "proof",
+      "kind": {
+        "kind": "static"
+      },
+      "item": "function",
+      "module": "vstd::function",
+      "visibility": {
+        "scope": "public"
+      },
+      "body_visibility": {
+        "body": "visible",
+        "visibility": {
+          "scope": "restricted",
+          "module": "vstd::function"
+        }
+      },
+      "opaqueness": {
+        "opaqueness": "opaque"
+      },
+      "has_body": false,
+      "external_body": true,
+      "broadcast": true,
+      "span": "vstd/function.rs:145:1: 149:2 (#0)"
+    },
+    {
+      "fun": "recursion::self_count",
+      "friendly": "recursion::self_count",
+      "krate": "recursion",
+      "local": true,
+      "mode": "exec",
+      "kind": {
+        "kind": "static"
+      },
+      "item": "function",
+      "module": "recursion",
+      "visibility": {
+        "scope": "restricted",
+        "module": "recursion"
+      },
+      "body_visibility": {
+        "body": "visible",
+        "visibility": {
+          "scope": "restricted",
+          "module": "recursion"
+        }
+      },
+      "opaqueness": {
+        "opaqueness": "opaque"
+      },
+      "has_body": true,
+      "external_body": false,
+      "broadcast": false,
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:5:1: 5:33 (#0)"
+    },
+    {
+      "fun": "recursion::parity",
+      "friendly": "recursion::parity",
+      "krate": "recursion",
+      "local": true,
+      "mode": "spec",
+      "kind": {
+        "kind": "static"
+      },
+      "item": "function",
+      "module": "recursion",
+      "visibility": {
+        "scope": "restricted",
+        "module": "recursion"
+      },
+      "body_visibility": {
+        "body": "visible",
+        "visibility": {
+          "scope": "restricted",
+          "module": "recursion"
+        }
+      },
+      "opaqueness": {
+        "opaqueness": "revealed",
+        "visibility": {
+          "scope": "restricted",
+          "module": "recursion"
+        }
+      },
+      "has_body": true,
+      "external_body": false,
+      "broadcast": false,
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:13:6: 13:31 (#0)"
+    },
+    {
+      "fun": "recursion::even_p",
+      "friendly": "recursion::even_p",
+      "krate": "recursion",
+      "local": true,
+      "mode": "proof",
+      "kind": {
+        "kind": "static"
+      },
+      "item": "function",
+      "module": "recursion",
+      "visibility": {
+        "scope": "restricted",
+        "module": "recursion"
+      },
+      "body_visibility": {
+        "body": "visible",
+        "visibility": {
+          "scope": "restricted",
+          "module": "recursion"
+        }
+      },
+      "opaqueness": {
+        "opaqueness": "opaque"
+      },
+      "has_body": true,
+      "external_body": false,
+      "broadcast": false,
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:19:7: 19:24 (#0)"
+    },
+    {
+      "fun": "recursion::odd_p",
+      "friendly": "recursion::odd_p",
+      "krate": "recursion",
+      "local": true,
+      "mode": "proof",
+      "kind": {
+        "kind": "static"
+      },
+      "item": "function",
+      "module": "recursion",
+      "visibility": {
+        "scope": "restricted",
+        "module": "recursion"
+      },
+      "body_visibility": {
+        "body": "visible",
+        "visibility": {
+          "scope": "restricted",
+          "module": "recursion"
+        }
+      },
+      "opaqueness": {
+        "opaqueness": "opaque"
+      },
+      "has_body": true,
+      "external_body": false,
+      "broadcast": false,
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:31:7: 31:23 (#0)"
+    }
+  ],
+  "queries": [
+    {
+      "id": 0,
+      "family": "batch",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "recursion::parity",
+      "desc": "function body check",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:13:6: 13:31 (#0)",
+      "ambient_batches": 21,
+      "occurrences": [
+        {
+          "path": "local._",
+          "role": "premise",
+          "carrier": "axiom(query_local)",
+          "origin": {
+            "kind": "generated",
+            "detail": "fuel"
+          },
+          "emission": {
+            "kind": "fuel",
+            "site": "function"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:13:6: 13:31 (#0)",
+          "label": "pc%0%local%0",
+          "rule": "sst.emitted_local_axiom"
+        },
+        {
+          "path": "local._",
+          "role": "premise",
+          "carrier": "axiom(query_local)",
+          "origin": {
+            "kind": "generated",
+            "detail": "type_invariant"
+          },
+          "emission": {
+            "kind": "type_invariant",
+            "site": "parameter"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:13:16: 13:22 (#0)",
+          "label": "pc%0%local%1",
+          "rule": "sst.emitted_local_axiom"
+        },
+        {
+          "path": "b1",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "sst:VarEquality"
+          },
+          "emission": {
+            "kind": "assignment_equality"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:15:1: 17:2 (#0)",
+          "label": "pc%0%0",
+          "node": "r.b0",
+          "rule": "sst.exact_lowering"
+        },
+        {
+          "path": "b2.s0.b0",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "branch_condition"
+          },
+          "emission": {
+            "kind": "branch_condition",
+            "arm": 0
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:16:5: 16:56 (#0)",
+          "label": "pc%0%1",
+          "node": "r.b2.b0.b0",
+          "rule": "sst.emitted_slot"
+        },
+        {
+          "path": "b2.s0.b1",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "sst:VarEquality"
+          },
+          "emission": {
+            "kind": "assignment_equality"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:16:5: 16:56 (#0)",
+          "label": "pc%0%2",
+          "node": "r.b2.b0.b0.t",
+          "rule": "sst.exact_lowering"
+        },
+        {
+          "path": "b2.s1.b0",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "branch_condition"
+          },
+          "emission": {
+            "kind": "branch_condition",
+            "arm": 1
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:16:5: 16:56 (#0)",
+          "label": "pc%0%3",
+          "node": "r.b2.b0.b0",
+          "rule": "sst.emitted_slot"
+        },
+        {
+          "path": "b2.s1.b1",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "sst:VarEquality"
+          },
+          "emission": {
+            "kind": "assignment_equality"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:16:39: 16:46 (#0)",
+          "label": "pc%0%4",
+          "node": "r.b2.b0.b0.e.b0.b0.b0",
+          "rule": "sst.exact_lowering"
+        },
+        {
+          "path": "b2.s1.b2",
+          "role": "obligation",
+          "carrier": "assert",
+          "origin": {
+            "kind": "generated",
+            "detail": "decreases"
+          },
+          "emission": {
+            "kind": "termination_check",
+            "at": "function"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:16:32: 16:54 (#0)",
+          "label": "pc%0%5",
+          "node": "r.b2.b0.b0.e.b0.b0.b1.b0",
+          "artifact": "recursion::parity#dec",
+          "rule": "msg.obligation_note",
+          "join_rule": "join.decreases_measure"
+        },
+        {
+          "path": "b2.s1.b4",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "generated",
+            "detail": "sst:HasType"
+          },
+          "emission": {
+            "kind": "has_type"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:16:32: 16:54 (#0)",
+          "label": "pc%0%6",
+          "node": "r.b2.b0.b0.e.b0.b0.b1.b2",
+          "rule": "sst.exact_lowering"
+        },
+        {
+          "path": "b2.s1.b5",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "sst:VarEquality"
+          },
+          "emission": {
+            "kind": "assignment_equality"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:16:32: 16:54 (#0)",
+          "label": "pc%0%7",
+          "node": "r.b2.b0.b0.e.b0.b1",
+          "rule": "sst.exact_lowering"
+        },
+        {
+          "path": "b2.s1.b6",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "sst:VarEquality"
+          },
+          "emission": {
+            "kind": "assignment_equality"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:16:5: 16:56 (#0)",
+          "label": "pc%0%8",
+          "node": "r.b2.b0.b0.e.b1",
+          "rule": "sst.exact_lowering"
+        }
+      ],
+      "results": [],
+      "shadow_result": "canonical_missing",
+      "core": null
+    },
+    {
+      "id": 1,
+      "family": "focused",
+      "parent": 0,
+      "parent_obligation_label": "pc%0%5",
+      "target_label": "pc%0%t%0%0",
+      "terminal_path": "",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "recursion::parity",
+      "desc": "function body check",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:13:6: 13:31 (#0)",
+      "ambient_batches": 21,
+      "available": [
+        "pc%0%0",
+        "pc%0%3",
+        "pc%0%4",
+        "pc%0%local%0",
+        "pc%0%local%1",
+        "pc%0%t%0%0"
+      ],
+      "occurrences": [],
+      "results": [],
+      "shadow_result": "canonical_missing",
+      "core": null
+    },
+    {
+      "id": 2,
+      "family": "batch",
+      "function_variant": "pc_fv%e00276cf850b123e3e5813a1f41b7ae6464da09d0d780dd1d8265558be20adb5",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "recursion::self_count",
+      "desc": "function body check",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:5:1: 5:33 (#0)",
+      "ambient_batches": 35,
+      "occurrences": [
+        {
+          "path": "local._",
+          "role": "premise",
+          "carrier": "axiom(query_local)",
+          "origin": {
+            "kind": "generated",
+            "detail": "fuel"
+          },
+          "emission": {
+            "kind": "fuel",
+            "site": "function"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:5:1: 5:33 (#0)",
+          "label": "pc%2%local%0",
+          "rule": "sst.emitted_local_axiom"
+        },
+        {
+          "path": "local._",
+          "role": "premise",
+          "carrier": "axiom(query_local)",
+          "origin": {
+            "kind": "generated",
+            "detail": "type_invariant"
+          },
+          "emission": {
+            "kind": "type_invariant",
+            "site": "parameter"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:5:15: 5:21 (#0)",
+          "label": "pc%2%local%1",
+          "rule": "sst.emitted_local_axiom"
+        },
+        {
+          "path": "b1",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "sst:VarEquality"
+          },
+          "emission": {
+            "kind": "assignment_equality"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:9:1: 11:2 (#0)",
+          "label": "pc%2%0",
+          "node": "r.b0",
+          "rule": "sst.exact_lowering"
+        },
+        {
+          "path": "b2.s0.b0",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "branch_condition"
+          },
+          "emission": {
+            "kind": "branch_condition",
+            "arm": 0
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:5: 10:47 (#0)",
+          "label": "pc%2%1",
+          "node": "r.b1.b0.b0",
+          "artifact": "recursion::self_count#branch.src0",
+          "rule": "sst.emitted_slot",
+          "join_rule": "join.source_provenance"
+        },
+        {
+          "path": "b2.s0.b1",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "sst:VarEquality"
+          },
+          "emission": {
+            "kind": "assignment_equality"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:5: 10:47 (#0)",
+          "label": "pc%2%2",
+          "node": "r.b1.b0.b0.t",
+          "artifact": "recursion::self_count#return.src0",
+          "rule": "sst.exact_lowering",
+          "join_rule": "join.source_provenance"
+        },
+        {
+          "path": "b2.s1.b0",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "branch_condition"
+          },
+          "emission": {
+            "kind": "branch_condition",
+            "arm": 1
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:5: 10:47 (#0)",
+          "label": "pc%2%3",
+          "node": "r.b1.b0.b0",
+          "artifact": "recursion::self_count#branch.src0",
+          "rule": "sst.emitted_slot",
+          "join_rule": "join.source_provenance"
+        },
+        {
+          "path": "b2.s1.b1",
+          "role": "obligation",
+          "carrier": "assert",
+          "origin": {
+            "kind": "generated",
+            "detail": "arith_overflow_check"
+          },
+          "emission": {
+            "kind": "arith_overflow_check"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:39: 10:44 (#0)",
+          "assert_id": "[0]",
+          "label": "pc%2%4",
+          "node": "r.b1.b0.b0.e.b0.b0",
+          "rule": "msg.obligation_note"
+        },
+        {
+          "path": "b2.s1.b2",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "generated",
+            "detail": "type_invariant"
+          },
+          "emission": {
+            "kind": "type_invariant",
+            "site": "statement"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:39: 10:44 (#0)",
+          "label": "pc%2%5",
+          "node": "r.b1.b0.b0.e.b0.b1",
+          "rule": "air.type_invariant"
+        },
+        {
+          "path": "b2.s1.b3",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "sst:VarEquality"
+          },
+          "emission": {
+            "kind": "assignment_equality"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:39: 10:44 (#0)",
+          "label": "pc%2%6",
+          "node": "r.b1.b0.b0.e.b0.b2.b0",
+          "rule": "sst.exact_lowering"
+        },
+        {
+          "path": "b2.s1.b4",
+          "role": "obligation",
+          "carrier": "assert",
+          "origin": {
+            "kind": "generated",
+            "detail": "decreases"
+          },
+          "emission": {
+            "kind": "termination_check",
+            "at": "function"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:28: 10:45 (#0)",
+          "label": "pc%2%7",
+          "node": "r.b1.b0.b0.e.b0.b2.b1.b0",
+          "artifact": "recursion::self_count#dec",
+          "rule": "msg.obligation_note",
+          "join_rule": "join.decreases_measure"
+        },
+        {
+          "path": "b2.s1.b5.b0",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "source",
+            "detail": "ensures_of:recursion::self_count"
+          },
+          "emission": {
+            "kind": "call_postcondition",
+            "callee": "recursion::self_count"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:28: 10:45 (#0)",
+          "label": "pc%2%8",
+          "node": "r.b1.b0.b0.e.b0.b2.b1.b1",
+          "artifact": "recursion::self_count#ens",
+          "rule": "air.callee_ensures",
+          "join_rule": "join.contract_aggregate"
+        },
+        {
+          "path": "b2.s1.b6",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "sst:VarEquality"
+          },
+          "emission": {
+            "kind": "assignment_equality"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:5: 10:47 (#0)",
+          "label": "pc%2%9",
+          "node": "r.b1.b0.b0.e.b1",
+          "artifact": "recursion::self_count#return.src0",
+          "rule": "sst.exact_lowering",
+          "join_rule": "join.source_provenance"
+        },
+        {
+          "path": "b3",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "sst:VarEquality"
+          },
+          "emission": {
+            "kind": "assignment_equality"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:5: 10:47 (#0)",
+          "label": "pc%2%10",
+          "node": "r.b1.b1",
+          "artifact": "recursion::self_count#return.src0",
+          "rule": "sst.exact_lowering",
+          "join_rule": "join.source_provenance"
+        },
+        {
+          "path": "b4",
+          "role": "obligation",
+          "carrier": "assert",
+          "origin": {
+            "kind": "source",
+            "detail": "ensures"
+          },
+          "emission": {
+            "kind": "function_ensures"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:7:9: 7:15 (#0)",
+          "assert_id": "[2]",
+          "label": "pc%2%11",
+          "node": "exit",
+          "artifact": "recursion::self_count#ens[0]",
+          "rule": "msg.obligation_note",
+          "join_rule": "join.clause_span"
+        }
+      ],
+      "results": [
+        "valid"
+      ],
+      "shadow_result": "valid",
+      "evidence_backend": "unsat_core",
+      "core": [
+        "pc%2%0",
+        "pc%2%1",
+        "pc%2%10",
+        "pc%2%11",
+        "pc%2%2",
+        "pc%2%3",
+        "pc%2%4",
+        "pc%2%6",
+        "pc%2%7",
+        "pc%2%8",
+        "pc%2%9",
+        "pc%2%local%1",
+        "pc_a%53155ead4e6841b6a9602a2471ffb003"
+      ]
+    },
+    {
+      "id": 3,
+      "family": "focused",
+      "parent": 2,
+      "parent_obligation_label": "pc%2%4",
+      "target_label": "pc%2%t%0%0",
+      "terminal_path": "",
+      "function_variant": "pc_fv%e00276cf850b123e3e5813a1f41b7ae6464da09d0d780dd1d8265558be20adb5",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "recursion::self_count",
+      "desc": "function body check",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:5:1: 5:33 (#0)",
+      "ambient_batches": 35,
+      "available": [
+        "pc%2%0",
+        "pc%2%3",
+        "pc%2%local%0",
+        "pc%2%local%1",
+        "pc%2%t%0%0"
+      ],
+      "occurrences": [],
+      "results": [],
+      "shadow_result": "valid",
+      "evidence_backend": "unsat_core",
+      "core": [
+        "pc%2%3",
+        "pc%2%local%1",
+        "pc%2%t%0%0"
+      ]
+    },
+    {
+      "id": 4,
+      "family": "focused",
+      "parent": 2,
+      "parent_obligation_label": "pc%2%7",
+      "target_label": "pc%2%t%1%0",
+      "terminal_path": "",
+      "function_variant": "pc_fv%e00276cf850b123e3e5813a1f41b7ae6464da09d0d780dd1d8265558be20adb5",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "recursion::self_count",
+      "desc": "function body check",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:5:1: 5:33 (#0)",
+      "ambient_batches": 35,
+      "available": [
+        "pc%2%0",
+        "pc%2%3",
+        "pc%2%5",
+        "pc%2%6",
+        "pc%2%local%0",
+        "pc%2%local%1",
+        "pc%2%t%1%0"
+      ],
+      "occurrences": [],
+      "results": [],
+      "shadow_result": "valid",
+      "evidence_backend": "unsat_core",
+      "core": [
+        "pc%2%0",
+        "pc%2%5",
+        "pc%2%6",
+        "pc%2%t%1%0"
+      ]
+    },
+    {
+      "id": 5,
+      "family": "focused",
+      "parent": 2,
+      "parent_obligation_label": "pc%2%11",
+      "target_label": "pc%2%t%2%0",
+      "terminal_path": "",
+      "function_variant": "pc_fv%e00276cf850b123e3e5813a1f41b7ae6464da09d0d780dd1d8265558be20adb5",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "recursion::self_count",
+      "desc": "function body check",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:5:1: 5:33 (#0)",
+      "ambient_batches": 35,
+      "available": [
+        "pc%2%0",
+        "pc%2%1",
+        "pc%2%10",
+        "pc%2%2",
+        "pc%2%3",
+        "pc%2%5",
+        "pc%2%6",
+        "pc%2%8",
+        "pc%2%9",
+        "pc%2%local%0",
+        "pc%2%local%1",
+        "pc%2%t%2%0"
+      ],
+      "occurrences": [],
+      "results": [],
+      "shadow_result": "valid",
+      "evidence_backend": "unsat_core",
+      "core": [
+        "pc%2%10",
+        "pc%2%2",
+        "pc%2%6",
+        "pc%2%8",
+        "pc%2%9",
+        "pc%2%t%2%0",
+        "pc_a%53155ead4e6841b6a9602a2471ffb003"
+      ]
+    },
+    {
+      "id": 6,
+      "family": "batch",
+      "function_variant": "pc_fv%9aff905762b21be38fbc0de4a3f463ff595582b46f10a536a053489972e654ab",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "recursion::odd_p",
+      "desc": "function body check",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:31:7: 31:23 (#0)",
+      "ambient_batches": 38,
+      "occurrences": [
+        {
+          "path": "local._",
+          "role": "premise",
+          "carrier": "axiom(query_local)",
+          "origin": {
+            "kind": "generated",
+            "detail": "fuel"
+          },
+          "emission": {
+            "kind": "fuel",
+            "site": "function"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:31:7: 31:23 (#0)",
+          "label": "pc%6%local%0",
+          "rule": "sst.emitted_local_axiom"
+        },
+        {
+          "path": "local._",
+          "role": "premise",
+          "carrier": "axiom(query_local)",
+          "origin": {
+            "kind": "generated",
+            "detail": "type_invariant"
+          },
+          "emission": {
+            "kind": "type_invariant",
+            "site": "parameter"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:31:16: 31:22 (#0)",
+          "label": "pc%6%local%1",
+          "rule": "sst.emitted_local_axiom"
+        },
+        {
+          "path": "local._",
+          "role": "premise",
+          "carrier": "axiom(query_local)",
+          "origin": {
+            "kind": "source",
+            "detail": "requires[0]"
+          },
+          "emission": {
+            "kind": "function_requires",
+            "clause": 0
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:33:9: 33:19 (#0)",
+          "label": "pc%6%local%2",
+          "artifact": "recursion::odd_p#req[0]",
+          "rule": "sst.emitted_local_axiom",
+          "join_rule": "join.emitted_clause"
+        },
+        {
+          "path": "b1",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "sst:VarEquality"
+          },
+          "emission": {
+            "kind": "assignment_equality"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:37:1: 41:2 (#0)",
+          "label": "pc%6%0",
+          "node": "r.b0",
+          "rule": "sst.exact_lowering"
+        },
+        {
+          "path": "b2.s0.b0",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "branch_condition"
+          },
+          "emission": {
+            "kind": "branch_condition",
+            "arm": 0
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:38:5: 40:6 (#0)",
+          "label": "pc%6%1",
+          "node": "r.b1.b0.b0",
+          "artifact": "recursion::odd_p#branch.src0",
+          "rule": "sst.emitted_slot",
+          "join_rule": "join.source_provenance"
+        },
+        {
+          "path": "b2.s0.b1",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "sst:VarEquality"
+          },
+          "emission": {
+            "kind": "assignment_equality"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:39:16: 39:23 (#0)",
+          "label": "pc%6%2",
+          "node": "r.b1.b0.b0.t.b0.b0",
+          "rule": "sst.exact_lowering"
+        },
+        {
+          "path": "b2.s0.b2",
+          "role": "obligation",
+          "carrier": "assert",
+          "origin": {
+            "kind": "generated",
+            "detail": "decreases"
+          },
+          "emission": {
+            "kind": "termination_check",
+            "at": "function"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:39:9: 39:31 (#0)",
+          "label": "pc%6%3",
+          "node": "r.b1.b0.b0.t.b0.b1.b0",
+          "artifact": "recursion::odd_p#dec",
+          "rule": "msg.obligation_note",
+          "join_rule": "join.decreases_measure"
+        },
+        {
+          "path": "b2.s0.b3.b0",
+          "role": "obligation",
+          "carrier": "assert",
+          "origin": {
+            "kind": "source",
+            "detail": "requires_of:recursion::even_p"
+          },
+          "emission": {
+            "kind": "call_precondition",
+            "callee": "recursion::even_p"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:39:9: 39:31 (#0)",
+          "assert_id": "[0]",
+          "label": "pc%6%4",
+          "node": "r.b1.b0.b0.t.b0.b1.b1",
+          "artifact": "recursion::even_p#req",
+          "rule": "air.callee_requires",
+          "join_rule": "join.contract_aggregate"
+        },
+        {
+          "path": "b2.s0.b3.b1",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "source",
+            "detail": "ensures_of:recursion::even_p"
+          },
+          "emission": {
+            "kind": "call_postcondition",
+            "callee": "recursion::even_p"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:39:9: 39:31 (#0)",
+          "label": "pc%6%5",
+          "node": "r.b1.b0.b0.t.b0.b1.b1",
+          "artifact": "recursion::even_p#ens",
+          "rule": "air.callee_ensures",
+          "join_rule": "join.contract_aggregate"
+        },
+        {
+          "path": "b2.s1.b0",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "branch_condition"
+          },
+          "emission": {
+            "kind": "branch_condition",
+            "arm": 1
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:38:5: 40:6 (#0)",
+          "label": "pc%6%6",
+          "node": "r.b1.b0.b0",
+          "artifact": "recursion::odd_p#branch.src0",
+          "rule": "sst.emitted_slot",
+          "join_rule": "join.source_provenance"
+        },
+        {
+          "path": "b3",
+          "role": "obligation",
+          "carrier": "assert",
+          "origin": {
+            "kind": "source",
+            "detail": "ensures"
+          },
+          "emission": {
+            "kind": "function_ensures"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:35:9: 35:19 (#0)",
+          "assert_id": "[1]",
+          "label": "pc%6%7",
+          "node": "exit",
+          "artifact": "recursion::odd_p#ens[0]",
+          "rule": "msg.obligation_note",
+          "join_rule": "join.clause_span"
+        }
+      ],
+      "results": [
+        "valid"
+      ],
+      "shadow_result": "valid",
+      "evidence_backend": "unsat_core",
+      "core": [
+        "pc%6%0",
+        "pc%6%2",
+        "pc%6%3",
+        "pc%6%4",
+        "pc%6%5",
+        "pc%6%6",
+        "pc%6%7",
+        "pc%6%local%0",
+        "pc%6%local%1",
+        "pc%6%local%2",
+        "pc_a%01908be7dfd6754c8e5ecc1dd8aca69f",
+        "pc_a%24ac1ce4bd31bd7803126aca563fee79",
+        "pc_a%313e555fc88b05229f2e67b0607bfddb",
+        "pc_a%585cddc83a8d4cb67a98432153d3cfe7",
+        "pc_a%58be8ea60ce2b9699f79cc1022501774",
+        "pc_a%d35704da09dcbfbc684fe2720fbbeebd"
+      ]
+    },
+    {
+      "id": 7,
+      "family": "focused",
+      "parent": 6,
+      "parent_obligation_label": "pc%6%3",
+      "target_label": "pc%6%t%0%0",
+      "terminal_path": "",
+      "function_variant": "pc_fv%9aff905762b21be38fbc0de4a3f463ff595582b46f10a536a053489972e654ab",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "recursion::odd_p",
+      "desc": "function body check",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:31:7: 31:23 (#0)",
+      "ambient_batches": 38,
+      "available": [
+        "pc%6%0",
+        "pc%6%1",
+        "pc%6%2",
+        "pc%6%local%0",
+        "pc%6%local%1",
+        "pc%6%local%2",
+        "pc%6%t%0%0"
+      ],
+      "occurrences": [],
+      "results": [],
+      "shadow_result": "valid",
+      "evidence_backend": "unsat_core",
+      "core": [
+        "pc%6%0",
+        "pc%6%1",
+        "pc%6%2",
+        "pc%6%t%0%0"
+      ]
+    },
+    {
+      "id": 8,
+      "family": "focused",
+      "parent": 6,
+      "parent_obligation_label": "pc%6%4",
+      "target_label": "pc%6%t%1%0",
+      "terminal_path": "",
+      "function_variant": "pc_fv%9aff905762b21be38fbc0de4a3f463ff595582b46f10a536a053489972e654ab",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "recursion::odd_p",
+      "desc": "function body check",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:31:7: 31:23 (#0)",
+      "ambient_batches": 38,
+      "available": [
+        "pc%6%0",
+        "pc%6%1",
+        "pc%6%2",
+        "pc%6%local%0",
+        "pc%6%local%1",
+        "pc%6%local%2",
+        "pc%6%t%1%0"
+      ],
+      "occurrences": [],
+      "results": [],
+      "shadow_result": "valid",
+      "evidence_backend": "unsat_core",
+      "core": [
+        "pc%6%1",
+        "pc%6%2",
+        "pc%6%local%1",
+        "pc%6%local%2",
+        "pc%6%t%1%0",
+        "pc_a%313e555fc88b05229f2e67b0607bfddb"
+      ]
+    },
+    {
+      "id": 9,
+      "family": "focused",
+      "parent": 6,
+      "parent_obligation_label": "pc%6%7",
+      "target_label": "pc%6%t%2%0",
+      "terminal_path": "",
+      "function_variant": "pc_fv%9aff905762b21be38fbc0de4a3f463ff595582b46f10a536a053489972e654ab",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "recursion::odd_p",
+      "desc": "function body check",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:31:7: 31:23 (#0)",
+      "ambient_batches": 38,
+      "available": [
+        "pc%6%0",
+        "pc%6%1",
+        "pc%6%2",
+        "pc%6%5",
+        "pc%6%6",
+        "pc%6%local%0",
+        "pc%6%local%1",
+        "pc%6%local%2",
+        "pc%6%t%2%0"
+      ],
+      "occurrences": [],
+      "results": [],
+      "shadow_result": "valid",
+      "evidence_backend": "unsat_core",
+      "core": [
+        "pc%6%2",
+        "pc%6%5",
+        "pc%6%6",
+        "pc%6%local%0",
+        "pc%6%local%1",
+        "pc%6%local%2",
+        "pc%6%t%2%0",
+        "pc_a%01908be7dfd6754c8e5ecc1dd8aca69f",
+        "pc_a%24ac1ce4bd31bd7803126aca563fee79",
+        "pc_a%585cddc83a8d4cb67a98432153d3cfe7",
+        "pc_a%58be8ea60ce2b9699f79cc1022501774",
+        "pc_a%d35704da09dcbfbc684fe2720fbbeebd"
+      ]
+    },
+    {
+      "id": 10,
+      "family": "batch",
+      "function_variant": "pc_fv%4a90d3bd6b24c6c3feb679524839ebf5afca52e244c857082ecc22627bf04136",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "recursion::even_p",
+      "desc": "function body check",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:19:7: 19:24 (#0)",
+      "ambient_batches": 38,
+      "occurrences": [
+        {
+          "path": "local._",
+          "role": "premise",
+          "carrier": "axiom(query_local)",
+          "origin": {
+            "kind": "generated",
+            "detail": "fuel"
+          },
+          "emission": {
+            "kind": "fuel",
+            "site": "function"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:19:7: 19:24 (#0)",
+          "label": "pc%10%local%0",
+          "rule": "sst.emitted_local_axiom"
+        },
+        {
+          "path": "local._",
+          "role": "premise",
+          "carrier": "axiom(query_local)",
+          "origin": {
+            "kind": "generated",
+            "detail": "type_invariant"
+          },
+          "emission": {
+            "kind": "type_invariant",
+            "site": "parameter"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:19:17: 19:23 (#0)",
+          "label": "pc%10%local%1",
+          "rule": "sst.emitted_local_axiom"
+        },
+        {
+          "path": "local._",
+          "role": "premise",
+          "carrier": "axiom(query_local)",
+          "origin": {
+            "kind": "source",
+            "detail": "requires[0]"
+          },
+          "emission": {
+            "kind": "function_requires",
+            "clause": 0
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:21:9: 21:19 (#0)",
+          "label": "pc%10%local%2",
+          "artifact": "recursion::even_p#req[0]",
+          "rule": "sst.emitted_local_axiom",
+          "join_rule": "join.emitted_clause"
+        },
+        {
+          "path": "b1",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "sst:VarEquality"
+          },
+          "emission": {
+            "kind": "assignment_equality"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:25:1: 29:2 (#0)",
+          "label": "pc%10%0",
+          "node": "r.b0",
+          "rule": "sst.exact_lowering"
+        },
+        {
+          "path": "b2.s0.b0",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "branch_condition"
+          },
+          "emission": {
+            "kind": "branch_condition",
+            "arm": 0
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:26:5: 28:6 (#0)",
+          "label": "pc%10%1",
+          "node": "r.b1.b0.b0",
+          "artifact": "recursion::even_p#branch.src0",
+          "rule": "sst.emitted_slot",
+          "join_rule": "join.source_provenance"
+        },
+        {
+          "path": "b2.s0.b1",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "sst:VarEquality"
+          },
+          "emission": {
+            "kind": "assignment_equality"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:27:15: 27:22 (#0)",
+          "label": "pc%10%2",
+          "node": "r.b1.b0.b0.t.b0.b0",
+          "rule": "sst.exact_lowering"
+        },
+        {
+          "path": "b2.s0.b2",
+          "role": "obligation",
+          "carrier": "assert",
+          "origin": {
+            "kind": "generated",
+            "detail": "decreases"
+          },
+          "emission": {
+            "kind": "termination_check",
+            "at": "function"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:27:9: 27:30 (#0)",
+          "label": "pc%10%3",
+          "node": "r.b1.b0.b0.t.b0.b1.b0",
+          "artifact": "recursion::even_p#dec",
+          "rule": "msg.obligation_note",
+          "join_rule": "join.decreases_measure"
+        },
+        {
+          "path": "b2.s0.b3.b0",
+          "role": "obligation",
+          "carrier": "assert",
+          "origin": {
+            "kind": "source",
+            "detail": "requires_of:recursion::odd_p"
+          },
+          "emission": {
+            "kind": "call_precondition",
+            "callee": "recursion::odd_p"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:27:9: 27:30 (#0)",
+          "assert_id": "[0]",
+          "label": "pc%10%4",
+          "node": "r.b1.b0.b0.t.b0.b1.b1",
+          "artifact": "recursion::odd_p#req",
+          "rule": "air.callee_requires",
+          "join_rule": "join.contract_aggregate"
+        },
+        {
+          "path": "b2.s0.b3.b1",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "source",
+            "detail": "ensures_of:recursion::odd_p"
+          },
+          "emission": {
+            "kind": "call_postcondition",
+            "callee": "recursion::odd_p"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:27:9: 27:30 (#0)",
+          "label": "pc%10%5",
+          "node": "r.b1.b0.b0.t.b0.b1.b1",
+          "artifact": "recursion::odd_p#ens",
+          "rule": "air.callee_ensures",
+          "join_rule": "join.contract_aggregate"
+        },
+        {
+          "path": "b2.s1.b0",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "branch_condition"
+          },
+          "emission": {
+            "kind": "branch_condition",
+            "arm": 1
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:26:5: 28:6 (#0)",
+          "label": "pc%10%6",
+          "node": "r.b1.b0.b0",
+          "artifact": "recursion::even_p#branch.src0",
+          "rule": "sst.emitted_slot",
+          "join_rule": "join.source_provenance"
+        },
+        {
+          "path": "b3",
+          "role": "obligation",
+          "carrier": "assert",
+          "origin": {
+            "kind": "source",
+            "detail": "ensures"
+          },
+          "emission": {
+            "kind": "function_ensures"
+          },
+          "span": "proof_coverage/studies/analysis_v01/recursion.rs:23:9: 23:18 (#0)",
+          "assert_id": "[1]",
+          "label": "pc%10%7",
+          "node": "exit",
+          "artifact": "recursion::even_p#ens[0]",
+          "rule": "msg.obligation_note",
+          "join_rule": "join.clause_span"
+        }
+      ],
+      "results": [
+        "valid"
+      ],
+      "shadow_result": "valid",
+      "evidence_backend": "unsat_core",
+      "core": [
+        "pc%10%0",
+        "pc%10%1",
+        "pc%10%2",
+        "pc%10%3",
+        "pc%10%4",
+        "pc%10%5",
+        "pc%10%6",
+        "pc%10%7",
+        "pc%10%local%0",
+        "pc%10%local%1",
+        "pc%10%local%2",
+        "pc_a%24ac1ce4bd31bd7803126aca563fee79",
+        "pc_a%585cddc83a8d4cb67a98432153d3cfe7",
+        "pc_a%58be8ea60ce2b9699f79cc1022501774",
+        "pc_a%b2924254086bbc5b9781e9dc98b5b640",
+        "pc_a%d35704da09dcbfbc684fe2720fbbeebd",
+        "pc_a%e948029b022bd1f430984bf5f63bed3f"
+      ]
+    },
+    {
+      "id": 11,
+      "family": "focused",
+      "parent": 10,
+      "parent_obligation_label": "pc%10%3",
+      "target_label": "pc%10%t%0%0",
+      "terminal_path": "",
+      "function_variant": "pc_fv%4a90d3bd6b24c6c3feb679524839ebf5afca52e244c857082ecc22627bf04136",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "recursion::even_p",
+      "desc": "function body check",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:19:7: 19:24 (#0)",
+      "ambient_batches": 38,
+      "available": [
+        "pc%10%0",
+        "pc%10%1",
+        "pc%10%2",
+        "pc%10%local%0",
+        "pc%10%local%1",
+        "pc%10%local%2",
+        "pc%10%t%0%0"
+      ],
+      "occurrences": [],
+      "results": [],
+      "shadow_result": "valid",
+      "evidence_backend": "unsat_core",
+      "core": [
+        "pc%10%0",
+        "pc%10%1",
+        "pc%10%2",
+        "pc%10%t%0%0"
+      ]
+    },
+    {
+      "id": 12,
+      "family": "focused",
+      "parent": 10,
+      "parent_obligation_label": "pc%10%4",
+      "target_label": "pc%10%t%1%0",
+      "terminal_path": "",
+      "function_variant": "pc_fv%4a90d3bd6b24c6c3feb679524839ebf5afca52e244c857082ecc22627bf04136",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "recursion::even_p",
+      "desc": "function body check",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:19:7: 19:24 (#0)",
+      "ambient_batches": 38,
+      "available": [
+        "pc%10%0",
+        "pc%10%1",
+        "pc%10%2",
+        "pc%10%local%0",
+        "pc%10%local%1",
+        "pc%10%local%2",
+        "pc%10%t%1%0"
+      ],
+      "occurrences": [],
+      "results": [],
+      "shadow_result": "valid",
+      "evidence_backend": "unsat_core",
+      "core": [
+        "pc%10%1",
+        "pc%10%2",
+        "pc%10%local%1",
+        "pc%10%local%2",
+        "pc%10%t%1%0",
+        "pc_a%e948029b022bd1f430984bf5f63bed3f"
+      ]
+    },
+    {
+      "id": 13,
+      "family": "focused",
+      "parent": 10,
+      "parent_obligation_label": "pc%10%7",
+      "target_label": "pc%10%t%2%0",
+      "terminal_path": "",
+      "function_variant": "pc_fv%4a90d3bd6b24c6c3feb679524839ebf5afca52e244c857082ecc22627bf04136",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "recursion::even_p",
+      "desc": "function body check",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:19:7: 19:24 (#0)",
+      "ambient_batches": 38,
+      "available": [
+        "pc%10%0",
+        "pc%10%1",
+        "pc%10%2",
+        "pc%10%5",
+        "pc%10%6",
+        "pc%10%local%0",
+        "pc%10%local%1",
+        "pc%10%local%2",
+        "pc%10%t%2%0"
+      ],
+      "occurrences": [],
+      "results": [],
+      "shadow_result": "valid",
+      "evidence_backend": "unsat_core",
+      "core": [
+        "pc%10%2",
+        "pc%10%5",
+        "pc%10%6",
+        "pc%10%local%0",
+        "pc%10%local%1",
+        "pc%10%t%2%0",
+        "pc_a%24ac1ce4bd31bd7803126aca563fee79",
+        "pc_a%585cddc83a8d4cb67a98432153d3cfe7",
+        "pc_a%58be8ea60ce2b9699f79cc1022501774",
+        "pc_a%b2924254086bbc5b9781e9dc98b5b640",
+        "pc_a%d35704da09dcbfbc684fe2720fbbeebd"
+      ]
+    }
+  ],
+  "ambients": [
+    {
+      "label": "pc_a%01908be7dfd6754c8e5ecc1dd8aca69f",
+      "op": "ReqEns",
+      "owner": "recursion::even_p",
+      "solver_contexts": [
+        0
+      ]
+    },
+    {
+      "label": "pc_a%24ac1ce4bd31bd7803126aca563fee79",
+      "op": "SpecDefinition",
+      "owner": "recursion::parity",
+      "solver_contexts": [
+        0
+      ]
+    },
+    {
+      "label": "pc_a%313e555fc88b05229f2e67b0607bfddb",
+      "op": "ReqEns",
+      "owner": "recursion::even_p",
+      "solver_contexts": [
+        0
+      ]
+    },
+    {
+      "label": "pc_a%53155ead4e6841b6a9602a2471ffb003",
+      "op": "ReqEns",
+      "owner": "recursion::self_count",
+      "solver_contexts": [
+        0
+      ]
+    },
+    {
+      "label": "pc_a%585cddc83a8d4cb67a98432153d3cfe7",
+      "op": "SpecDefinition",
+      "owner": "recursion::parity",
+      "solver_contexts": [
+        0
+      ]
+    },
+    {
+      "label": "pc_a%58be8ea60ce2b9699f79cc1022501774",
+      "op": "SpecDefinition",
+      "owner": "recursion::parity",
+      "solver_contexts": [
+        0
+      ]
+    },
+    {
+      "label": "pc_a%726c23e568f15f210bad3f34534591ce",
+      "op": "Broadcast",
+      "owner": "vstd::function::axiom_fn_mut_call_requires",
+      "solver_contexts": [
+        0
+      ]
+    },
+    {
+      "label": "pc_a%b2924254086bbc5b9781e9dc98b5b640",
+      "op": "ReqEns",
+      "owner": "recursion::odd_p",
+      "solver_contexts": [
+        0
+      ]
+    },
+    {
+      "label": "pc_a%bf588da22bbbe2872c581a4ccfc3cc1a",
+      "op": "Broadcast",
+      "owner": "vstd::function::axiom_fn_mut_call_ensures",
+      "solver_contexts": [
+        0
+      ]
+    },
+    {
+      "label": "pc_a%d35704da09dcbfbc684fe2720fbbeebd",
+      "op": "SpecDefinition",
+      "owner": "recursion::parity",
+      "solver_contexts": [
+        0
+      ]
+    },
+    {
+      "label": "pc_a%e948029b022bd1f430984bf5f63bed3f",
+      "op": "ReqEns",
+      "owner": "recursion::odd_p",
+      "solver_contexts": [
+        0
+      ]
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "recursion::even_p",
+      "kind": "function",
+      "owner": "recursion::even_p"
+    },
+    {
+      "id": "recursion::even_p#branch.src0",
+      "kind": "branch_condition",
+      "owner": "recursion::even_p",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:26:8: 26:13 (#0)",
+      "parent": "recursion::even_p",
+      "cfg_node": "r.b1.b0.b0"
+    },
+    {
+      "id": "recursion::even_p#call.src0",
+      "kind": "call_site",
+      "owner": "recursion::even_p",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:27:9: 27:30 (#0)",
+      "parent": "recursion::even_p",
+      "callee": "recursion::odd_p"
+    },
+    {
+      "id": "recursion::even_p#dec",
+      "kind": "decreases_aggregate",
+      "owner": "recursion::even_p",
+      "parent": "recursion::even_p"
+    },
+    {
+      "id": "recursion::even_p#dec[0]",
+      "kind": "decreases_clause",
+      "owner": "recursion::even_p",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:24:15: 24:16 (#0)",
+      "parent": "recursion::even_p#dec"
+    },
+    {
+      "id": "recursion::even_p#ens",
+      "kind": "ensures_aggregate",
+      "owner": "recursion::even_p",
+      "parent": "recursion::even_p"
+    },
+    {
+      "id": "recursion::even_p#ens[0]",
+      "kind": "ensures_clause",
+      "owner": "recursion::even_p",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:23:9: 23:18 (#0)",
+      "parent": "recursion::even_p#ens"
+    },
+    {
+      "id": "recursion::even_p#req",
+      "kind": "requires_aggregate",
+      "owner": "recursion::even_p",
+      "parent": "recursion::even_p"
+    },
+    {
+      "id": "recursion::even_p#req[0]",
+      "kind": "requires_clause",
+      "owner": "recursion::even_p",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:21:9: 21:19 (#0)",
+      "parent": "recursion::even_p#req"
+    },
+    {
+      "id": "recursion::even_p#return.src0",
+      "kind": "return_binding",
+      "owner": "recursion::even_p",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:26:5: 28:6 (#0)",
+      "parent": "recursion::even_p"
+    },
+    {
+      "id": "recursion::odd_p",
+      "kind": "function",
+      "owner": "recursion::odd_p"
+    },
+    {
+      "id": "recursion::odd_p#branch.src0",
+      "kind": "branch_condition",
+      "owner": "recursion::odd_p",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:38:8: 38:13 (#0)",
+      "parent": "recursion::odd_p",
+      "cfg_node": "r.b1.b0.b0"
+    },
+    {
+      "id": "recursion::odd_p#call.src0",
+      "kind": "call_site",
+      "owner": "recursion::odd_p",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:39:9: 39:31 (#0)",
+      "parent": "recursion::odd_p",
+      "callee": "recursion::even_p"
+    },
+    {
+      "id": "recursion::odd_p#dec",
+      "kind": "decreases_aggregate",
+      "owner": "recursion::odd_p",
+      "parent": "recursion::odd_p"
+    },
+    {
+      "id": "recursion::odd_p#dec[0]",
+      "kind": "decreases_clause",
+      "owner": "recursion::odd_p",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:36:15: 36:16 (#0)",
+      "parent": "recursion::odd_p#dec"
+    },
+    {
+      "id": "recursion::odd_p#ens",
+      "kind": "ensures_aggregate",
+      "owner": "recursion::odd_p",
+      "parent": "recursion::odd_p"
+    },
+    {
+      "id": "recursion::odd_p#ens[0]",
+      "kind": "ensures_clause",
+      "owner": "recursion::odd_p",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:35:9: 35:19 (#0)",
+      "parent": "recursion::odd_p#ens"
+    },
+    {
+      "id": "recursion::odd_p#req",
+      "kind": "requires_aggregate",
+      "owner": "recursion::odd_p",
+      "parent": "recursion::odd_p"
+    },
+    {
+      "id": "recursion::odd_p#req[0]",
+      "kind": "requires_clause",
+      "owner": "recursion::odd_p",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:33:9: 33:19 (#0)",
+      "parent": "recursion::odd_p#req"
+    },
+    {
+      "id": "recursion::odd_p#return.src0",
+      "kind": "return_binding",
+      "owner": "recursion::odd_p",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:38:5: 40:6 (#0)",
+      "parent": "recursion::odd_p"
+    },
+    {
+      "id": "recursion::parity",
+      "kind": "function",
+      "owner": "recursion::parity"
+    },
+    {
+      "id": "recursion::parity#branch.src0",
+      "kind": "branch_condition",
+      "owner": "recursion::parity",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:16:8: 16:14 (#0)",
+      "parent": "recursion::parity"
+    },
+    {
+      "id": "recursion::parity#call.src0",
+      "kind": "call_site",
+      "owner": "recursion::parity",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:16:32: 16:54 (#0)",
+      "parent": "recursion::parity",
+      "callee": "recursion::parity"
+    },
+    {
+      "id": "recursion::parity#dec",
+      "kind": "decreases_aggregate",
+      "owner": "recursion::parity",
+      "parent": "recursion::parity"
+    },
+    {
+      "id": "recursion::parity#dec[0]",
+      "kind": "decreases_clause",
+      "owner": "recursion::parity",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:14:15: 14:16 (#0)",
+      "parent": "recursion::parity#dec"
+    },
+    {
+      "id": "recursion::parity#ens",
+      "kind": "ensures_aggregate",
+      "owner": "recursion::parity",
+      "parent": "recursion::parity"
+    },
+    {
+      "id": "recursion::parity#req",
+      "kind": "requires_aggregate",
+      "owner": "recursion::parity",
+      "parent": "recursion::parity"
+    },
+    {
+      "id": "recursion::parity#return.src0",
+      "kind": "return_binding",
+      "owner": "recursion::parity",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:16:5: 16:56 (#0)",
+      "parent": "recursion::parity"
+    },
+    {
+      "id": "recursion::self_count",
+      "kind": "function",
+      "owner": "recursion::self_count"
+    },
+    {
+      "id": "recursion::self_count#branch.src0",
+      "kind": "branch_condition",
+      "owner": "recursion::self_count",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:8: 10:14 (#0)",
+      "parent": "recursion::self_count",
+      "cfg_node": "r.b1.b0.b0"
+    },
+    {
+      "id": "recursion::self_count#call.src0",
+      "kind": "call_site",
+      "owner": "recursion::self_count",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:28: 10:45 (#0)",
+      "parent": "recursion::self_count",
+      "callee": "recursion::self_count"
+    },
+    {
+      "id": "recursion::self_count#dec",
+      "kind": "decreases_aggregate",
+      "owner": "recursion::self_count",
+      "parent": "recursion::self_count"
+    },
+    {
+      "id": "recursion::self_count#dec[0]",
+      "kind": "decreases_clause",
+      "owner": "recursion::self_count",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:8:15: 8:16 (#0)",
+      "parent": "recursion::self_count#dec"
+    },
+    {
+      "id": "recursion::self_count#ens",
+      "kind": "ensures_aggregate",
+      "owner": "recursion::self_count",
+      "parent": "recursion::self_count"
+    },
+    {
+      "id": "recursion::self_count#ens[0]",
+      "kind": "ensures_clause",
+      "owner": "recursion::self_count",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:7:9: 7:15 (#0)",
+      "parent": "recursion::self_count#ens"
+    },
+    {
+      "id": "recursion::self_count#req",
+      "kind": "requires_aggregate",
+      "owner": "recursion::self_count",
+      "parent": "recursion::self_count"
+    },
+    {
+      "id": "recursion::self_count#return.src0",
+      "kind": "return_binding",
+      "owner": "recursion::self_count",
+      "span": "proof_coverage/studies/analysis_v01/recursion.rs:10:5: 10:47 (#0)",
+      "parent": "recursion::self_count"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_ensures",
+      "kind": "function",
+      "owner": "vstd::function::axiom_fn_mut_call_ensures"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_ensures#ens",
+      "kind": "ensures_aggregate",
+      "owner": "vstd::function::axiom_fn_mut_call_ensures",
+      "parent": "vstd::function::axiom_fn_mut_call_ensures"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_ensures#ens[0]",
+      "kind": "ensures_clause",
+      "owner": "vstd::function::axiom_fn_mut_call_ensures",
+      "span": "vstd/function.rs:153:9: 153:66 (#0)",
+      "parent": "vstd::function::axiom_fn_mut_call_ensures#ens"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_ensures#ens[1]",
+      "kind": "ensures_clause",
+      "owner": "vstd::function::axiom_fn_mut_call_ensures",
+      "span": "vstd/function.rs:154:9: 154:48 (#0)",
+      "parent": "vstd::function::axiom_fn_mut_call_ensures#ens"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_ensures#req",
+      "kind": "requires_aggregate",
+      "owner": "vstd::function::axiom_fn_mut_call_ensures",
+      "parent": "vstd::function::axiom_fn_mut_call_ensures"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_ensures#req[0]",
+      "kind": "requires_clause",
+      "owner": "vstd::function::axiom_fn_mut_call_ensures",
+      "span": "vstd/function.rs:151:20: 151:65 (#0)",
+      "parent": "vstd::function::axiom_fn_mut_call_ensures#req"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_requires",
+      "kind": "function",
+      "owner": "vstd::function::axiom_fn_mut_call_requires"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_requires#ens",
+      "kind": "ensures_aggregate",
+      "owner": "vstd::function::axiom_fn_mut_call_requires",
+      "parent": "vstd::function::axiom_fn_mut_call_requires"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_requires#ens[0]",
+      "kind": "ensures_clause",
+      "owner": "vstd::function::axiom_fn_mut_call_requires",
+      "span": "vstd/function.rs:142:20: 142:58 (#0)",
+      "parent": "vstd::function::axiom_fn_mut_call_requires#ens"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_requires#req",
+      "kind": "requires_aggregate",
+      "owner": "vstd::function::axiom_fn_mut_call_requires",
+      "parent": "vstd::function::axiom_fn_mut_call_requires"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_requires#req[0]",
+      "kind": "requires_clause",
+      "owner": "vstd::function::axiom_fn_mut_call_requires",
+      "span": "vstd/function.rs:140:9: 140:59 (#0)",
+      "parent": "vstd::function::axiom_fn_mut_call_requires#req"
+    }
+  ],
+  "refinements": [],
+  "derivations": [
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%4a90d3bd6b24c6c3feb679524839ebf5afca52e244c857082ecc22627bf04136:r.b0"
+      ],
+      "outputs": [
+        "pc%10%0"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%4a90d3bd6b24c6c3feb679524839ebf5afca52e244c857082ecc22627bf04136:r.b1.b0.b0"
+      ],
+      "outputs": [
+        "pc%10%1"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%4a90d3bd6b24c6c3feb679524839ebf5afca52e244c857082ecc22627bf04136:r.b1.b0.b0"
+      ],
+      "outputs": [
+        "pc%10%6"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%4a90d3bd6b24c6c3feb679524839ebf5afca52e244c857082ecc22627bf04136:r.b1.b0.b0.t.b0.b0"
+      ],
+      "outputs": [
+        "pc%10%2"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%4a90d3bd6b24c6c3feb679524839ebf5afca52e244c857082ecc22627bf04136:r.b1.b0.b0.t.b0.b1.b0"
+      ],
+      "outputs": [
+        "pc%10%3"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%4a90d3bd6b24c6c3feb679524839ebf5afca52e244c857082ecc22627bf04136:r.b1.b0.b0.t.b0.b1.b1"
+      ],
+      "outputs": [
+        "pc%10%4"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%4a90d3bd6b24c6c3feb679524839ebf5afca52e244c857082ecc22627bf04136:r.b1.b0.b0.t.b0.b1.b1"
+      ],
+      "outputs": [
+        "pc%10%5"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%4a90d3bd6b24c6c3feb679524839ebf5afca52e244c857082ecc22627bf04136:r.b1.b1"
+      ],
+      "outputs": [
+        "pc%10%7"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%9aff905762b21be38fbc0de4a3f463ff595582b46f10a536a053489972e654ab:r.b0"
+      ],
+      "outputs": [
+        "pc%6%0"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%9aff905762b21be38fbc0de4a3f463ff595582b46f10a536a053489972e654ab:r.b1.b0.b0"
+      ],
+      "outputs": [
+        "pc%6%1"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%9aff905762b21be38fbc0de4a3f463ff595582b46f10a536a053489972e654ab:r.b1.b0.b0"
+      ],
+      "outputs": [
+        "pc%6%6"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%9aff905762b21be38fbc0de4a3f463ff595582b46f10a536a053489972e654ab:r.b1.b0.b0.t.b0.b0"
+      ],
+      "outputs": [
+        "pc%6%2"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%9aff905762b21be38fbc0de4a3f463ff595582b46f10a536a053489972e654ab:r.b1.b0.b0.t.b0.b1.b0"
+      ],
+      "outputs": [
+        "pc%6%3"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%9aff905762b21be38fbc0de4a3f463ff595582b46f10a536a053489972e654ab:r.b1.b0.b0.t.b0.b1.b1"
+      ],
+      "outputs": [
+        "pc%6%4"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%9aff905762b21be38fbc0de4a3f463ff595582b46f10a536a053489972e654ab:r.b1.b0.b0.t.b0.b1.b1"
+      ],
+      "outputs": [
+        "pc%6%5"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%9aff905762b21be38fbc0de4a3f463ff595582b46f10a536a053489972e654ab:r.b1.b1"
+      ],
+      "outputs": [
+        "pc%6%7"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%e00276cf850b123e3e5813a1f41b7ae6464da09d0d780dd1d8265558be20adb5:r.b0"
+      ],
+      "outputs": [
+        "pc%2%0"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%e00276cf850b123e3e5813a1f41b7ae6464da09d0d780dd1d8265558be20adb5:r.b1.b0.b0"
+      ],
+      "outputs": [
+        "pc%2%1"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%e00276cf850b123e3e5813a1f41b7ae6464da09d0d780dd1d8265558be20adb5:r.b1.b0.b0"
+      ],
+      "outputs": [
+        "pc%2%3"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%e00276cf850b123e3e5813a1f41b7ae6464da09d0d780dd1d8265558be20adb5:r.b1.b0.b0.e.b0.b0"
+      ],
+      "outputs": [
+        "pc%2%4"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%e00276cf850b123e3e5813a1f41b7ae6464da09d0d780dd1d8265558be20adb5:r.b1.b0.b0.e.b0.b1"
+      ],
+      "outputs": [
+        "pc%2%5"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%e00276cf850b123e3e5813a1f41b7ae6464da09d0d780dd1d8265558be20adb5:r.b1.b0.b0.e.b0.b2.b0"
+      ],
+      "outputs": [
+        "pc%2%6"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%e00276cf850b123e3e5813a1f41b7ae6464da09d0d780dd1d8265558be20adb5:r.b1.b0.b0.e.b0.b2.b1.b0"
+      ],
+      "outputs": [
+        "pc%2%7"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%e00276cf850b123e3e5813a1f41b7ae6464da09d0d780dd1d8265558be20adb5:r.b1.b0.b0.e.b0.b2.b1.b1"
+      ],
+      "outputs": [
+        "pc%2%8"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%e00276cf850b123e3e5813a1f41b7ae6464da09d0d780dd1d8265558be20adb5:r.b1.b0.b0.e.b1"
+      ],
+      "outputs": [
+        "pc%2%9"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%e00276cf850b123e3e5813a1f41b7ae6464da09d0d780dd1d8265558be20adb5:r.b1.b0.b0.t"
+      ],
+      "outputs": [
+        "pc%2%2"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%e00276cf850b123e3e5813a1f41b7ae6464da09d0d780dd1d8265558be20adb5:r.b1.b1"
+      ],
+      "outputs": [
+        "pc%2%10"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%e00276cf850b123e3e5813a1f41b7ae6464da09d0d780dd1d8265558be20adb5:r.b1.b1"
+      ],
+      "outputs": [
+        "pc%2%11"
+      ]
+    },
+    {
+      "transform": "terminal_split",
+      "inputs": [
+        "pc%0%5"
+      ],
+      "outputs": [
+        "pc%0%t%0%0"
+      ]
+    },
+    {
+      "transform": "terminal_split",
+      "inputs": [
+        "pc%10%3"
+      ],
+      "outputs": [
+        "pc%10%t%0%0"
+      ]
+    },
+    {
+      "transform": "terminal_split",
+      "inputs": [
+        "pc%10%4"
+      ],
+      "outputs": [
+        "pc%10%t%1%0"
+      ]
+    },
+    {
+      "transform": "terminal_split",
+      "inputs": [
+        "pc%10%7"
+      ],
+      "outputs": [
+        "pc%10%t%2%0"
+      ]
+    },
+    {
+      "transform": "terminal_split",
+      "inputs": [
+        "pc%2%11"
+      ],
+      "outputs": [
+        "pc%2%t%2%0"
+      ]
+    },
+    {
+      "transform": "terminal_split",
+      "inputs": [
+        "pc%2%4"
+      ],
+      "outputs": [
+        "pc%2%t%0%0"
+      ]
+    },
+    {
+      "transform": "terminal_split",
+      "inputs": [
+        "pc%2%7"
+      ],
+      "outputs": [
+        "pc%2%t%1%0"
+      ]
+    },
+    {
+      "transform": "terminal_split",
+      "inputs": [
+        "pc%6%3"
+      ],
+      "outputs": [
+        "pc%6%t%0%0"
+      ]
+    },
+    {
+      "transform": "terminal_split",
+      "inputs": [
+        "pc%6%4"
+      ],
+      "outputs": [
+        "pc%6%t%1%0"
+      ]
+    },
+    {
+      "transform": "terminal_split",
+      "inputs": [
+        "pc%6%7"
+      ],
+      "outputs": [
+        "pc%6%t%2%0"
+      ]
+    }
+  ],
+  "summary": {
+    "queries": 14,
+    "premises": 37,
+    "obligations": 10,
+    "unresolved_premises": 0,
+    "unresolved_obligations": 0,
+    "unresolved_buckets": [],
+    "results": [
+      [
+        "valid",
+        4
+      ]
+    ]
+  },
+  "record_id": "pc_r%02248707d5b592be16c905e510bda4173092db251b9ce616699621304b469f41"
+}

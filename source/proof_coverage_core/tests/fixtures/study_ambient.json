@@ -1,0 +1,889 @@
+{
+  "schema": "verus-proof-coverage/1",
+  "artifact_version": "0.1",
+  "functions": [
+    {
+      "variant": "pc_fv%066983e20a10091824a1a97a6076016d79fef79a2982146dd963deab980fc5bd",
+      "fun": "ambient::double_is_even",
+      "cfg": {
+        "entry": "entry",
+        "exit": "exit",
+        "nodes": [
+          {
+            "id": "entry",
+            "kind": "entry"
+          },
+          {
+            "id": "exit",
+            "kind": "exit"
+          },
+          {
+            "id": "r.b1",
+            "kind": "return",
+            "span": "proof_coverage/studies/analysis_v01/ambient.rs:17:1: 18:2 (#0)"
+          }
+        ],
+        "edges": [
+          {
+            "from": "entry",
+            "to": "r.b1",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1",
+            "to": "exit",
+            "kind": "return"
+          },
+          {
+            "from": "r.b1",
+            "to": "exit",
+            "kind": "next"
+          }
+        ]
+      },
+      "call_sites": [],
+      "sst_assumes": [],
+      "ens_spans": [
+        "proof_coverage/studies/analysis_v01/ambient.rs:16:9: 16:38 (#0)"
+      ],
+      "req_spans": [],
+      "param_spans": [
+        "proof_coverage/studies/analysis_v01/ambient.rs:14:35: 14:41 (#0)"
+      ],
+      "loops": []
+    },
+    {
+      "variant": "pc_fv%039f77caa544697934b8e9baeb45c0bad066474cef3fe35f200e4e9fe4bb8854",
+      "fun": "ambient::uses_ambient",
+      "cfg": {
+        "entry": "entry",
+        "exit": "exit",
+        "nodes": [
+          {
+            "id": "entry",
+            "kind": "entry"
+          },
+          {
+            "id": "exit",
+            "kind": "exit"
+          },
+          {
+            "id": "r.b0.b0.b0",
+            "kind": "stmt",
+            "span": "proof_coverage/studies/analysis_v01/ambient.rs:25:5: 25:34 (#0)"
+          },
+          {
+            "id": "r.b1",
+            "kind": "return",
+            "span": "proof_coverage/studies/analysis_v01/ambient.rs:25:5: 25:34 (#0)"
+          }
+        ],
+        "edges": [
+          {
+            "from": "entry",
+            "to": "r.b0.b0.b0",
+            "kind": "next"
+          },
+          {
+            "from": "r.b0.b0.b0",
+            "to": "r.b1",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1",
+            "to": "exit",
+            "kind": "return"
+          },
+          {
+            "from": "r.b1",
+            "to": "exit",
+            "kind": "next"
+          }
+        ]
+      },
+      "call_sites": [],
+      "sst_assumes": [],
+      "ens_spans": [
+        "proof_coverage/studies/analysis_v01/ambient.rs:22:9: 22:27 (#0)",
+        "proof_coverage/studies/analysis_v01/ambient.rs:23:9: 23:27 (#0)"
+      ],
+      "req_spans": [],
+      "param_spans": [
+        "proof_coverage/studies/analysis_v01/ambient.rs:20:23: 20:29 (#0)"
+      ],
+      "loops": []
+    }
+  ],
+  "source_functions": [
+    {
+      "fun": "vstd::function::axiom_fn_mut_call_requires",
+      "friendly": "vstd::function::axiom_fn_mut_call_requires",
+      "krate": "vstd",
+      "local": false,
+      "mode": "proof",
+      "kind": {
+        "kind": "static"
+      },
+      "item": "function",
+      "module": "vstd::function",
+      "visibility": {
+        "scope": "public"
+      },
+      "body_visibility": {
+        "body": "visible",
+        "visibility": {
+          "scope": "restricted",
+          "module": "vstd::function"
+        }
+      },
+      "opaqueness": {
+        "opaqueness": "opaque"
+      },
+      "has_body": false,
+      "external_body": true,
+      "broadcast": true,
+      "span": "vstd/function.rs:135:1: 138:2 (#0)"
+    },
+    {
+      "fun": "vstd::function::axiom_fn_mut_call_ensures",
+      "friendly": "vstd::function::axiom_fn_mut_call_ensures",
+      "krate": "vstd",
+      "local": false,
+      "mode": "proof",
+      "kind": {
+        "kind": "static"
+      },
+      "item": "function",
+      "module": "vstd::function",
+      "visibility": {
+        "scope": "public"
+      },
+      "body_visibility": {
+        "body": "visible",
+        "visibility": {
+          "scope": "restricted",
+          "module": "vstd::function"
+        }
+      },
+      "opaqueness": {
+        "opaqueness": "opaque"
+      },
+      "has_body": false,
+      "external_body": true,
+      "broadcast": true,
+      "span": "vstd/function.rs:145:1: 149:2 (#0)"
+    },
+    {
+      "fun": "ambient::double",
+      "friendly": "ambient::double",
+      "krate": "ambient",
+      "local": true,
+      "mode": "spec",
+      "kind": {
+        "kind": "static"
+      },
+      "item": "function",
+      "module": "ambient",
+      "visibility": {
+        "scope": "restricted",
+        "module": "ambient"
+      },
+      "body_visibility": {
+        "body": "visible",
+        "visibility": {
+          "scope": "restricted",
+          "module": "ambient"
+        }
+      },
+      "opaqueness": {
+        "opaqueness": "revealed",
+        "visibility": {
+          "scope": "restricted",
+          "module": "ambient"
+        }
+      },
+      "has_body": true,
+      "external_body": false,
+      "broadcast": false,
+      "span": "proof_coverage/studies/analysis_v01/ambient.rs:10:6: 10:30 (#0)"
+    },
+    {
+      "fun": "ambient::double_is_even",
+      "friendly": "ambient::double_is_even",
+      "krate": "ambient",
+      "local": true,
+      "mode": "proof",
+      "kind": {
+        "kind": "static"
+      },
+      "item": "function",
+      "module": "ambient",
+      "visibility": {
+        "scope": "restricted",
+        "module": "ambient"
+      },
+      "body_visibility": {
+        "body": "visible",
+        "visibility": {
+          "scope": "restricted",
+          "module": "ambient"
+        }
+      },
+      "opaqueness": {
+        "opaqueness": "opaque"
+      },
+      "has_body": true,
+      "external_body": false,
+      "broadcast": true,
+      "span": "proof_coverage/studies/analysis_v01/ambient.rs:14:17: 14:42 (#0)"
+    },
+    {
+      "fun": "ambient::uses_ambient",
+      "friendly": "ambient::uses_ambient",
+      "krate": "ambient",
+      "local": true,
+      "mode": "proof",
+      "kind": {
+        "kind": "static"
+      },
+      "item": "function",
+      "module": "ambient",
+      "visibility": {
+        "scope": "restricted",
+        "module": "ambient"
+      },
+      "body_visibility": {
+        "body": "visible",
+        "visibility": {
+          "scope": "restricted",
+          "module": "ambient"
+        }
+      },
+      "opaqueness": {
+        "opaqueness": "opaque"
+      },
+      "has_body": true,
+      "external_body": false,
+      "broadcast": false,
+      "span": "proof_coverage/studies/analysis_v01/ambient.rs:20:7: 20:30 (#0)"
+    }
+  ],
+  "queries": [
+    {
+      "id": 0,
+      "family": "batch",
+      "function_variant": "pc_fv%066983e20a10091824a1a97a6076016d79fef79a2982146dd963deab980fc5bd",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "ambient::double_is_even",
+      "desc": "function body check",
+      "span": "proof_coverage/studies/analysis_v01/ambient.rs:14:17: 14:42 (#0)",
+      "ambient_batches": 34,
+      "occurrences": [
+        {
+          "path": "local._",
+          "role": "premise",
+          "carrier": "axiom(query_local)",
+          "origin": {
+            "kind": "generated",
+            "detail": "fuel"
+          },
+          "emission": {
+            "kind": "fuel",
+            "site": "function"
+          },
+          "span": "proof_coverage/studies/analysis_v01/ambient.rs:14:17: 14:42 (#0)",
+          "label": "pc%0%local%0",
+          "rule": "sst.emitted_local_axiom"
+        },
+        {
+          "path": "b1",
+          "role": "obligation",
+          "carrier": "assert",
+          "origin": {
+            "kind": "source",
+            "detail": "ensures"
+          },
+          "emission": {
+            "kind": "function_ensures"
+          },
+          "span": "proof_coverage/studies/analysis_v01/ambient.rs:16:9: 16:38 (#0)",
+          "assert_id": "[0]",
+          "label": "pc%0%0",
+          "node": "exit",
+          "artifact": "ambient::double_is_even#ens[0]",
+          "rule": "msg.obligation_note",
+          "join_rule": "join.clause_span"
+        }
+      ],
+      "results": [
+        "valid"
+      ],
+      "shadow_result": "valid",
+      "evidence_backend": "unsat_core",
+      "core": [
+        "pc%0%0",
+        "pc%0%local%0",
+        "pc_a%11e6ce3322fc1916112ad28793c8dd61",
+        "pc_a%ef89a4aab8a52d49d1fef098a3584158"
+      ]
+    },
+    {
+      "id": 1,
+      "family": "focused",
+      "parent": 0,
+      "parent_obligation_label": "pc%0%0",
+      "target_label": "pc%0%t%0%0",
+      "terminal_path": "",
+      "function_variant": "pc_fv%066983e20a10091824a1a97a6076016d79fef79a2982146dd963deab980fc5bd",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "ambient::double_is_even",
+      "desc": "function body check",
+      "span": "proof_coverage/studies/analysis_v01/ambient.rs:14:17: 14:42 (#0)",
+      "ambient_batches": 34,
+      "available": [
+        "pc%0%local%0",
+        "pc%0%t%0%0"
+      ],
+      "occurrences": [],
+      "results": [],
+      "shadow_result": "valid",
+      "evidence_backend": "unsat_core",
+      "core": [
+        "pc%0%local%0",
+        "pc%0%t%0%0",
+        "pc_a%11e6ce3322fc1916112ad28793c8dd61",
+        "pc_a%ef89a4aab8a52d49d1fef098a3584158"
+      ]
+    },
+    {
+      "id": 2,
+      "family": "batch",
+      "function_variant": "pc_fv%039f77caa544697934b8e9baeb45c0bad066474cef3fe35f200e4e9fe4bb8854",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "ambient::uses_ambient",
+      "desc": "function body check",
+      "span": "proof_coverage/studies/analysis_v01/ambient.rs:20:7: 20:30 (#0)",
+      "ambient_batches": 36,
+      "occurrences": [
+        {
+          "path": "local._",
+          "role": "premise",
+          "carrier": "axiom(query_local)",
+          "origin": {
+            "kind": "generated",
+            "detail": "fuel"
+          },
+          "emission": {
+            "kind": "fuel",
+            "site": "function"
+          },
+          "span": "proof_coverage/studies/analysis_v01/ambient.rs:20:7: 20:30 (#0)",
+          "label": "pc%2%local%0",
+          "rule": "sst.emitted_local_axiom"
+        },
+        {
+          "path": "b1",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "generated",
+            "detail": "fuel"
+          },
+          "emission": {
+            "kind": "fuel",
+            "site": "statement"
+          },
+          "span": "proof_coverage/studies/analysis_v01/ambient.rs:25:5: 25:34 (#0)",
+          "label": "pc%2%0",
+          "node": "r.b0.b0.b0",
+          "artifact": "ambient::uses_ambient#reveal.src0",
+          "rule": "air.fuel",
+          "join_rule": "join.source_provenance"
+        },
+        {
+          "path": "b2",
+          "role": "obligation",
+          "carrier": "assert",
+          "origin": {
+            "kind": "source",
+            "detail": "ensures"
+          },
+          "emission": {
+            "kind": "function_ensures"
+          },
+          "span": "proof_coverage/studies/analysis_v01/ambient.rs:22:9: 22:27 (#0)",
+          "assert_id": "[0]",
+          "label": "pc%2%1",
+          "node": "exit",
+          "artifact": "ambient::uses_ambient#ens[0]",
+          "rule": "msg.obligation_note",
+          "join_rule": "join.clause_span"
+        },
+        {
+          "path": "b3",
+          "role": "obligation",
+          "carrier": "assert",
+          "origin": {
+            "kind": "source",
+            "detail": "ensures"
+          },
+          "emission": {
+            "kind": "function_ensures"
+          },
+          "span": "proof_coverage/studies/analysis_v01/ambient.rs:23:9: 23:27 (#0)",
+          "assert_id": "[0]",
+          "label": "pc%2%2",
+          "node": "exit",
+          "artifact": "ambient::uses_ambient#ens[1]",
+          "rule": "msg.obligation_note",
+          "join_rule": "join.clause_span"
+        }
+      ],
+      "results": [
+        "valid"
+      ],
+      "shadow_result": "valid",
+      "evidence_backend": "unsat_core",
+      "core": [
+        "pc%2%0",
+        "pc%2%1",
+        "pc%2%2",
+        "pc%2%local%0",
+        "pc_a%11e6ce3322fc1916112ad28793c8dd61",
+        "pc_a%4472a2aec9b6cd95d72241e86c652aa0",
+        "pc_a%ef89a4aab8a52d49d1fef098a3584158"
+      ]
+    },
+    {
+      "id": 3,
+      "family": "focused",
+      "parent": 2,
+      "parent_obligation_label": "pc%2%1",
+      "target_label": "pc%2%t%0%0",
+      "terminal_path": "",
+      "function_variant": "pc_fv%039f77caa544697934b8e9baeb45c0bad066474cef3fe35f200e4e9fe4bb8854",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "ambient::uses_ambient",
+      "desc": "function body check",
+      "span": "proof_coverage/studies/analysis_v01/ambient.rs:20:7: 20:30 (#0)",
+      "ambient_batches": 36,
+      "available": [
+        "pc%2%0",
+        "pc%2%local%0",
+        "pc%2%t%0%0"
+      ],
+      "occurrences": [],
+      "results": [],
+      "shadow_result": "valid",
+      "evidence_backend": "unsat_core",
+      "core": [
+        "pc%2%local%0",
+        "pc%2%t%0%0",
+        "pc_a%11e6ce3322fc1916112ad28793c8dd61",
+        "pc_a%ef89a4aab8a52d49d1fef098a3584158"
+      ]
+    },
+    {
+      "id": 4,
+      "family": "focused",
+      "parent": 2,
+      "parent_obligation_label": "pc%2%2",
+      "target_label": "pc%2%t%1%0",
+      "terminal_path": "",
+      "function_variant": "pc_fv%039f77caa544697934b8e9baeb45c0bad066474cef3fe35f200e4e9fe4bb8854",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "ambient::uses_ambient",
+      "desc": "function body check",
+      "span": "proof_coverage/studies/analysis_v01/ambient.rs:20:7: 20:30 (#0)",
+      "ambient_batches": 36,
+      "available": [
+        "pc%2%0",
+        "pc%2%local%0",
+        "pc%2%t%1%0"
+      ],
+      "occurrences": [],
+      "results": [],
+      "shadow_result": "valid",
+      "evidence_backend": "unsat_core",
+      "core": [
+        "pc%2%0",
+        "pc%2%t%1%0",
+        "pc_a%4472a2aec9b6cd95d72241e86c652aa0"
+      ]
+    }
+  ],
+  "ambients": [
+    {
+      "label": "pc_a%11e6ce3322fc1916112ad28793c8dd61",
+      "op": "SpecDefinition",
+      "owner": "ambient::double",
+      "solver_contexts": [
+        0
+      ]
+    },
+    {
+      "label": "pc_a%3afed42632a4bca13dc31cbcc5340c70",
+      "op": "ReqEns",
+      "owner": "ambient::double_is_even",
+      "solver_contexts": [
+        0
+      ]
+    },
+    {
+      "label": "pc_a%4472a2aec9b6cd95d72241e86c652aa0",
+      "op": "Broadcast",
+      "owner": "ambient::double_is_even",
+      "solver_contexts": [
+        0
+      ]
+    },
+    {
+      "label": "pc_a%726c23e568f15f210bad3f34534591ce",
+      "op": "Broadcast",
+      "owner": "vstd::function::axiom_fn_mut_call_requires",
+      "solver_contexts": [
+        0
+      ]
+    },
+    {
+      "label": "pc_a%ada60a94501d583fa9b9874fc37119a8",
+      "op": "ReqEns",
+      "owner": "ambient::uses_ambient",
+      "solver_contexts": [
+        0
+      ]
+    },
+    {
+      "label": "pc_a%bf588da22bbbe2872c581a4ccfc3cc1a",
+      "op": "Broadcast",
+      "owner": "vstd::function::axiom_fn_mut_call_ensures",
+      "solver_contexts": [
+        0
+      ]
+    },
+    {
+      "label": "pc_a%ef89a4aab8a52d49d1fef098a3584158",
+      "op": "SpecDefinition",
+      "owner": "ambient::double",
+      "solver_contexts": [
+        0
+      ]
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "ambient::double",
+      "kind": "function",
+      "owner": "ambient::double"
+    },
+    {
+      "id": "ambient::double#ens",
+      "kind": "ensures_aggregate",
+      "owner": "ambient::double",
+      "parent": "ambient::double"
+    },
+    {
+      "id": "ambient::double#req",
+      "kind": "requires_aggregate",
+      "owner": "ambient::double",
+      "parent": "ambient::double"
+    },
+    {
+      "id": "ambient::double#return.src0",
+      "kind": "return_binding",
+      "owner": "ambient::double",
+      "span": "proof_coverage/studies/analysis_v01/ambient.rs:11:5: 11:10 (#0)",
+      "parent": "ambient::double"
+    },
+    {
+      "id": "ambient::double_is_even",
+      "kind": "function",
+      "owner": "ambient::double_is_even"
+    },
+    {
+      "id": "ambient::double_is_even#ens",
+      "kind": "ensures_aggregate",
+      "owner": "ambient::double_is_even",
+      "parent": "ambient::double_is_even"
+    },
+    {
+      "id": "ambient::double_is_even#ens[0]",
+      "kind": "ensures_clause",
+      "owner": "ambient::double_is_even",
+      "span": "proof_coverage/studies/analysis_v01/ambient.rs:16:9: 16:38 (#0)",
+      "parent": "ambient::double_is_even#ens"
+    },
+    {
+      "id": "ambient::double_is_even#req",
+      "kind": "requires_aggregate",
+      "owner": "ambient::double_is_even",
+      "parent": "ambient::double_is_even"
+    },
+    {
+      "id": "ambient::uses_ambient",
+      "kind": "function",
+      "owner": "ambient::uses_ambient"
+    },
+    {
+      "id": "ambient::uses_ambient#ens",
+      "kind": "ensures_aggregate",
+      "owner": "ambient::uses_ambient",
+      "parent": "ambient::uses_ambient"
+    },
+    {
+      "id": "ambient::uses_ambient#ens[0]",
+      "kind": "ensures_clause",
+      "owner": "ambient::uses_ambient",
+      "span": "proof_coverage/studies/analysis_v01/ambient.rs:22:9: 22:27 (#0)",
+      "parent": "ambient::uses_ambient#ens"
+    },
+    {
+      "id": "ambient::uses_ambient#ens[1]",
+      "kind": "ensures_clause",
+      "owner": "ambient::uses_ambient",
+      "span": "proof_coverage/studies/analysis_v01/ambient.rs:23:9: 23:27 (#0)",
+      "parent": "ambient::uses_ambient#ens"
+    },
+    {
+      "id": "ambient::uses_ambient#req",
+      "kind": "requires_aggregate",
+      "owner": "ambient::uses_ambient",
+      "parent": "ambient::uses_ambient"
+    },
+    {
+      "id": "ambient::uses_ambient#return.src0",
+      "kind": "return_binding",
+      "owner": "ambient::uses_ambient",
+      "span": "proof_coverage/studies/analysis_v01/ambient.rs:25:5: 25:34 (#0)",
+      "parent": "ambient::uses_ambient"
+    },
+    {
+      "id": "ambient::uses_ambient#reveal.src0",
+      "kind": "reveal",
+      "owner": "ambient::uses_ambient",
+      "span": "proof_coverage/studies/analysis_v01/ambient.rs:25:5: 25:34 (#0)",
+      "parent": "ambient::uses_ambient",
+      "cfg_node": "r.b0.b0.b0"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_ensures",
+      "kind": "function",
+      "owner": "vstd::function::axiom_fn_mut_call_ensures"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_ensures#ens",
+      "kind": "ensures_aggregate",
+      "owner": "vstd::function::axiom_fn_mut_call_ensures",
+      "parent": "vstd::function::axiom_fn_mut_call_ensures"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_ensures#ens[0]",
+      "kind": "ensures_clause",
+      "owner": "vstd::function::axiom_fn_mut_call_ensures",
+      "span": "vstd/function.rs:153:9: 153:66 (#0)",
+      "parent": "vstd::function::axiom_fn_mut_call_ensures#ens"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_ensures#ens[1]",
+      "kind": "ensures_clause",
+      "owner": "vstd::function::axiom_fn_mut_call_ensures",
+      "span": "vstd/function.rs:154:9: 154:48 (#0)",
+      "parent": "vstd::function::axiom_fn_mut_call_ensures#ens"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_ensures#req",
+      "kind": "requires_aggregate",
+      "owner": "vstd::function::axiom_fn_mut_call_ensures",
+      "parent": "vstd::function::axiom_fn_mut_call_ensures"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_ensures#req[0]",
+      "kind": "requires_clause",
+      "owner": "vstd::function::axiom_fn_mut_call_ensures",
+      "span": "vstd/function.rs:151:20: 151:65 (#0)",
+      "parent": "vstd::function::axiom_fn_mut_call_ensures#req"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_requires",
+      "kind": "function",
+      "owner": "vstd::function::axiom_fn_mut_call_requires"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_requires#ens",
+      "kind": "ensures_aggregate",
+      "owner": "vstd::function::axiom_fn_mut_call_requires",
+      "parent": "vstd::function::axiom_fn_mut_call_requires"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_requires#ens[0]",
+      "kind": "ensures_clause",
+      "owner": "vstd::function::axiom_fn_mut_call_requires",
+      "span": "vstd/function.rs:142:20: 142:58 (#0)",
+      "parent": "vstd::function::axiom_fn_mut_call_requires#ens"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_requires#req",
+      "kind": "requires_aggregate",
+      "owner": "vstd::function::axiom_fn_mut_call_requires",
+      "parent": "vstd::function::axiom_fn_mut_call_requires"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_requires#req[0]",
+      "kind": "requires_clause",
+      "owner": "vstd::function::axiom_fn_mut_call_requires",
+      "span": "vstd/function.rs:140:9: 140:59 (#0)",
+      "parent": "vstd::function::axiom_fn_mut_call_requires#req"
+    }
+  ],
+  "refinements": [],
+  "derivations": [
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%039f77caa544697934b8e9baeb45c0bad066474cef3fe35f200e4e9fe4bb8854:r.b0.b0.b0"
+      ],
+      "outputs": [
+        "pc%2%0"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%039f77caa544697934b8e9baeb45c0bad066474cef3fe35f200e4e9fe4bb8854:r.b1"
+      ],
+      "outputs": [
+        "pc%2%1"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%039f77caa544697934b8e9baeb45c0bad066474cef3fe35f200e4e9fe4bb8854:r.b1"
+      ],
+      "outputs": [
+        "pc%2%2"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%066983e20a10091824a1a97a6076016d79fef79a2982146dd963deab980fc5bd:r.b1"
+      ],
+      "outputs": [
+        "pc%0%0"
+      ]
+    },
+    {
+      "transform": "terminal_split",
+      "inputs": [
+        "pc%0%0"
+      ],
+      "outputs": [
+        "pc%0%t%0%0"
+      ]
+    },
+    {
+      "transform": "terminal_split",
+      "inputs": [
+        "pc%2%1"
+      ],
+      "outputs": [
+        "pc%2%t%0%0"
+      ]
+    },
+    {
+      "transform": "terminal_split",
+      "inputs": [
+        "pc%2%2"
+      ],
+      "outputs": [
+        "pc%2%t%1%0"
+      ]
+    }
+  ],
+  "summary": {
+    "queries": 5,
+    "premises": 3,
+    "obligations": 3,
+    "unresolved_premises": 0,
+    "unresolved_obligations": 0,
+    "unresolved_buckets": [],
+    "results": [
+      [
+        "valid",
+        2
+      ]
+    ]
+  },
+  "record_id": "pc_r%0e0745442c420a2feccfd1696dc72a51a8827687c004cb3527baf2902f155a11"
+}

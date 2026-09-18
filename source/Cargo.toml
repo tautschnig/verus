@@ -8,6 +8,8 @@ members = [
   "cargo-verus-toolchains",
   "vir",
   "vir_macros",
+  "proof_coverage",
+  "proof_coverage_core",
   "rust_verify",
   "verus",
   "rust_verify_test",
