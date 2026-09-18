@@ -122,6 +122,8 @@ pub struct ArgsX {
     pub axiom_usage_info: bool,
     pub check_api_safety: bool,
     pub no_bv_simplify: bool,
+    pub neutral_prelude: bool,
+    pub emit_smt_proofs: Option<String>,
 }
 
 impl ArgsX {
@@ -173,6 +175,8 @@ impl ArgsX {
             axiom_usage_info: Default::default(),
             check_api_safety: Default::default(),
             no_bv_simplify: Default::default(),
+            neutral_prelude: Default::default(),
+            emit_smt_proofs: Default::default(),
         }
     }
 }
@@ -422,6 +426,8 @@ pub fn parse_args_with_imports(
     const EXTENDED_AXIOM_USAGE_INFO: &str = "axiom-usage-info";
     const EXTENDED_CHECK_API_SAFETY: &str = "check-api-safety";
     const EXTENDED_NO_BV_SIMPLIFY: &str = "no-bv-simplify";
+    const EXTENDED_NEUTRAL_PRELUDE: &str = "neutral-prelude";
+    const EXTENDED_EMIT_SMT_PROOFS: &str = "emit-smt-proofs";
     const EXTENDED_KEYS: &[(&str, &str)] = &[
         (EXTENDED_IGNORE_UNEXPECTED_SMT, "Ignore unexpected SMT output"),
         (EXTENDED_DEBUG, "Enable debugging of proof failures"),
@@ -460,6 +466,14 @@ pub fn parse_args_with_imports(
         (
             EXTENDED_NO_BV_SIMPLIFY,
             "internal option to disable simplification of bit-vector assertions before sending to the SMT solver",
+        ),
+        (
+            EXTENDED_NEUTRAL_PRELUDE,
+            "Emit the solver-neutral (axiomatised) partial-order height prelude even under Z3, so the emitted SMT-LIB contains no Z3-proprietary `(_ partial-order 0)` special relation (design 05 §2.1). Also settable via VERUS_NEUTRAL_PRELUDE.",
+        ),
+        (
+            EXTENDED_EMIT_SMT_PROOFS,
+            "Write the exact cvc5-clean SMT-LIB query stream for each module to the given directory (-V emit-smt-proofs=DIR), for offline CPC proof generation and Ethos checking. Implies the neutral prelude and requires -V cvc5.",
         ),
     ];
 
@@ -867,10 +881,28 @@ pub fn parse_args_with_imports(
         axiom_usage_info: extended.contains_key(EXTENDED_AXIOM_USAGE_INFO),
         check_api_safety: extended.contains_key(EXTENDED_CHECK_API_SAFETY),
         no_bv_simplify: extended.contains_key(EXTENDED_NO_BV_SIMPLIFY),
+        neutral_prelude: extended.contains_key(EXTENDED_NEUTRAL_PRELUDE),
+        emit_smt_proofs: {
+            if let Some(v) = extended.get(EXTENDED_EMIT_SMT_PROOFS) {
+                match v {
+                    Some(dir) => Some(dir.clone()),
+                    None => error(
+                        "-V emit-smt-proofs requires a directory: -V emit-smt-proofs=DIR"
+                            .to_string(),
+                    ),
+                }
+            } else {
+                None
+            }
+        },
     };
 
     if args.compile && args.no_erasure_check {
         error("--compile and --no-erasure-check are mutually exclusive".to_string())
+    }
+
+    if args.emit_smt_proofs.is_some() && !matches!(args.solver, SmtSolver::Cvc5) {
+        error("-V emit-smt-proofs requires the cvc5 solver (pass -V cvc5)".to_string())
     }
 
     (Arc::new(args), unmatched)
