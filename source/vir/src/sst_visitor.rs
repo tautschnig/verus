@@ -466,9 +466,9 @@ pub(crate) trait Visitor<R: Returner, Err, Scope: Scoper> {
                 let exp = self.visit_exp(exp)?;
                 R::ret(|| stm_new(StmX::AssertCompute(assert_id.clone(), R::get(exp), *compute)))
             }
-            StmX::Assume(exp) => {
+            StmX::Assume(intent, exp) => {
                 let exp = self.visit_exp(exp)?;
-                R::ret(|| stm_new(StmX::Assume(R::get(exp))))
+                R::ret(|| stm_new(StmX::Assume(*intent, R::get(exp))))
             }
             StmX::Assign { lhs, rhs } => {
                 let lhs = self.visit_dest(lhs)?;

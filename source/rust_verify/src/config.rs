@@ -124,6 +124,7 @@ pub struct ArgsX {
     pub no_bv_simplify: bool,
     pub neutral_prelude: bool,
     pub emit_smt_proofs: Option<String>,
+    pub proof_coverage: bool,
 }
 
 impl ArgsX {
@@ -177,6 +178,7 @@ impl ArgsX {
             no_bv_simplify: Default::default(),
             neutral_prelude: Default::default(),
             emit_smt_proofs: Default::default(),
+            proof_coverage: Default::default(),
         }
     }
 }
@@ -428,6 +430,7 @@ pub fn parse_args_with_imports(
     const EXTENDED_NO_BV_SIMPLIFY: &str = "no-bv-simplify";
     const EXTENDED_NEUTRAL_PRELUDE: &str = "neutral-prelude";
     const EXTENDED_EMIT_SMT_PROOFS: &str = "emit-smt-proofs";
+    const EXTENDED_PROOF_COVERAGE: &str = "proof-coverage";
     const EXTENDED_KEYS: &[(&str, &str)] = &[
         (EXTENDED_IGNORE_UNEXPECTED_SMT, "Ignore unexpected SMT output"),
         (EXTENDED_DEBUG, "Enable debugging of proof failures"),
@@ -474,6 +477,10 @@ pub fn parse_args_with_imports(
         (
             EXTENDED_EMIT_SMT_PROOFS,
             "Write the exact cvc5-clean SMT-LIB query stream for each module to the given directory (-V emit-smt-proofs=DIR), for offline CPC proof generation and Ethos checking. Implies the neutral prelude and requires -V cvc5. Experimental.",
+        ),
+        (
+            EXTENDED_PROOF_COVERAGE,
+            "Observe the verification pipeline and emit proof-coverage provenance records. Experimental.",
         ),
     ];
 
@@ -895,6 +902,7 @@ pub fn parse_args_with_imports(
                 None
             }
         },
+        proof_coverage: extended.contains_key(EXTENDED_PROOF_COVERAGE),
     };
 
     if args.compile && args.no_erasure_check {

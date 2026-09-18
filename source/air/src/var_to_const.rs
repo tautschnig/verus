@@ -7,6 +7,35 @@ use indexmap::IndexMap;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+/// Which control-flow join an SSA reconciliation equality belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SsaJoin {
+    /// A `Switch` arm brought up to the versions after the switch.
+    SwitchArm(usize),
+    /// The non-breaking exit of a `Breakable`.
+    Fallthrough,
+    /// A `Break` brought up to the versions at its `Breakable`'s exit.
+    Break,
+}
+
+/// Why this pass generated an `Assume`. `source` is the process-local pointer
+/// of the *input* statement (the `Assign`, or the `Switch` / `Breakable` /
+/// `Break` at whose join the reconciliation was inserted); it is only a key
+/// for a consumer holding the same input tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SsaOrigin {
+    Assign { source: usize },
+    Reconcile { source: usize, join: SsaJoin, var: Ident, from: u32, to: u32 },
+}
+
+/// Recording sidecar: every `Assume` this pass generates, keyed by the
+/// pointer of the generated statement, in generation order. Passive: the
+/// transformation does not read it.
+#[derive(Debug, Default)]
+pub struct SsaTrace {
+    pub generated: Vec<(usize, SsaOrigin)>,
+}
+
 fn find_version(versions: &IndexMap<Ident, u32>, x: &String) -> u32 {
     *versions.get(x).unwrap_or_else(|| panic!("variable {} not declared", x))
 }
@@ -52,6 +81,9 @@ fn update_branch_to_versions(
     versions_to: &IndexMap<Ident, u32>,
     stmt: &Stmt,
     update_before: bool,
+    trace: &mut SsaTrace,
+    source: usize,
+    join: SsaJoin,
 ) -> Stmt {
     let mut branch: Vec<Stmt> = Vec::new();
     if !update_before {
@@ -63,7 +95,18 @@ fn update_branch_to_versions(
             let xk = string_var(&rename_var(x, versions_from[x]));
             let xm = string_var(&rename_var(x, versions_to[x]));
             let eq = Arc::new(ExprX::Binary(BinaryOp::Eq, xm, xk));
-            branch.push(Arc::new(StmtX::Assume(eq)));
+            let assume = Arc::new(StmtX::Assume(eq));
+            trace.generated.push((
+                Arc::as_ptr(&assume) as usize,
+                SsaOrigin::Reconcile {
+                    source,
+                    join,
+                    var: x.clone(),
+                    from: versions_from[x],
+                    to: versions_to[x],
+                },
+            ));
+            branch.push(assume);
         }
     }
     if update_before {
@@ -78,21 +121,31 @@ fn update_breaks_to_versions(
     versions_to: &IndexMap<Ident, u32>,
     break_i: &mut usize,
     stmt: &Stmt,
+    trace: &mut SsaTrace,
+    break_sources: &[usize],
 ) -> Stmt {
     match &**stmt {
         StmtX::Assume(_) | StmtX::Assert(..) => stmt.clone(),
         StmtX::Havoc(_) | StmtX::Assign(..) => stmt.clone(),
         StmtX::Snapshot(_) => stmt.clone(),
         StmtX::DeadEnd(s) => {
-            let s = update_breaks_to_versions(label, all_versions, versions_to, break_i, s);
+            let s = update_breaks_to_versions(label, all_versions, versions_to, break_i, s, trace, break_sources);
             Arc::new(StmtX::DeadEnd(s))
         }
         StmtX::Breakable(x, s) => {
-            let s = update_breaks_to_versions(label, all_versions, versions_to, break_i, s);
+            let s = update_breaks_to_versions(label, all_versions, versions_to, break_i, s, trace, break_sources);
             Arc::new(StmtX::Breakable(x.clone(), s))
         }
         StmtX::Break(x) if x == label => {
-            let s = update_branch_to_versions(&all_versions[*break_i], versions_to, &stmt, true);
+            let s = update_branch_to_versions(
+                &all_versions[*break_i],
+                versions_to,
+                &stmt,
+                true,
+                trace,
+                break_sources[*break_i - 1],
+                SsaJoin::Break,
+            );
             *break_i += 1;
             s
             // Note: after the break, we may later merge the (unreachable) path following the break
@@ -104,14 +157,14 @@ fn update_breaks_to_versions(
         StmtX::Block(ss) => {
             let mut stmts: Vec<Stmt> = Vec::new();
             for s in ss.iter() {
-                stmts.push(update_breaks_to_versions(label, all_versions, versions_to, break_i, s));
+                stmts.push(update_breaks_to_versions(label, all_versions, versions_to, break_i, s, trace, break_sources));
             }
             Arc::new(StmtX::Block(Arc::new(stmts)))
         }
         StmtX::Switch(ss) => {
             let mut stmts: Vec<Stmt> = Vec::new();
             for s in ss.iter() {
-                stmts.push(update_breaks_to_versions(label, all_versions, versions_to, break_i, s));
+                stmts.push(update_breaks_to_versions(label, all_versions, versions_to, break_i, s, trace, break_sources));
             }
             Arc::new(StmtX::Switch(Arc::new(stmts)))
         }
@@ -121,8 +174,12 @@ fn update_breaks_to_versions(
 struct LowerStmtState {
     decls: Vec<Decl>,
     break_versions: HashMap<Ident, Vec<IndexMap<Ident, u32>>>,
+    /// Input `Break` statements per label, in the same order as
+    /// `break_versions`, so a reconciliation can name the break it serves.
+    break_sources: HashMap<Ident, Vec<usize>>,
     version_decls: HashSet<Ident>,
     all_snapshots: Snapshots,
+    trace: SsaTrace,
 }
 
 fn lower_stmt(
@@ -132,6 +189,8 @@ fn lower_stmt(
     types: &HashMap<Ident, Typ>,
     stmt: &Stmt,
 ) -> Stmt {
+    // Identity of the input statement, for the trace.
+    let source = Arc::as_ptr(stmt) as usize;
     let stmt = crate::visitor::map_stmt_expr_visitor(&stmt, &mut |e| {
         lower_expr_visitor(versions, snapshots, e)
     });
@@ -151,7 +210,12 @@ fn lower_stmt(
                 StmtX::Assign(_, e) => {
                     let expr1 = Arc::new(ExprX::Var(x));
                     let expr = Arc::new(ExprX::Binary(BinaryOp::Eq, expr1, e.clone()));
-                    Arc::new(StmtX::Assume(expr))
+                    let assume = Arc::new(StmtX::Assume(expr));
+                    state
+                        .trace
+                        .generated
+                        .push((Arc::as_ptr(&assume) as usize, SsaOrigin::Assign { source }));
+                    assume
                 }
                 _ => Arc::new(StmtX::Block(Arc::new(vec![]))),
             }
@@ -170,6 +234,7 @@ fn lower_stmt(
                 .break_versions
                 .insert(label.clone(), Vec::new())
                 .map(|_| panic!("break_versions"));
+            state.break_sources.insert(label.clone(), Vec::new());
             let s = lower_stmt(state, versions, snapshots, types, s);
             // See the Switch case below.
             // This is similar to Switch, where:
@@ -182,14 +247,32 @@ fn lower_stmt(
                 state.break_versions.remove(label).expect("break_versions");
             all_versions.insert(0, versions.clone());
             update_versions_from_all_branches(&all_versions, versions);
+            let break_sources = state.break_sources.remove(label).expect("break_sources");
             let mut break_i: usize = 1;
-            let s = update_breaks_to_versions(label, &all_versions, versions, &mut break_i, &s);
+            let s = update_breaks_to_versions(
+                label,
+                &all_versions,
+                versions,
+                &mut break_i,
+                &s,
+                &mut state.trace,
+                &break_sources,
+            );
             assert!(break_i == all_versions.len());
-            let s = update_branch_to_versions(&all_versions[0], versions, &s, false);
+            let s = update_branch_to_versions(
+                &all_versions[0],
+                versions,
+                &s,
+                false,
+                &mut state.trace,
+                source,
+                SsaJoin::Fallthrough,
+            );
             Arc::new(StmtX::Breakable(label.clone(), s))
         }
         StmtX::Break(label) => {
             state.break_versions.get_mut(label).expect("break_versions").push(versions.clone());
+            state.break_sources.get_mut(label).expect("break_sources").push(source);
             stmt
         }
         StmtX::Block(ss) => {
@@ -212,14 +295,33 @@ fn lower_stmt(
             }
             update_versions_from_all_branches(&all_versions, versions);
             for i in 0..ss.len() {
-                stmts[i] = update_branch_to_versions(&all_versions[i], versions, &stmts[i], false);
+                stmts[i] = update_branch_to_versions(
+                    &all_versions[i],
+                    versions,
+                    &stmts[i],
+                    false,
+                    &mut state.trace,
+                    source,
+                    SsaJoin::SwitchArm(i),
+                );
             }
             Arc::new(StmtX::Switch(Arc::new(stmts)))
         }
     }
 }
 
-pub(crate) fn lower_query(query: &Query) -> (Query, Snapshots, Vec<Decl>) {
+/// Lower a query out of SSA form, returning the generation trace of every
+/// `Assume` the pass introduced.
+///
+/// The trace is built unconditionally, including when no observer is
+/// registered, and `Context::check_valid` drops it unless `ssa_rewrite` is set.
+/// This is the one place the tap layer does work on the canonical path: a
+/// `Vec` of one `(pointer, SsaOrigin)` per generated equality per query. Making
+/// it conditional means threading `Option<&mut SsaTrace>` through `lower_stmt`,
+/// `update_branch_to_versions` and `update_breaks_to_versions`; that was judged
+/// more trusted surface than the allocation is worth. The transformation itself
+/// is untouched either way — the trace only records what the pass already did.
+pub fn lower_query(query: &Query) -> (Query, Snapshots, Vec<Decl>, SsaTrace) {
     let QueryX { local, assertion } = &**query;
     let mut decls: Vec<Decl> = Vec::new();
     let mut versions: IndexMap<Ident, u32> = IndexMap::new();
@@ -251,8 +353,15 @@ pub(crate) fn lower_query(query: &Query) -> (Query, Snapshots, Vec<Decl>) {
             local_vars.push(decl.clone());
         }
     }
-    let mut state = LowerStmtState { decls, break_versions, version_decls, all_snapshots };
+    let mut state = LowerStmtState {
+        decls,
+        break_versions,
+        break_sources: HashMap::new(),
+        version_decls,
+        all_snapshots,
+        trace: SsaTrace::default(),
+    };
     let assertion = lower_stmt(&mut state, &mut versions, &mut snapshots, &types, assertion);
     let local = Arc::new(state.decls);
-    (Arc::new(QueryX { local, assertion }), state.all_snapshots, local_vars)
+    (Arc::new(QueryX { local, assertion }), state.all_snapshots, local_vars, state.trace)
 }

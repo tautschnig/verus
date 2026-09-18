@@ -19,6 +19,12 @@ pub struct Span {
     pub id: AstId, // arbitrary integer identifier that may be set and used in any way (e.g. as unique id, or just left as 0)
     pub data: Vec<u64>, // arbitrary integers (e.g. for serialization/deserialization)
     pub as_string: String, // if we can't print (description, raw_span), print as_string instead
+    /// Passive proof-coverage marker: `true` for spans synthesized by the
+    /// proof-coverage machinery, `false` for genuine source spans. Canonical
+    /// verification never reads it; the proof-coverage consumer uses it to
+    /// skip generated locations. Always `false` in the canonical pipeline.
+    #[serde(default)]
+    pub proof_coverage_generated: bool,
 }
 
 impl std::fmt::Debug for Span {
@@ -28,6 +34,7 @@ impl std::fmt::Debug for Span {
             .field("id", &self.id)
             .field("data", &self.data)
             .field("as_string", &self.as_string)
+            .field("proof_coverage_generated", &self.proof_coverage_generated)
             .finish()
     }
 }
@@ -238,6 +245,7 @@ impl air::messages::MessageInterface for VirMessageInterface {
                 id: 0,
                 data: Vec::new(),
                 as_string: air_span.to_owned(),
+                proof_coverage_generated: false,
             },
             note: note.to_owned(),
             is_proof_note: false,

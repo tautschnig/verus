@@ -34,7 +34,7 @@ pub(crate) fn from_raw_span(raw_span: &vir::messages::RawSpan) -> Option<Span> {
 pub(crate) fn err_air_span(span: Span) -> vir::messages::Span {
     let raw_span = to_raw_span(span);
     let as_string = format!("{:?}", span);
-    vir::messages::Span { raw_span, id: 0, data: vec![], as_string }
+    vir::messages::Span { raw_span, id: 0, data: vec![], as_string, proof_coverage_generated: false }
 }
 
 #[derive(Debug, Clone)]
@@ -293,7 +293,7 @@ impl SpanContextX {
         let id = self.get_next_span_id();
         let data = self.pack_span(span);
         let as_string = format!("{:?}", span);
-        vir::messages::Span { raw_span, id, data, as_string }
+        vir::messages::Span { raw_span, id, data, as_string, proof_coverage_generated: false }
     }
 
     pub(crate) fn from_air_span(

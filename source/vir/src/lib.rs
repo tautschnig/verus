@@ -51,6 +51,7 @@ mod inv_masks;
 pub mod layout;
 pub mod messages;
 pub mod modes;
+pub mod observer;
 pub mod opaque_type_to_air;
 pub mod patterns;
 pub mod place_preconditions;

@@ -24,11 +24,24 @@ use std::convert::TryInto;
 use std::ops::Sub;
 use std::sync::Arc;
 
+/// One bit-vector query with the passive provenance of its pieces: which
+/// requires clause (by declaring ordinal) each query-local axiom came from,
+/// and which ensures clause each assert came from. The provenance is
+/// metadata for observers; canonical verification does not read it.
+pub(crate) struct BvQuery {
+    pub query: Query,
+    pub error_desc: String,
+    /// (query-local axiom `Decl`, requires clause ordinal)
+    pub requires_axioms: Vec<(Decl, usize)>,
+    /// (assert statement, ensures clause ordinal)
+    pub ensures_asserts: Vec<(air::ast::Stmt, usize)>,
+}
+
 pub(crate) fn bv_to_queries(
     ctx: &Ctx,
     reqs: &Vec<Exp>,
     enss: &Vec<Exp>,
-) -> Result<Vec<(Query, String)>, VirErr> {
+) -> Result<Vec<BvQuery>, VirErr> {
     let mut id_idx = 0;
     let reqs = vec_map_result(reqs, |e| bv_maybe_split(ctx, &mut id_idx, e))?;
     let enss = vec_map_result(enss, |e| bv_maybe_split(ctx, &mut id_idx, e))?;
@@ -53,7 +66,7 @@ fn make_query(
     reqs: &Vec<Vec<BvSpecialized>>,
     enss: &Vec<Vec<BvSpecialized>>,
     sp: Option<u32>,
-) -> (Query, String) {
+) -> BvQuery {
     let mut requires_air: Vec<Expr> = vec![];
     let mut ensures_air: Vec<(Span, Expr)> = vec![];
     let mut all_decl_lists: Vec<&Vec<(Ident, air::ast::Typ)>> = vec![];
@@ -100,16 +113,21 @@ fn make_query(
         }
     }
 
-    for req in requires_air.iter() {
-        local.push(mk_unnamed_axiom(req.clone()));
+    let mut requires_axioms = Vec::new();
+    for (clause, req) in requires_air.iter().enumerate() {
+        let axiom = mk_unnamed_axiom(req.clone());
+        requires_axioms.push((axiom.clone(), clause));
+        local.push(axiom);
     }
 
     let mut air_body: Vec<air::ast::Stmt> = Vec::new();
-    for (span, ens) in ensures_air.iter() {
+    let mut ensures_asserts = Vec::new();
+    for (clause, (span, ens)) in ensures_air.iter().enumerate() {
         // This error seems to be ignored, the message below is the important one
         let error = error(span, format!("bitvector assertion not satisfied"));
-        let ens_stmt = air::ast::StmtX::Assert(None, error, None, ens.clone());
-        air_body.push(Arc::new(ens_stmt));
+        let ens_stmt = Arc::new(air::ast::StmtX::Assert(None, error, None, ens.clone()));
+        ensures_asserts.push((ens_stmt.clone(), clause));
+        air_body.push(ens_stmt);
     }
     let assertion = crate::sst_to_air::one_stmt(air_body);
     let query = Arc::new(QueryX { local: Arc::new(local), assertion });
@@ -118,9 +136,9 @@ fn make_query(
         None => "".to_string(),
         Some(w) => format!(" (with arch-size set to {} bits)", w),
     };
-    let error = format!("bitvector assertion not satisfied{}", special_note);
+    let error_desc = format!("bitvector assertion not satisfied{}", special_note);
 
-    (query, error)
+    BvQuery { query, error_desc, requires_axioms, ensures_asserts }
 }
 
 fn bv_maybe_split(ctx: &Ctx, id_idx: &mut u64, exp: &Exp) -> Result<Vec<BvSpecialized>, VirErr> {
