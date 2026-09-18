@@ -52,6 +52,7 @@ pub enum WarningAllow {
     UnknownAutomaticDerive,
     AutoderiveCloneWithoutSpec,
     NonExecGhostTrackedWrappers,
+    UnreachableObligation,
 }
 
 impl WarningAllow {
@@ -72,6 +73,7 @@ impl WarningAllow {
             WarningAllow::UnknownAutomaticDerive => "unknown_automatic_derive",
             WarningAllow::AutoderiveCloneWithoutSpec => "autoderive_clone_without_spec",
             WarningAllow::NonExecGhostTrackedWrappers => "non_exec_ghost_tracked_wrappers",
+            WarningAllow::UnreachableObligation => "unreachable_obligation",
         }
     }
 
@@ -92,6 +94,7 @@ impl WarningAllow {
             "unknown_automatic_derive" => Some(WarningAllow::UnknownAutomaticDerive),
             "autoderive_clone_without_spec" => Some(WarningAllow::AutoderiveCloneWithoutSpec),
             "non_exec_ghost_tracked_wrappers" => Some(WarningAllow::NonExecGhostTrackedWrappers),
+            "unreachable_obligation" => Some(WarningAllow::UnreachableObligation),
             _ => None,
         }
     }

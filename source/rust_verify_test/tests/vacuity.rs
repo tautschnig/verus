@@ -218,6 +218,128 @@ test_verify_one_file_with_options! {
 }
 
 // ----------------------------------------------------------------------------
+// Deliberate contradiction idioms suppressed by construction (items 1a and 1b), plus the
+// per-function opt-out (item 2). See `air::focus::collect_assert_ids`.
+// ----------------------------------------------------------------------------
+
+// (1a) A `proof_from_false()` call in a dead — but *satisfiable-precondition* — branch. The call
+// site is a deliberate "this arm is impossible" idiom, not accidental dead code, so it must NOT be
+// reported even though its path condition is unsatisfiable.
+test_verify_one_file_with_options! {
+    #[test] reach_idiom_proof_from_false ["-V vacuity-checks"] => verus_code! {
+        proof fn f(x: int)
+            requires x == 5,
+        {
+            if x != 5 {
+                vstd::pervasive::proof_from_false::<()>();
+            }
+        }
+    } => Ok(err) => {
+        assert!(!err.warnings.iter().any(|w| w.message.contains(UNREACHABLE_MSG)),
+            "proof_from_false idiom must not be reported: {:?}", err.warnings);
+    }
+}
+
+// (1a) Likewise for an `unreached()` call in a dead exec branch.
+test_verify_one_file_with_options! {
+    #[test] reach_idiom_unreached ["-V vacuity-checks"] => verus_code! {
+        fn f(x: u64) -> (r: u64)
+            requires x == 5,
+            ensures r == 5,
+        {
+            if x != 5 {
+                vstd::pervasive::unreached::<u64>()
+            } else {
+                5
+            }
+        }
+    } => Ok(err) => {
+        assert!(!err.warnings.iter().any(|w| w.message.contains(UNREACHABLE_MSG)),
+            "unreached idiom must not be reported: {:?}", err.warnings);
+    }
+}
+
+// (1b) An `assert(false)` closing a proof-by-contradiction branch, together with an intermediate
+// assertion that it dominates. Neither the `assert(false)` itself nor the dominated intermediate
+// assertion may be reported: both are intended steps of the contradiction, not dead code.
+test_verify_one_file_with_options! {
+    #[test] reach_idiom_assert_false_and_dominated ["-V vacuity-checks"] => verus_code! {
+        proof fn f(x: int)
+            requires x == 5,
+        {
+            if x != 5 {
+                assert(x == 99);  // intermediate step, dominated by the assert(false) below
+                assert(false);    // the intended contradiction that closes the branch
+            }
+        }
+    } => Ok(err) => {
+        assert!(!err.warnings.iter().any(|w| w.message.contains(UNREACHABLE_MSG)),
+            "assert(false) contradiction idiom (and dominated asserts) must not be reported: {:?}",
+            err.warnings);
+    }
+}
+
+// (1a + 1b) The vstd `assert(false); proof_from_false()` shape (e.g. impossible match arms in
+// seq.rs): the leading `assert(false)` and the trailing `proof_from_false` are both exempt.
+test_verify_one_file_with_options! {
+    #[test] reach_idiom_assert_false_then_pff ["-V vacuity-checks"] => verus_code! {
+        enum E { A, B }
+        proof fn f(e: E, x: int)
+            requires x == 5,
+        {
+            match e {
+                E::A => {
+                    if x != 5 {
+                        assert(false);
+                        vstd::pervasive::proof_from_false::<()>();
+                    }
+                }
+                E::B => {}
+            }
+        }
+    } => Ok(err) => {
+        assert!(!err.warnings.iter().any(|w| w.message.contains(UNREACHABLE_MSG)),
+            "assert(false);proof_from_false() idiom must not be reported: {:?}", err.warnings);
+    }
+}
+
+// (2) Opt-out: `#[verifier::allow(unreachable_obligation)]` silences the reachability warning for
+// the annotated function even for a genuinely dead obligation that would otherwise be reported.
+test_verify_one_file_with_options! {
+    #[test] reach_allow_attribute_silences ["-V vacuity-checks"] => verus_code! {
+        #[verifier::allow(unreachable_obligation)]
+        proof fn f(x: int)
+            requires x == 5,
+        {
+            if x != 5 {
+                assert(x == 99);  // genuinely dead, but silenced by the allow attribute
+            }
+        }
+    } => Ok(err) => {
+        assert!(!err.warnings.iter().any(|w| w.message.contains(UNREACHABLE_MSG)),
+            "allow(unreachable_obligation) must silence the warning: {:?}", err.warnings);
+    }
+}
+
+// Control: a genuinely dead obligation that is NOT a contradiction idiom (the branch does not end
+// in `assert(false)` and calls no `proof_from_false`/`unreached`) MUST still warn. This is the
+// boundary that keeps the lint useful: the idiom filter must not swallow real dead code.
+test_verify_one_file_with_options! {
+    #[test] reach_control_dead_not_contradiction ["-V vacuity-checks"] => verus_code! {
+        proof fn f(x: int)
+            requires x == 5,
+        {
+            if x != 5 {
+                assert(x == 99);  // dead, but no contradiction idiom: still reported
+            }
+        }
+    } => Ok(err) => {
+        assert!(err.warnings.iter().any(|w| w.message.contains(UNREACHABLE_MSG)),
+            "a genuinely dead non-idiom obligation must still be reported: {:?}", err.warnings);
+    }
+}
+
+// ----------------------------------------------------------------------------
 // Ambient-axiom consistency probe (item 2).
 // ----------------------------------------------------------------------------
 

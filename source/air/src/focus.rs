@@ -1,4 +1,7 @@
-use crate::ast::{AssertId, Command, CommandX, Commands, QueryX, Stmt, StmtX};
+use crate::ast::{
+    AssertId, AxiomInfoFilter, Command, CommandX, Commands, Constant, Expr, ExprX, QueryX, Stmt,
+    StmtX,
+};
 use crate::messages::ArcDynMessage;
 use std::sync::Arc;
 
@@ -16,14 +19,81 @@ pub fn collect_assert_ids(stmt: &Stmt, out: &mut Vec<(AssertId, ArcDynMessage)>)
     collect_assert_ids_rec(stmt, false, out)
 }
 
+/// Is `e` the literal boolean constant `false`? This is the asserted expression of a source-level
+/// `assert(false)` (see `mk_false`) and, after simplification, of any obligation that Verus lowered
+/// to a constant contradiction.
+fn is_false_expr(e: &Expr) -> bool {
+    matches!(&**e, ExprX::Const(Constant::Bool(false)))
+}
+
+/// Does this assertion's `AxiomInfoFilter` name a call to `vstd::pervasive::proof_from_false` or
+/// `vstd::pervasive::unreached`?
+///
+/// The precondition of both is `false`, so their call-site obligation is `assert(req%...)` where
+/// the substituted `req%...` unfolds to `false` — it is *not* the literal constant `false`, so
+/// `is_false_expr` cannot see it. The filter, however, carries the callee's air-encoded path
+/// (e.g. `vstd!pervasive.proof_from_false.`), which lets us recognize the call by construction.
+fn filter_is_from_false(filter: &AxiomInfoFilter) -> bool {
+    match filter {
+        Some(id) => {
+            let s: &str = id.as_str();
+            s.contains("pervasive.proof_from_false") || s.contains("pervasive.unreached")
+        }
+        None => false,
+    }
+}
+
+/// An assertion that is *definitionally* a contradiction: either an `assert(false)` or the
+/// precondition check of a `proof_from_false` / `unreached` call. Such a site is the *intended*
+/// contradiction that closes a proof-by-contradiction or an impossible match arm, never accidental
+/// dead code, so it must not be reported by the reachability probe.
+fn is_contradiction_assert(filter: &AxiomInfoFilter, e: &Expr) -> bool {
+    is_false_expr(e) || filter_is_from_false(filter)
+}
+
+/// Does executing `stmt` (on every path through it) guarantee reaching a contradiction assertion?
+/// Used to decide domination: an obligation followed, within the same branch, by a statement for
+/// which this holds is discharged only because it flows into that contradiction, i.e. it is an
+/// intermediate step of a deliberate proof-by-contradiction rather than dead code.
+fn reaches_contradiction(stmt: &Stmt) -> bool {
+    match &**stmt {
+        StmtX::Assert(_, _, filter, e) => is_contradiction_assert(filter, e),
+        StmtX::DeadEnd(s) | StmtX::Breakable(_, s) => reaches_contradiction(s),
+        // A block reaches a contradiction if any of its (sequential) statements does.
+        StmtX::Block(stmts) => stmts.iter().any(|s| reaches_contradiction(s)),
+        // A switch reaches a contradiction only if *every* branch does.
+        StmtX::Switch(stmts) => {
+            !stmts.is_empty() && stmts.iter().all(|s| reaches_contradiction(s))
+        }
+        StmtX::Assume(..)
+        | StmtX::Havoc(..)
+        | StmtX::Assign(..)
+        | StmtX::Snapshot(..)
+        | StmtX::Break(..) => false,
+    }
+}
+
+/// Collect the branch-guarded obligation sites that the reachability probe should test, filtering
+/// out the two idiom classes that are *definitionally* dead (and therefore always vacuous by
+/// design, not by mistake):
+///
+///   (1a) an obligation whose site is a `proof_from_false` / `unreached` call (recognized via its
+///        `AxiomInfoFilter`), and
+///   (1b) an `assert(false)` (recognized as the literal-`false` obligation), together with any
+///        obligation dominated by a subsequent contradiction assertion in the same branch — those
+///        are the intermediate steps of a deliberate proof-by-contradiction.
+///
+/// Doing this here, before any query is issued, both silences the lint noise and saves the solver
+/// the corresponding reachability queries.
 fn collect_assert_ids_rec(
     stmt: &Stmt,
     under_switch: bool,
     out: &mut Vec<(AssertId, ArcDynMessage)>,
 ) {
     match &**stmt {
-        StmtX::Assert(Some(assert_id), msg, _filter, _e) => {
-            if under_switch {
+        StmtX::Assert(Some(assert_id), msg, filter, e) => {
+            // (1a)/(1b) self: a contradiction assertion is the intended dead end, not dead code.
+            if under_switch && !is_contradiction_assert(filter, e) {
                 out.push((assert_id.clone(), msg.clone()));
             }
         }
@@ -35,8 +105,15 @@ fn collect_assert_ids_rec(
         | StmtX::Break(..) => {}
         StmtX::DeadEnd(s) | StmtX::Breakable(_, s) => collect_assert_ids_rec(s, under_switch, out),
         StmtX::Block(stmts) => {
-            for s in stmts.iter() {
-                collect_assert_ids_rec(s, under_switch, out);
+            for (i, s) in stmts.iter().enumerate() {
+                // (1b) domination: if a *later* statement in this block is guaranteed to reach a
+                // contradiction, every obligation in `s` flows into that contradiction and is an
+                // intended intermediate step, so skip it.
+                let dominated_by_later =
+                    stmts[i + 1..].iter().any(|later| reaches_contradiction(later));
+                if !dominated_by_later {
+                    collect_assert_ids_rec(s, under_switch, out);
+                }
             }
         }
         StmtX::Switch(stmts) => {

@@ -308,6 +308,19 @@ impl<T: std::cmp::Eq + std::hash::Hash + Clone> GraphBuilder<T> {
 }
 
 impl GlobalCtx {
+    /// Is the given `WarningAllow` opted out for `fun` (via a `#[verifier::allow(..)]` on the
+    /// function or an enclosing item)? Returns `false` for functions imported from other crates
+    /// (whose per-function config is not tracked) and for functions with no recorded config.
+    pub fn fun_allows_warning(&self, fun: &Fun, allow: &WarningAllow) -> bool {
+        match self.warning_ctx.fun_warn_configs.get(fun) {
+            Some(Some(config)) => {
+                use crate::messages::CheckAllowForWarning;
+                config.allowed(allow)
+            }
+            _ => false,
+        }
+    }
+
     pub fn new(
         krate: &Krate,
         crate_name: CrateId,
