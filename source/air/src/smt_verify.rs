@@ -228,8 +228,7 @@ pub(crate) fn smt_check_assertion<'ctx>(
     let (smt_output, secondary_output) = if cross_check {
         // The shared stream stays solver-neutral: inject the Z3-only rlimit into the primary
         // stream only, and fan the identical check-sat text to both solvers in parallel.
-        let primary_prefix =
-            format!("(set-option :rlimit {})\n", context.rlimit).into_bytes();
+        let primary_prefix = format!("(set-option :rlimit {})\n", context.rlimit).into_bytes();
         context.check_sat_fanned(smt_data, primary_prefix, report_long_running)
     } else {
         let commands_handle = context.get_smt_process().send_commands_async(smt_data);

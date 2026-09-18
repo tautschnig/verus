@@ -237,10 +237,7 @@ mod tests {
         // No recognised verdict is never mistaken for a proof.
         assert_eq!(SolverVerdict::from_lines(&["(error \"boom\")".to_string()]), Unknown);
         // Last verdict wins (e.g. push/pop bookkeeping before the real answer).
-        assert_eq!(
-            SolverVerdict::from_lines(&["sat".to_string(), "unsat".to_string()]),
-            Unsat
-        );
+        assert_eq!(SolverVerdict::from_lines(&["sat".to_string(), "unsat".to_string()]), Unsat);
     }
 
     #[test]
@@ -276,10 +273,7 @@ mod tests {
             reconcile(Warn, Unsat, Some(Unknown)),
             CrossCheckAction::UsePrimaryWithWarning(_)
         ));
-        assert!(matches!(
-            reconcile(Strict, Unsat, Some(Unknown)),
-            CrossCheckAction::HardError(_)
-        ));
+        assert!(matches!(reconcile(Strict, Unsat, Some(Unknown)), CrossCheckAction::HardError(_)));
     }
 
     #[test]

@@ -433,7 +433,12 @@ impl Context {
             }
             CrossCheckAction::HardError(reason) => {
                 let dumped = self
-                    .cross_check_dump(primary_lines, secondary_lines, primary_verdict, secondary_verdict)
+                    .cross_check_dump(
+                        primary_lines,
+                        secondary_lines,
+                        primary_verdict,
+                        secondary_verdict,
+                    )
                     .map(|p| format!("; query and both transcripts dumped to {}", p.display()))
                     .unwrap_or_default();
                 let msg = format!(
