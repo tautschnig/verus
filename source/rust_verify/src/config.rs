@@ -451,6 +451,8 @@ pub fn parse_args_with_imports(
         (
             EXTENDED_PROOF_COVERAGE,
             "Observe the verification pipeline and emit proof-coverage provenance records. Experimental.",
+        ),
+        (
             EXTENDED_VACUITY_CHECKS,
             "Warn (do not error) when a verified function's `requires` clauses are unsatisfiable, making every obligation in it vacuous. A lint; it never changes a verification verdict.",
         ),

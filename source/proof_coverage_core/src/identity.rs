@@ -53,7 +53,13 @@ pub enum QuerySiteId {
     /// The equality `var@to == var@from` the SSA pass inserts at the join of
     /// the `Switch`, `Breakable` or `Break` statement at `at`. No written
     /// statement stands behind it; the identity is the pass's own trace.
-    Reconciliation { at: String, join: SsaJoin, var: String, from: u32, to: u32 },
+    Reconciliation {
+        at: String,
+        join: SsaJoin,
+        var: String,
+        from: u32,
+        to: u32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

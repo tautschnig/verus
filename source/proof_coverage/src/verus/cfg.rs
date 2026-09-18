@@ -119,9 +119,7 @@ fn type_invariant_subject(
     use vir::sst::{CallFun, ExpX};
     match &stm.x {
         StmX::Assume(AssumeIntent::TypeInvariant, exp) => match &exp.x {
-            ExpX::Call(CallFun::Fun(fun, _), _, _) => {
-                Some(super::fun_identity(fun))
-            }
+            ExpX::Call(CallFun::Fun(fun, _), _, _) => Some(super::fun_identity(fun)),
             ExpX::Var(ident) => temps.get(ident).cloned(),
             _ => None,
         },
@@ -511,18 +509,14 @@ impl<'p> Walk<'p> {
                     }
                 }
                 let callee = match fun {
-                    vir::sst::CallTarget::Fun(f) => {
-                        Some(super::fun_identity(f))
-                    }
+                    vir::sst::CallTarget::Fun(f) => Some(super::fun_identity(f)),
                     vir::sst::CallTarget::AssumeExternal => None,
                 };
                 self.call_sites.push(CallSite {
                     node: id.clone(),
                     span: span.as_string.clone(),
                     callee,
-                    resolved_callee: resolved_method
-                        .as_ref()
-                        .map(|(f, _)| super::fun_identity(f)),
+                    resolved_callee: resolved_method.as_ref().map(|(f, _)| super::fun_identity(f)),
                 });
                 // Emplaced code executed "inside" the call (closure/atomic
                 // update machinery), between pre- and post-state.

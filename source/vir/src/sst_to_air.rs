@@ -1713,7 +1713,6 @@ impl State {
         Self::record_lowered_statement_in(provenance, stmt);
     }
 
-
     fn record_lowered_statement_in(provenance: &mut LoweringProvenanceState, stmt: &Stmt) {
         let record_self = |provenance: &mut LoweringProvenanceState| {
             let emitted_at = provenance
@@ -2014,10 +2013,11 @@ fn record_emission_slot(
     let Some(provenance) = provenance else {
         return;
     };
-    provenance
-        .slots
-        .entry(Arc::as_ptr(stmt) as usize)
-        .or_insert(EmittedClause { slot, clause, loop_id });
+    provenance.slots.entry(Arc::as_ptr(stmt) as usize).or_insert(EmittedClause {
+        slot,
+        clause,
+        loop_id,
+    });
 }
 
 /// Record which construction emitted a query-local axiom `decl`.
@@ -3070,7 +3070,13 @@ fn loop_to_stmts(
     // (These need to go after the above Havoc statements.)
     for (_, inv, _, _, clause) in invs_entry.iter() {
         let inv_stmt = Arc::new(StmtX::Assume(inv.clone()));
-        record_emission_slot(&mut state.lowering_provenance, &inv_stmt, EmissionSlot::LoopBodyEntry, Some(*clause), Some(*id));
+        record_emission_slot(
+            &mut state.lowering_provenance,
+            &inv_stmt,
+            EmissionSlot::LoopBodyEntry,
+            Some(*clause),
+            Some(*id),
+        );
         air_body.push(inv_stmt);
     }
     for dec in decrease_init.iter() {
@@ -3122,7 +3128,13 @@ fn loop_to_stmts(
                 error = error.secondary_label(span, &**msg);
             }
             let inv_stmt = Arc::new(StmtX::Assert(None, error, None, inv.clone()));
-            record_emission_slot(&mut state.lowering_provenance, &inv_stmt, EmissionSlot::LoopMaintain, Some(*clause), Some(*id));
+            record_emission_slot(
+                &mut state.lowering_provenance,
+                &inv_stmt,
+                EmissionSlot::LoopMaintain,
+                Some(*clause),
+                Some(*id),
+            );
             air_body.push(inv_stmt);
         }
         if decrease.len() > 0 {
@@ -3179,7 +3191,13 @@ fn loop_to_stmts(
                 error = error.secondary_label(span, &**msg);
             }
             let inv_stmt = Arc::new(StmtX::Assert(None, error, None, inv.clone()));
-            record_emission_slot(&mut state.lowering_provenance, &inv_stmt, EmissionSlot::LoopEstablish, Some(*clause), Some(*id));
+            record_emission_slot(
+                &mut state.lowering_provenance,
+                &inv_stmt,
+                EmissionSlot::LoopEstablish,
+                Some(*clause),
+                Some(*id),
+            );
             stmts.push(inv_stmt);
         }
     }
@@ -3193,7 +3211,13 @@ fn loop_to_stmts(
         modified_vars.emit_havocs(ctx, SNAPSHOT_LOOP, &mut stmts);
         for (_, inv, _, _, clause) in invs_exit.iter() {
             let inv_stmt = Arc::new(StmtX::Assume(inv.clone()));
-            record_emission_slot(&mut state.lowering_provenance, &inv_stmt, EmissionSlot::LoopExit, Some(*clause), Some(*id));
+            record_emission_slot(
+                &mut state.lowering_provenance,
+                &inv_stmt,
+                EmissionSlot::LoopExit,
+                Some(*clause),
+                Some(*id),
+            );
             stmts.push(inv_stmt);
         }
     }
@@ -3378,7 +3402,11 @@ pub(crate) fn body_stm_to_air(
             let mut provenance =
                 lowering_provenance_mode.is_enabled().then(LoweringProvenanceState::default);
             for (axiom, clause) in &bv.requires_axioms {
-                record_local_axiom(&mut provenance, axiom, LocalAxiomSite::Requires { clause: *clause });
+                record_local_axiom(
+                    &mut provenance,
+                    axiom,
+                    LocalAxiomSite::Requires { clause: *clause },
+                );
             }
             for (assert, clause) in &bv.ensures_asserts {
                 record_emission_slot(
@@ -3680,7 +3708,7 @@ pub(crate) fn precondition_satisfiability_to_air(
         });
     }
 
-    set_fuel(ctx, &mut local, hidden);
+    local.push(fuel_axiom(ctx, hidden));
 
     for e in crate::traits::trait_bounds_to_air(ctx, typ_bounds) {
         local.push(Arc::new(DeclX::Axiom(air::ast::Axiom { named: None, expr: e })));

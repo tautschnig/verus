@@ -21,8 +21,8 @@ use air::context::{SolverReplayConfig, ValidityResult};
 use classify::Classification;
 use record::{
     AmbientRecord, AssertQueryPoint, AssertionPoint, ContractSection, CoverageRecord, EmissionRole,
-    ForallPoint, FuelSite, FunctionRecord, InvariantBlockPoint, LoopPoint, Occurrence,
-    QueryRecord, Role, SolverConfigRecord, Summary, TypeInvariantSite,
+    ForallPoint, FuelSite, FunctionRecord, InvariantBlockPoint, LoopPoint, Occurrence, QueryRecord,
+    Role, SolverConfigRecord, Summary, TypeInvariantSite,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -93,11 +93,8 @@ impl EvidenceProgress {
         }
         let elapsed = now.duration_since(self.started);
         let elapsed_seconds = elapsed.as_secs_f64();
-        let rate = if elapsed_seconds > 0.0 {
-            self.completed as f64 / elapsed_seconds
-        } else {
-            0.0
-        };
+        let rate =
+            if elapsed_seconds > 0.0 { self.completed as f64 / elapsed_seconds } else { 0.0 };
         let eta = if rate > 0.0 {
             std::time::Duration::from_secs_f64(
                 self.total.saturating_sub(self.completed) as f64 / rate,
@@ -127,12 +124,7 @@ impl EvidenceProgress {
         } else if seconds < 60 * 60 {
             format!("{}m{:02}s", seconds / 60, seconds % 60)
         } else {
-            format!(
-                "{}h{:02}m{:02}s",
-                seconds / (60 * 60),
-                (seconds / 60) % 60,
-                seconds % 60
-            )
+            format!("{}h{:02}m{:02}s", seconds / (60 * 60), (seconds / 60) % 60, seconds % 60)
         }
     }
 }
@@ -1104,9 +1096,7 @@ impl CoverageProducer {
                 section: ContractSection::Ensures,
                 point: AssertQueryPoint::Assume,
             },
-            I::OpenedInvariant => {
-                EmissionRole::InvariantBlock { point: InvariantBlockPoint::Open }
-            }
+            I::OpenedInvariant => EmissionRole::InvariantBlock { point: InvariantBlockPoint::Open },
             I::MutRefCurrent => EmissionRole::MutRefCurrent,
             I::VarEquality => EmissionRole::AssignmentEquality,
             I::CheckedCondition
@@ -2863,8 +2853,7 @@ impl<'a> QueryWalk<'a> {
                 if class.origin.detail == "requires_of_callee" {
                     if let Some(callee) = classify::callee_of_requires(expr) {
                         class.origin.detail = format!("requires_of:{}", callee);
-                        class.role =
-                            Some(EmissionRole::CallPrecondition { callee: Some(callee) });
+                        class.role = Some(EmissionRole::CallPrecondition { callee: Some(callee) });
                         class = class.cite(rules::R_CALLEE_REQ);
                     }
                 }
@@ -3461,12 +3450,7 @@ impl VerificationObserver for CoverageProducer {
         let names = krate
             .functions
             .iter()
-            .map(|f| {
-                (
-                    name_ctxt.fun_to_string(&f.x.name),
-                    verus::fun_identity(&f.x.name),
-                )
-            })
+            .map(|f| (name_ctxt.fun_to_string(&f.x.name), verus::fun_identity(&f.x.name)))
             .collect();
         self.events.push(RawEvent::AirNames(names));
     }
