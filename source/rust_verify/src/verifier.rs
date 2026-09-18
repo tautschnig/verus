@@ -359,6 +359,11 @@ pub struct Verifier {
     warning_ctx: Option<Arc<vir::context::WarningCtx>>,
     buckets: HashMap<BucketId, Bucket>,
 
+    /// Crate-level coordinator for detached cvc5 cross-check secondaries (design 05 §2, async
+    /// variant). Shared, via `Arc`, with every per-bucket air `Context` and with the
+    /// per-thread verifier clones. `None` unless `-V cross-check[-strict]` is set.
+    cross_check_registry: Option<Arc<air::solver_set::SecondaryRegistry>>,
+
     // proof debugging purposes
     expand_flag: bool,
 
@@ -550,6 +555,8 @@ impl Verifier {
             warning_ctx: None,
             buckets: HashMap::new(),
 
+            cross_check_registry: None,
+
             expand_flag: false,
             error_format: None,
         }
@@ -598,6 +605,8 @@ impl Verifier {
             crate_items: self.crate_items.clone(),
             warning_ctx: self.warning_ctx.clone(),
             buckets: self.buckets.clone(),
+
+            cross_check_registry: self.cross_check_registry.clone(),
 
             expand_flag: self.expand_flag,
             error_format: self.error_format,
@@ -1251,17 +1260,9 @@ impl Verifier {
         if self.args.cross_check != air::solver_set::CrossCheckPolicy::Off
             && prover_choice == vir::def::ProverChoice::DefaultProver
         {
-            let cvc5_rlimit = if self.args.rlimit == f32::INFINITY {
-                0
-            } else {
-                (self.args.rlimit * RLIMIT_PER_SECOND_CVC5).min(u32::MAX as f32) as u32
-            };
-            air_context.enable_cross_check(
-                self.args.cross_check,
-                cvc5_rlimit,
-                self.args.cross_check_inject_disagreement,
-                std::path::PathBuf::from(crate::config::SOLVER_LOG_DIR),
-            );
+            if let Some(registry) = &self.cross_check_registry {
+                air_context.enable_cross_check(self.args.cross_check, Arc::clone(registry));
+            }
         }
         if !bitvector {
             air_context.set_solver_option("air_recommended_options", "true");
@@ -2163,6 +2164,50 @@ impl Verifier {
         } else {
             std::cmp::min(self.args.num_threads, bucket_ids.len())
         };
+
+        // Dual-solver cross-check (design 05 §2, async variant): create the crate-level
+        // coordinator for detached cvc5 secondaries before any bucket runs, so every
+        // per-bucket air Context (including per-thread verifier clones) shares it. The
+        // process-permit cap bounds concurrent cvc5 processes to a small number (design
+        // constraint 5); both the cap and the per-worker queue bound can be overridden via
+        // the environment for measurement.
+        if self.args.cross_check != air::solver_set::CrossCheckPolicy::Off
+            && !self.args.no_verify
+            && self.cross_check_registry.is_none()
+        {
+            let cvc5_rlimit = if self.args.rlimit == f32::INFINITY {
+                0
+            } else {
+                (self.args.rlimit * RLIMIT_PER_SECOND_CVC5).min(u32::MAX as f32) as u32
+            };
+            // Default the process cap to the verification thread count: this gives each
+            // active bucket its own detached cvc5 lane, so the secondaries retain the same
+            // parallelism the synchronous cross-check had (bounding them to a small 2-4 here
+            // instead SERIALISES the previously-parallel secondaries and regresses wall time
+            // badly on many-core hosts). `VERUS_CROSS_CHECK_WORKERS` can shrink the cap for
+            // memory-constrained hosts (design constraint 5); the per-worker bounded queue
+            // still caps memory regardless of the process count.
+            let default_workers = self.num_threads.max(1);
+            let max_processes = std::env::var("VERUS_CROSS_CHECK_WORKERS")
+                .ok()
+                .and_then(|s| s.parse::<usize>().ok())
+                .filter(|n| *n >= 1)
+                .unwrap_or(default_workers);
+            let queue_bound = std::env::var("VERUS_CROSS_CHECK_QUEUE")
+                .ok()
+                .and_then(|s| s.parse::<usize>().ok())
+                .filter(|n| *n >= 1)
+                .unwrap_or(64);
+            self.cross_check_registry = Some(air::solver_set::SecondaryRegistry::new(
+                self.args.cross_check,
+                std::path::PathBuf::from(crate::config::SOLVER_LOG_DIR),
+                cvc5_rlimit,
+                self.args.cross_check_inject_disagreement,
+                max_processes,
+                queue_bound,
+            ));
+        }
+
         if self.args.num_threads != 1 && self.num_threads >= 1 {
             // create the multiple producers, single consumer queue
             let (sender, receiver) = std::sync::mpsc::channel();
@@ -2583,6 +2628,57 @@ impl Verifier {
                     global_ctx,
                 )?;
             }
+        }
+
+        // Mandatory crate-end cross-check join (design 05 §2, async variant; constraint 4).
+        // All per-bucket air Contexts (hence their secondary channel senders) have been
+        // dropped by now, so every detached cvc5 worker will drain and exit. We must not
+        // report success until every queued secondary check-sat has been answered or the
+        // join times out (a timed-out secondary counts as `unknown`, never a confirmation).
+        // Warnings trail the verdict lines; an `unsat`/`sat` disagreement is surfaced as an
+        // `error:` diagnostic naming the function and bumps `count_errors`, forcing a
+        // non-zero exit.
+        if let Some(registry) = self.cross_check_registry.clone() {
+            let join_timeout = std::env::var("VERUS_CROSS_CHECK_JOIN_TIMEOUT_SECS")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .map(Duration::from_secs)
+                .unwrap_or(Duration::from_secs(3600));
+            let outcomes = registry.join_all(join_timeout);
+            let (outcomes, timed_out) = outcomes;
+            let message_interface: Arc<dyn air::messages::MessageInterface> =
+                Arc::new(vir::messages::VirMessageInterface {});
+            if timed_out {
+                reporter.report_as(
+                    &message_interface.bare(
+                        air::messages::MessageLevel::Note,
+                        "cross-check: some secondary (cvc5) queries were still in flight at the \
+                         crate-end join deadline and were left un-reconciled (counted as \
+                         unknown); set VERUS_CROSS_CHECK_JOIN_TIMEOUT_SECS higher to confirm \
+                         them all",
+                    ),
+                    MessageLevel::Note,
+                );
+            }
+            let mut hard_errors = 0u64;
+            for outcome in outcomes {
+                match outcome {
+                    air::solver_set::CrossCheckOutcome::Warning(msg) => {
+                        reporter.report_as(
+                            &message_interface.bare(air::messages::MessageLevel::Warning, &msg),
+                            MessageLevel::Warning,
+                        );
+                    }
+                    air::solver_set::CrossCheckOutcome::HardError(msg) => {
+                        reporter.report_as(
+                            &message_interface.bare(air::messages::MessageLevel::Error, &msg),
+                            MessageLevel::Error,
+                        );
+                        hard_errors += 1;
+                    }
+                }
+            }
+            self.count_errors += hard_errors;
         }
 
         if self.args.no_verify {
