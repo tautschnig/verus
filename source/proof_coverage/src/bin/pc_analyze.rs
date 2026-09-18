@@ -3116,9 +3116,7 @@ fn main() {
                 })
                 .collect();
             let mut slices = g.backward_slices(
-                rows.iter()
-                    .filter(|row| !not_applicable(row))
-                    .map(|row| row.target.clone()),
+                rows.iter().filter(|row| !not_applicable(row)).map(|row| row.target.clone()),
                 SliceOptions { calls: CallPolicy::Opaque },
             );
             let fail_open = fail_open_roots(&g);

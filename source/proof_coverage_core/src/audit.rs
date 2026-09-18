@@ -320,10 +320,7 @@ pub fn audit(
             // mode this scheme exists to prevent.
             for function in &r.functions {
                 if !by_fun.contains_key(function.fun.as_str()) {
-                    v.push(format!(
-                        "function record {} has no source function row",
-                        function.fun
-                    ));
+                    v.push(format!("function record {} has no source function row", function.fun));
                 }
             }
             for query in &r.queries {
@@ -339,8 +336,7 @@ pub fn audit(
                 .artifacts
                 .iter()
                 .flat_map(|artifact| {
-                    std::iter::once(artifact.owner.as_str())
-                        .chain(artifact.callee.as_deref())
+                    std::iter::once(artifact.owner.as_str()).chain(artifact.callee.as_deref())
                 })
                 .filter(|owner| !by_fun.contains_key(owner))
                 .collect();
@@ -1245,10 +1241,8 @@ mod audit_invariant_tests {
                 "broadcast": false
             })
         };
-        value["source_functions"] = serde_json::json!([
-            source_function("t::f", "t::f"),
-            source_function("t::f", "t::f")
-        ]);
+        value["source_functions"] =
+            serde_json::json!([source_function("t::f", "t::f"), source_function("t::f", "t::f")]);
         let record: CoverageRecord = serde_json::from_value(value).unwrap();
 
         let findings = audit(&record, &test_lookup);
@@ -2275,13 +2269,7 @@ pub fn audit_recursive_joins(r: &CoverageRecord) -> Vec<String> {
                         ens += 1;
                     }
                     if o.role == Role::Obligation
-                        && matches!(
-                            o.emission,
-                            Some(E::CallPrecondition {
-                                callee: Some(_),
-                                ..
-                            })
-                        )
+                        && matches!(o.emission, Some(E::CallPrecondition { callee: Some(_), .. }))
                         && o.span.as_deref() == Some(rc.span.as_str())
                         && o.node.as_deref() != Some(rc.call_node.as_str())
                     {

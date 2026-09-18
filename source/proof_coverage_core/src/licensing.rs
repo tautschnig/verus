@@ -285,13 +285,7 @@ fn is_call_post(o: &crate::record::Occurrence) -> bool {
 /// A callee precondition checked at a call, with the callee named. Rows whose
 /// encoding did not name the callee cannot be paired with a call site.
 fn is_call_pre(o: &crate::record::Occurrence) -> bool {
-    matches!(
-        o.emission,
-        Some(EmissionRole::CallPrecondition {
-            callee: Some(_),
-            ..
-        })
-    )
+    matches!(o.emission, Some(EmissionRole::CallPrecondition { callee: Some(_), .. }))
 }
 
 /// One call-local licensing relation.
@@ -350,26 +344,22 @@ pub fn demand_calls(rf: &RecordFacts<'_>) -> Vec<DemandCall> {
         let Some(node) = &o.node else { continue };
         let boundary = rf.call_sites.get(&(row.query.fun.clone(), node.clone()));
         let recursive = boundary.is_some_and(|call| call.recursive);
-        let callee = boundary
-            .and_then(|call| call.callee.clone())
-            .or_else(|| match &o.emission {
-                Some(EmissionRole::CallPostcondition { callee }) => Some(callee.clone()),
-                _ => None,
-            });
+        let callee = boundary.and_then(|call| call.callee.clone()).or_else(|| match &o.emission {
+            Some(EmissionRole::CallPostcondition { callee }) => Some(callee.clone()),
+            _ => None,
+        });
 
         let base = if recursive {
-            let guard_node = rf
-                .record
-                .functions
-                .iter()
-                .find(|function| function.fun == row.query.fun)
-                .and_then(|function| {
-                    function
-                        .recursive_calls
-                        .iter()
-                        .find(|call| call.call_node == *node)
-                        .map(|call| call.guard_node.as_str())
-                });
+            let guard_node =
+                rf.record.functions.iter().find(|function| function.fun == row.query.fun).and_then(
+                    |function| {
+                        function
+                            .recursive_calls
+                            .iter()
+                            .find(|call| call.call_node == *node)
+                            .map(|call| call.guard_node.as_str())
+                    },
+                );
             guard_node.and_then(|guard_node| {
                 let guards: Vec<String> = rf
                     .rows

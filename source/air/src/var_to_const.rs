@@ -129,11 +129,27 @@ fn update_breaks_to_versions(
         StmtX::Havoc(_) | StmtX::Assign(..) => stmt.clone(),
         StmtX::Snapshot(_) => stmt.clone(),
         StmtX::DeadEnd(s) => {
-            let s = update_breaks_to_versions(label, all_versions, versions_to, break_i, s, trace, break_sources);
+            let s = update_breaks_to_versions(
+                label,
+                all_versions,
+                versions_to,
+                break_i,
+                s,
+                trace,
+                break_sources,
+            );
             Arc::new(StmtX::DeadEnd(s))
         }
         StmtX::Breakable(x, s) => {
-            let s = update_breaks_to_versions(label, all_versions, versions_to, break_i, s, trace, break_sources);
+            let s = update_breaks_to_versions(
+                label,
+                all_versions,
+                versions_to,
+                break_i,
+                s,
+                trace,
+                break_sources,
+            );
             Arc::new(StmtX::Breakable(x.clone(), s))
         }
         StmtX::Break(x) if x == label => {
@@ -157,14 +173,30 @@ fn update_breaks_to_versions(
         StmtX::Block(ss) => {
             let mut stmts: Vec<Stmt> = Vec::new();
             for s in ss.iter() {
-                stmts.push(update_breaks_to_versions(label, all_versions, versions_to, break_i, s, trace, break_sources));
+                stmts.push(update_breaks_to_versions(
+                    label,
+                    all_versions,
+                    versions_to,
+                    break_i,
+                    s,
+                    trace,
+                    break_sources,
+                ));
             }
             Arc::new(StmtX::Block(Arc::new(stmts)))
         }
         StmtX::Switch(ss) => {
             let mut stmts: Vec<Stmt> = Vec::new();
             for s in ss.iter() {
-                stmts.push(update_breaks_to_versions(label, all_versions, versions_to, break_i, s, trace, break_sources));
+                stmts.push(update_breaks_to_versions(
+                    label,
+                    all_versions,
+                    versions_to,
+                    break_i,
+                    s,
+                    trace,
+                    break_sources,
+                ));
             }
             Arc::new(StmtX::Switch(Arc::new(stmts)))
         }

@@ -529,20 +529,17 @@ impl Graph {
             .flat_map(|a| a.head.iter())
             .chain(self.demand_calls.iter().map(|call| &call.head))
             .collect();
-        let mut roots: BTreeSet<String> =
-            self.premises
-                .iter()
-                .filter(|p| {
-                    !certified.contains(*p)
-                        && !self.vertex_info.get(*p).is_some_and(|info| {
-                            matches!(
-                                info.emission,
-                                Some(EmissionRole::CallPostcondition { .. })
-                            )
-                        })
-                })
-                .cloned()
-                .collect();
+        let mut roots: BTreeSet<String> = self
+            .premises
+            .iter()
+            .filter(|p| {
+                !certified.contains(*p)
+                    && !self.vertex_info.get(*p).is_some_and(|info| {
+                        matches!(info.emission, Some(EmissionRole::CallPostcondition { .. }))
+                    })
+            })
+            .cloned()
+            .collect();
         roots.extend(self.ambient_roots.iter().cloned());
         // Artifacts with no establishment inside the record are its axioms:
         // a requires clause of a function nobody (observed) calls is an
@@ -798,8 +795,7 @@ impl Graph {
         ranks: &BTreeMap<String, usize>,
     ) -> bool {
         let Some(head_rank) = ranks.get(&call.head) else { return false };
-        tail.iter()
-            .all(|vertex| ranks.get(vertex).is_some_and(|tail_rank| tail_rank < head_rank))
+        tail.iter().all(|vertex| ranks.get(vertex).is_some_and(|tail_rank| tail_rank < head_rank))
     }
 
     fn prepare_slices(&self, options: SliceOptions) -> PreparedSlices<'_> {
@@ -821,13 +817,7 @@ impl Graph {
         let mut explanation_roots = roots;
         explanation_roots.extend(self.unmeasured.iter().cloned());
         let explanation_ranks = self.slice_ranks(&explanation_roots, options);
-        PreparedSlices {
-            options,
-            by_head,
-            demand_by_head,
-            definite_ranks,
-            explanation_ranks,
-        }
+        PreparedSlices { options, by_head, demand_by_head, definite_ranks, explanation_ranks }
     }
 
     fn backward_slice_prepared(&self, target: &str, prepared: &PreparedSlices<'_>) -> Slice {
@@ -1422,9 +1412,7 @@ mod tests {
             "function.ensures" => EmissionRole::FunctionEnsures,
             "assert.check" => EmissionRole::Assertion { point: AssertionPoint::Check },
             "assert.establish" => EmissionRole::Assertion { point: AssertionPoint::Establish },
-            "call.pre" => {
-                EmissionRole::CallPrecondition { callee: Some("t::callee".into()) }
-            }
+            "call.pre" => EmissionRole::CallPrecondition { callee: Some("t::callee".into()) },
             "call.post" => EmissionRole::CallPostcondition { callee: "t::callee".into() },
             other => panic!("test phase {other} has no role mapping"),
         }
@@ -1981,12 +1969,7 @@ mod tests {
                 occ(Role::Obligation, "call_req", Some("t::f#req"), Some("call.pre")),
                 occ(Role::Obligation, "dec", Some("t::f#dec"), None),
                 occ(Role::Premise, "ih", Some("t::f#ens"), Some("call.post")),
-                occ(
-                    Role::Obligation,
-                    "post",
-                    Some("t::f#ens[0]"),
-                    Some("function.ensures"),
-                ),
+                occ(Role::Obligation, "post", Some("t::f#ens[0]"), Some("function.ensures")),
             ],
             vec!["h0", "h1", "call_req", "dec", "ih", "post"],
         );
@@ -1996,9 +1979,8 @@ mod tests {
         batch.occurrences[2].emission =
             Some(EmissionRole::CallPrecondition { callee: Some("t::f".into()) });
         batch.occurrences[2].node = Some(node.into());
-        batch.occurrences[3].emission = Some(EmissionRole::TerminationCheck {
-            at: crate::record::TerminationPoint::Function,
-        });
+        batch.occurrences[3].emission =
+            Some(EmissionRole::TerminationCheck { at: crate::record::TerminationPoint::Function });
         batch.occurrences[3].node = Some(guard.into());
         batch.occurrences[4].emission =
             Some(EmissionRole::CallPostcondition { callee: "t::f".into() });

@@ -561,14 +561,7 @@ pub fn solve_context(
                 let mut primary_issued = false;
                 let primary = if solver_config.single_check_query {
                     primary_issued = true;
-                    fresh_solve(
-                        &ambient,
-                        solver_config,
-                        command,
-                        ssa_plan,
-                        false,
-                        minimize_cores,
-                    )
+                    fresh_solve(&ambient, solver_config, command, ssa_plan, false, minimize_cores)
                 } else {
                     replay.apply(solver_config).map(|()| {
                         primary_issued = true;
@@ -1379,10 +1372,7 @@ mod tests {
     fn unsupported_solver_is_never_replayed_as_z3() {
         let mut cvc5 = config(&[]);
         cvc5.solver = SmtSolver::Cvc5;
-        assert!(matches!(
-            ReplayContext::new(&cvc5, false, false, None),
-            Err("unsupported_solver")
-        ));
+        assert!(matches!(ReplayContext::new(&cvc5, false, false, None), Err("unsupported_solver")));
     }
 
     #[test]
