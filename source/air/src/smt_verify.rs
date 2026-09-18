@@ -225,11 +225,12 @@ pub(crate) fn smt_check_assertion<'ctx>(
     // Run SMT solver
     let smt_run_start_time = std::time::Instant::now();
     let smt_data = context.smt_log.take_pipe_data();
-    let (smt_output, secondary_output) = if cross_check {
+    let smt_output = if cross_check {
         // The shared stream stays solver-neutral: inject the Z3-only rlimit into the primary
-        // stream only, and fan the identical check-sat text to both solvers in parallel.
-        let primary_prefix =
-            format!("(set-option :rlimit {})\n", context.rlimit).into_bytes();
+        // stream only. The identical check-sat text is enqueued to the DETACHED cvc5 secondary
+        // worker together with this verdict; reconciliation happens off the critical path and
+        // is joined at crate end (design 05 §2.3, async variant).
+        let primary_prefix = format!("(set-option :rlimit {})\n", context.rlimit).into_bytes();
         context.check_sat_fanned(smt_data, primary_prefix, report_long_running)
     } else {
         let commands_handle = context.get_smt_process().send_commands_async(smt_data);
@@ -246,20 +247,9 @@ pub(crate) fn smt_check_assertion<'ctx>(
         } else {
             commands_handle.wait()
         };
-        (smt_output, None)
+        smt_output
     };
     context.time_smt_run += smt_run_start_time.elapsed();
-
-    // Cross-check reconciliation (design 05 §2.2): compare the two verdicts on the identical
-    // query before interpreting the primary's. An unsat/sat disagreement (or, under Strict,
-    // an unconfirmed proof) becomes a hard error dumped to .verus-solver-log; a Warn-level
-    // non-confirmation emits a warning and defers to the primary.
-    if let Some(secondary_output) = &secondary_output {
-        if let Some(err) = context.cross_check_finish(diagnostics, &smt_output, secondary_output) {
-            context.state = ContextState::FoundResult;
-            return ValidityResult::Invalid(None, Some(err), None);
-        }
-    }
 
     #[derive(PartialEq, Eq)]
     enum SmtOutput {

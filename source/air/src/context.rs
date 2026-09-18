@@ -3,7 +3,7 @@ use crate::ast::{
 };
 use crate::closure::ClosureTerm;
 use crate::emitter::Emitter;
-use crate::messages::{ArcDynMessage, Diagnostics, MessageLevel};
+use crate::messages::{ArcDynMessage, Diagnostics};
 use crate::model::Model;
 use crate::node;
 use crate::printer::{macro_push_node, str_to_node};
@@ -11,26 +11,13 @@ use crate::printer::{macro_push_node, str_to_node};
 use crate::scope_map::ScopeMap;
 use crate::smt_process::SmtProcess;
 use crate::smt_verify::ReportLongRunning;
-use crate::solver_set::{CrossCheckAction, CrossCheckPolicy, SolverVerdict, reconcile};
+use crate::solver_set::{CrossCheckPolicy, SecondaryChannel, SecondaryRegistry, SolverVerdict};
 use crate::typecheck::Typing;
 use sise::TreeNode as Node;
 use std::any::Any;
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-
-/// Process-global count of disagreement dumps written, so each cross-check disagreement
-/// gets a unique `.verus-solver-log/disagreement-<n>.smt2` filename across all contexts.
-static DISAGREEMENT_COUNTER: AtomicU64 = AtomicU64::new(0);
-/// Process-global count of warn-level cross-check non-confirmations (the secondary solver
-/// could not independently confirm a proof the primary discharged).
-static CROSS_CHECK_WARN_COUNT: AtomicU64 = AtomicU64::new(0);
-
-/// Total number of warn-level cross-check non-confirmations emitted so far.
-pub fn cross_check_warn_count() -> u64 {
-    CROSS_CHECK_WARN_COUNT.load(Ordering::Relaxed)
-}
 
 #[derive(Clone, Debug)]
 pub(crate) struct AssertionInfo {
@@ -140,24 +127,25 @@ pub struct Context {
     pub(crate) check_valid_used: bool,
     pub(crate) solver: SmtSolver,
     // Cross-checking (design 05 §2): a cvc5 secondary running the identical solver-neutral
-    // stream alongside the Z3 primary, with every check-sat verdict reconciled.
+    // stream alongside the Z3 primary. The secondary now runs DETACHED on a background worker
+    // thread (see solver_set::SecondaryRegistry) so the slower cvc5 solve is off the critical
+    // path; the primary's verdict is reported immediately and reconciliation happens when the
+    // secondary answers, joined at crate end.
     pub(crate) cross_check: CrossCheckPolicy,
-    secondary_process: Option<SmtProcess>,
+    /// Shared crate-level coordinator for all detached secondary workers (permit semaphore,
+    /// outstanding-job accounting, collected outcomes). `None` when cross-check is off.
+    cross_check_registry: Option<Arc<SecondaryRegistry>>,
+    /// This context's handle to its own detached secondary worker (lazily created on the
+    /// first fanned command). Dropping it lets the worker drain and exit.
+    secondary: Option<SecondaryChannel>,
     /// Z3-specific options that must reach the primary process but never the shared stream.
     cross_check_primary_startup: Vec<u8>,
     /// cvc5-specific options (logic, incremental) that must reach the secondary process only.
     cross_check_secondary_startup: Vec<u8>,
-    /// The secondary (cvc5) per-check resource budget, in cvc5 rlimit units (0 = infinity).
-    cross_check_secondary_rlimit: u32,
-    /// Test-only: force the secondary to report `sat` on a primary `unsat`, exercising the
-    /// hard-error disagreement path deterministically.
-    cross_check_inject_disagreement: bool,
     /// Friendly name of the function whose queries are currently running, for diagnostics.
     cross_check_function: Option<String>,
-    /// Directory for disagreement dumps (`.verus-solver-log`).
-    cross_check_dump_dir: Option<std::path::PathBuf>,
-    /// Accumulated solver-neutral command text for the current context, for the dump.
-    cross_check_transcript: Vec<u8>,
+    /// Per-context monotonic query id, tagged onto each secondary check-sat job.
+    cross_check_query_counter: u64,
 }
 
 impl Context {
@@ -226,14 +214,12 @@ impl Context {
             check_valid_used: false,
             solver,
             cross_check: CrossCheckPolicy::Off,
-            secondary_process: None,
+            cross_check_registry: None,
+            secondary: None,
             cross_check_primary_startup: Vec::new(),
             cross_check_secondary_startup: Vec::new(),
-            cross_check_secondary_rlimit: 0,
-            cross_check_inject_disagreement: false,
             cross_check_function: None,
-            cross_check_dump_dir: None,
-            cross_check_transcript: Vec::new(),
+            cross_check_query_counter: 0,
         };
         context.axiom_infos.push_scope(false);
         context.array_map.push_scope(false);
@@ -263,21 +249,19 @@ impl Context {
         self.smt_process.as_mut().unwrap()
     }
 
-    /// Enable dual-solver cross-checking for this context (design 05 §2): launch a cvc5
-    /// secondary that runs the identical solver-neutral stream and reconcile every
-    /// check-sat verdict. Must be called before the prelude is emitted so the shared
-    /// stream is neutral (no `:skolemid`, axiomatised height prelude via `PreludeConfig`).
+    /// Enable dual-solver cross-checking for this context (design 05 §2, async variant):
+    /// register a DETACHED cvc5 secondary (via the shared [`SecondaryRegistry`]) that runs
+    /// the identical solver-neutral stream on a background worker. Must be called before the
+    /// prelude is emitted so the shared stream is neutral (no `:skolemid`, axiomatised height
+    /// prelude via `PreludeConfig`). The worker itself is created lazily on the first fanned
+    /// command, once the cvc5-only startup has been accumulated.
     pub fn enable_cross_check(
         &mut self,
         policy: CrossCheckPolicy,
-        secondary_rlimit: u32,
-        inject_disagreement: bool,
-        dump_dir: std::path::PathBuf,
+        registry: Arc<SecondaryRegistry>,
     ) {
         self.cross_check = policy;
-        self.cross_check_secondary_rlimit = secondary_rlimit;
-        self.cross_check_inject_disagreement = inject_disagreement;
-        self.cross_check_dump_dir = Some(dump_dir);
+        self.cross_check_registry = Some(registry);
         // The shared stream fed to both solvers must carry no Z3-only annotations.
         self.smt_log.set_neutral(true);
     }
@@ -292,65 +276,53 @@ impl Context {
         self.cross_check_function = Some(name);
     }
 
-    /// Launch the secondary (cvc5) process if needed, sending its solver-specific startup.
+    /// Create this context's detached secondary worker if needed. The worker owns the cvc5
+    /// process and services an ordered job queue; the cvc5-only startup (logic, incremental)
+    /// accumulated so far is handed to it, and it appends the rlimit-per budget itself.
     fn ensure_secondary(&mut self) {
-        if self.cross_check == CrossCheckPolicy::Off || self.secondary_process.is_some() {
+        if self.cross_check == CrossCheckPolicy::Off || self.secondary.is_some() {
             return;
         }
-        let mut process = SmtProcess::launch(&SmtSolver::Cvc5, None);
-        let mut startup = self.cross_check_secondary_startup.clone();
-        if self.cross_check_secondary_rlimit > 0 {
-            startup.extend_from_slice(
-                format!("(set-option :rlimit-per {})\n", self.cross_check_secondary_rlimit)
-                    .as_bytes(),
-            );
-        }
-        if !startup.is_empty() {
-            let _ = process.send_commands(startup);
-        }
-        self.secondary_process = Some(process);
+        let Some(registry) = &self.cross_check_registry else {
+            return;
+        };
+        let startup = self.cross_check_secondary_startup.clone();
+        self.secondary = Some(registry.spawn_secondary(startup));
     }
 
-    /// Send a solver-neutral command chunk to the primary and, under cross-check, mirror it
-    /// to the secondary in parallel (draining its output). Returns the primary's lines.
-    /// Used for stateful flushes (declarations, the version query) that both solvers need
-    /// to stay in lockstep; the secondary's response here is not a verdict and is ignored.
+    /// Send a solver-neutral command chunk to the primary and, under cross-check, ENQUEUE it
+    /// to the detached secondary worker (which applies it in order to keep incremental state
+    /// in lockstep). Returns the primary's lines. Used for stateful flushes (declarations,
+    /// the version query); the secondary's response is not a verdict and is ignored.
     pub(crate) fn send_fanned(&mut self, commands: Vec<u8>) -> Vec<String> {
         if self.cross_check == CrossCheckPolicy::Off {
             return self.get_smt_process().send_commands(commands);
         }
         self.get_smt_process();
         self.ensure_secondary();
-        self.cross_check_transcript.extend_from_slice(&commands);
-        let primary = self.smt_process.as_mut().unwrap();
-        let secondary = self.secondary_process.as_mut().unwrap();
-        let sec_handle = secondary.send_commands_async(commands.clone());
-        let prim_handle = primary.send_commands_async(commands);
-        let primary_lines = prim_handle.wait();
-        let _ = sec_handle.wait();
-        primary_lines
+        if let Some(secondary) = &self.secondary {
+            secondary.send_commands(commands.clone());
+        }
+        self.smt_process.as_mut().unwrap().send_commands(commands)
     }
 
-    /// Fan a check-sat query (identical solver-neutral text) to both solvers in parallel,
-    /// injecting the Z3-only `primary_prefix` (rlimit) into the primary stream only. Returns
-    /// the primary's lines and, under cross-check, the secondary's lines. Wall time is the
-    /// max of the two solvers, not the sum (design 05 §2.3).
+    /// Run a check-sat on the primary and return its lines IMMEDIATELY, injecting the Z3-only
+    /// `primary_prefix` (rlimit) into the primary stream only. Under cross-check the identical
+    /// solver-neutral text is ENQUEUED to the detached secondary worker together with the
+    /// primary's verdict; reconciliation happens on the worker and is joined at crate end, so
+    /// the slower cvc5 solve is off the critical path (design 05 §2.3, async variant).
     pub(crate) fn check_sat_fanned(
         &mut self,
         neutral_commands: Vec<u8>,
         primary_prefix: Vec<u8>,
         report_long_running: Option<&mut ReportLongRunning>,
-    ) -> (Vec<String>, Option<Vec<String>>) {
+    ) -> Vec<String> {
         self.get_smt_process();
         self.ensure_secondary();
-        self.cross_check_transcript.extend_from_slice(&neutral_commands);
         let mut primary_data = primary_prefix;
         primary_data.extend_from_slice(&neutral_commands);
 
         let primary = self.smt_process.as_mut().unwrap();
-        let secondary = self.secondary_process.as_mut().unwrap();
-        // Start the secondary first so it runs concurrently while we wait on the primary.
-        let sec_handle = secondary.send_commands_async(neutral_commands);
         let prim_handle = primary.send_commands_async(primary_data);
         let primary_lines = if let Some((report_threshold, report_fn)) = report_long_running {
             let start = std::time::Instant::now();
@@ -366,8 +338,22 @@ impl Context {
         } else {
             prim_handle.wait()
         };
-        let secondary_lines = sec_handle.wait();
-        (primary_lines, Some(secondary_lines))
+
+        if self.secondary.is_some() {
+            let query_id = self.cross_check_query_counter;
+            self.cross_check_query_counter += 1;
+            let verdict = SolverVerdict::from_lines(&primary_lines);
+            let func =
+                self.cross_check_function.clone().unwrap_or_else(|| "this query".to_string());
+            self.secondary.as_ref().unwrap().send_check_sat(
+                neutral_commands,
+                primary_lines.clone(),
+                verdict,
+                func,
+                query_id,
+            );
+        }
+        primary_lines
     }
 
     /// Append a raw Z3-only startup option to the primary process's private prefix.
@@ -380,7 +366,7 @@ impl Context {
         self.cross_check_secondary_startup.extend_from_slice(text.as_bytes());
     }
 
-    /// Under cross-check, flush any pending shared declarations to BOTH solvers, so a
+    /// Under cross-check, flush any pending shared declarations to the secondary worker, so a
     /// subsequent Z3-only primary-only command (e.g. the `(get-info :all-statistics)`
     /// rlimit-count probe) does not strand the secondary without the declarations the next
     /// check-sat depends on.
@@ -393,100 +379,6 @@ impl Context {
             return;
         }
         let _ = self.send_fanned(pending);
-    }
-
-    /// Reconcile the primary and secondary check-sat verdicts (design 05 §2.2). Emits a
-    /// warning for an unconfirmed proof (Warn) and, on an unsat/sat disagreement (or an
-    /// unconfirmed proof under Strict), dumps the query plus both transcripts and returns
-    /// an error message the caller reports as the obligation's failure.
-    pub(crate) fn cross_check_finish(
-        &mut self,
-        diagnostics: &impl Diagnostics,
-        primary_lines: &[String],
-        secondary_lines: &[String],
-    ) -> Option<ArcDynMessage> {
-        use SolverVerdict::*;
-        let primary_verdict = SolverVerdict::from_lines(primary_lines);
-        let mut secondary_verdict = SolverVerdict::from_lines(secondary_lines);
-        if self.cross_check_inject_disagreement && primary_verdict == Unsat {
-            // Test-only: pretend the secondary refuted a query the primary proved.
-            secondary_verdict = Sat;
-        }
-        let func = self.cross_check_function.clone().unwrap_or_else(|| "this query".to_string());
-        match reconcile(self.cross_check, primary_verdict, Some(secondary_verdict)) {
-            CrossCheckAction::UsePrimary => None,
-            CrossCheckAction::UsePrimaryWithWarning(_) => {
-                CROSS_CHECK_WARN_COUNT.fetch_add(1, Ordering::Relaxed);
-                let msg = match (primary_verdict, secondary_verdict) {
-                    (Unsat, _) => format!(
-                        "cross-check: cvc5 could not independently confirm the proof of {}",
-                        func
-                    ),
-                    (Unknown, Unsat) => format!(
-                        "cross-check: z3 left {} unknown but cvc5 proved it (consider making cvc5 the primary solver)",
-                        func
-                    ),
-                    _ => format!("cross-check: the secondary solver could not confirm {}", func),
-                };
-                diagnostics.report(&self.message_interface.bare(MessageLevel::Warning, &msg));
-                None
-            }
-            CrossCheckAction::HardError(reason) => {
-                let dumped = self
-                    .cross_check_dump(primary_lines, secondary_lines, primary_verdict, secondary_verdict)
-                    .map(|p| format!("; query and both transcripts dumped to {}", p.display()))
-                    .unwrap_or_default();
-                let msg = format!(
-                    "cross-check disagreement in {}: z3 reported {} but cvc5 reported {} on the \
-                     identical query{} ({})",
-                    func,
-                    primary_verdict.name(),
-                    secondary_verdict.name(),
-                    dumped,
-                    reason,
-                );
-                Some(self.message_interface.bare(MessageLevel::Error, &msg))
-            }
-        }
-    }
-
-    /// Write the accumulated solver-neutral query plus both solvers' response transcripts to
-    /// `.verus-solver-log/disagreement-<n>.smt2`.
-    fn cross_check_dump(
-        &self,
-        primary_lines: &[String],
-        secondary_lines: &[String],
-        primary_verdict: SolverVerdict,
-        secondary_verdict: SolverVerdict,
-    ) -> Option<std::path::PathBuf> {
-        let dir = self.cross_check_dump_dir.as_ref()?;
-        std::fs::create_dir_all(dir).ok()?;
-        let n = DISAGREEMENT_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let path = dir.join(format!("disagreement-{}.smt2", n));
-        let func = self.cross_check_function.clone().unwrap_or_else(|| "<unknown>".to_string());
-        let mut out = String::new();
-        out += &format!(";; cross-check disagreement for {}\n", func);
-        out += &format!(
-            ";; z3 (primary) = {}, cvc5 (secondary) = {}\n",
-            primary_verdict.name(),
-            secondary_verdict.name(),
-        );
-        out += ";; ======== solver-neutral query (identical text sent to both) ========\n";
-        out += &String::from_utf8_lossy(&self.cross_check_transcript);
-        out += "\n;; ======== z3 (primary) response transcript ========\n";
-        for line in primary_lines {
-            out += ";; ";
-            out += line;
-            out += "\n";
-        }
-        out += ";; ======== cvc5 (secondary) response transcript ========\n";
-        for line in secondary_lines {
-            out += ";; ";
-            out += line;
-            out += "\n";
-        }
-        std::fs::write(&path, out).ok()?;
-        Some(path)
     }
 
     pub fn set_air_initial_log(&mut self, writer: Box<dyn std::io::Write>) {

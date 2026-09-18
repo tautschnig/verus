@@ -42,9 +42,11 @@ test_verify_one_file_with_options! {
 }
 
 // (b) The injected-disagreement path (test-only `-V cross-check-inject-disagreement` forces
-// the secondary to report `sat` on a primary `unsat`) produces the hard error naming both
-// solvers and dumps the query plus both transcripts to
-// `.verus-solver-log/disagreement-<n>.smt2`. The obligation is then treated as an error.
+// the secondary to report `sat` on a primary `unsat`) produces a hard error. Under the async
+// (detached-secondary) design the secondary answers off the critical path, so the
+// disagreement is discovered on the background worker and surfaced at CRATE END: it must
+// still fail the build (non-zero exit) with an `error:` diagnostic naming the function and
+// pointing at the dump under `.verus-solver-log/disagreement-<n>.smt2`.
 test_verify_one_file_with_options! {
     #[test] cross_check_injected_disagreement_is_hard_error
         ["-V cross-check", "-V cross-check-inject-disagreement"] => verus_code! {
@@ -55,22 +57,27 @@ test_verify_one_file_with_options! {
             x + 1
         }
     } => Err(err) => {
+        // The crate-end join surfaced the disagreement as a build-failing error (this is the
+        // `Err` arm, so the process exited non-zero) naming both solvers, the function, and
+        // the dump file.
         assert!(
             err.errors.iter().any(|e| {
                 e.message.contains("cross-check disagreement")
+                    && e.message.contains("add_one")
                     && e.message.contains("z3 reported unsat")
                     && e.message.contains("cvc5 reported sat")
                     && e.message.contains("disagreement-")
             }),
-            "expected a cross-check disagreement hard error naming both solvers and the dump \
-             file, got: {:?}",
+            "expected a crate-end cross-check disagreement hard error naming the function, both \
+             solvers, and the dump file, got: {:?}",
             err.errors.iter().map(|e| e.message.clone()).collect::<Vec<_>>(),
         );
     }
 }
 
-// (c) Under `-V cross-check-strict`, the same injected disagreement is still a hard error
-// (Strict is a superset of Warn for the disagreement rows of the reconciliation table).
+// (c) Under `-V cross-check-strict`, the same injected disagreement is still a build-failing
+// hard error surfaced at crate end (Strict is a superset of Warn for the disagreement rows of
+// the reconciliation table).
 test_verify_one_file_with_options! {
     #[test] cross_check_strict_injected_disagreement_is_hard_error
         ["-V cross-check-strict", "-V cross-check-inject-disagreement"] => verus_code! {
@@ -82,8 +89,11 @@ test_verify_one_file_with_options! {
         }
     } => Err(err) => {
         assert!(
-            err.errors.iter().any(|e| e.message.contains("cross-check disagreement")),
-            "expected a cross-check disagreement hard error, got: {:?}",
+            err.errors.iter().any(|e| {
+                e.message.contains("cross-check disagreement") && e.message.contains("add_one")
+            }),
+            "expected a crate-end cross-check disagreement hard error naming the function, got: \
+             {:?}",
             err.errors.iter().map(|e| e.message.clone()).collect::<Vec<_>>(),
         );
     }

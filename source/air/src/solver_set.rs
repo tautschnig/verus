@@ -219,6 +219,425 @@ impl SolverSet {
     }
 }
 
+// ============================================================================
+// Detached (asynchronous) secondary cross-checking (design 05 §2, async variant)
+// ============================================================================
+//
+// The synchronous cross-check (Context::check_sat_fanned as originally written) put the
+// slower cvc5 solve on the critical path: the primary's verdict could not be interpreted
+// until the secondary had also answered, which cost ~3.1x wall on vstd. Profiling showed
+// ~92% of cvc5's time is the check-sat solve itself, so the only way to recover the wall
+// time is to take the secondary off the critical path entirely.
+//
+// This module does that. Each module bucket keeps its own cvc5 process (as before, so the
+// incremental declaration/push-pop state stays in lockstep), but that process is now driven
+// by a dedicated background worker thread. The primary thread reports its verdict
+// immediately and hands the worker a queue of jobs: solver-neutral declaration chunks
+// (`Commands`) and check-sat requests carrying the already-known primary verdict
+// (`CheckSat`). The worker runs cvc5 and reconciles when the answer comes back.
+//
+// Soundness is preserved by a MANDATORY crate-end join (`SecondaryRegistry::join_all`):
+// verification cannot report success until every queued secondary check-sat has been
+// answered or the join times out (a timed-out secondary counts as `unknown`, never a
+// confirmation). An `unsat`/`sat` disagreement is recorded as a hard error surfaced at
+// crate end, which forces a non-zero exit and an `error:` diagnostic naming the function.
+//
+// Resource use is bounded on two axes (design constraint 5): a process-permit semaphore
+// caps the number of concurrent cvc5 processes to a small K (2-4), and each worker's job
+// channel is a bounded `sync_channel`, so a primary that races ahead of a lagging secondary
+// blocks on `send` (backpressure) rather than letting the queue — and memory — grow without
+// limit.
+
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
+
+/// Process-global count of warn-level cross-check non-confirmations (the secondary solver
+/// could not independently confirm a proof the primary discharged). Reported at crate end.
+static CROSS_CHECK_WARN_COUNT: AtomicU64 = AtomicU64::new(0);
+/// Process-global count of disagreement dumps written, so each disagreement gets a unique
+/// `.verus-solver-log/disagreement-<n>.smt2` filename across all workers.
+static DISAGREEMENT_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Total number of warn-level cross-check non-confirmations emitted so far.
+pub fn cross_check_warn_count() -> u64 {
+    CROSS_CHECK_WARN_COUNT.load(Ordering::Relaxed)
+}
+
+/// A reconciliation result discovered asynchronously by a secondary worker, to be surfaced
+/// on the main thread at crate end. Carries only owned strings so it is trivially `Send`.
+#[derive(Debug, Clone)]
+pub enum CrossCheckOutcome {
+    /// The secondary could not confirm a proof (or proved a goal the primary left unknown):
+    /// a warning under `Warn`. Reported at crate end (may trail the verdict line).
+    Warning(String),
+    /// An `unsat`/`sat` disagreement, or (under `Strict`) an unconfirmed proof: a hard error
+    /// that must fail the build.
+    HardError(String),
+}
+
+/// A single ordered unit of work for a secondary worker. Sent in the exact order the primary
+/// emitted the corresponding solver-neutral text, so the secondary's incremental state stays
+/// in lockstep with the primary's.
+enum SecondaryJob {
+    /// Solver-neutral declarations / push / pop. The response is ignored; this only keeps the
+    /// secondary process's state consistent for the next check-sat.
+    Commands(Vec<u8>),
+    /// A check-sat whose primary verdict is already known. The worker runs cvc5 on the
+    /// identical neutral text and reconciles the two verdicts.
+    CheckSat {
+        neutral_commands: Vec<u8>,
+        primary_verdict: SolverVerdict,
+        primary_lines: Vec<String>,
+        function: String,
+        query_id: u64,
+    },
+}
+
+/// Crate-level coordinator for all detached secondary (cvc5) workers.
+///
+/// One is created per crate (when cross-check is enabled) and shared, via `Arc`, with every
+/// `Context`. It owns the process-permit semaphore, the outstanding-job accounting used by
+/// the mandatory crate-end join, and the collected outcomes.
+pub struct SecondaryRegistry {
+    policy: CrossCheckPolicy,
+    dump_dir: PathBuf,
+    /// The secondary (cvc5) per-check resource budget, in cvc5 rlimit units (0 = infinity).
+    secondary_rlimit: u32,
+    /// Test-only: force every secondary to report `sat` on a primary `unsat`.
+    inject_disagreement: bool,
+    /// Bound on each worker's job channel (backpressure).
+    queue_bound: usize,
+    /// Available cvc5 process permits; workers block until one is free before launching.
+    permits: Mutex<usize>,
+    permits_cv: Condvar,
+    /// Number of enqueued check-sat jobs not yet reconciled; the crate-end join waits on this.
+    outstanding: Mutex<usize>,
+    outstanding_cv: Condvar,
+    outcomes: Mutex<Vec<CrossCheckOutcome>>,
+    handles: Mutex<Vec<JoinHandle<()>>>,
+}
+
+impl SecondaryRegistry {
+    pub fn new(
+        policy: CrossCheckPolicy,
+        dump_dir: PathBuf,
+        secondary_rlimit: u32,
+        inject_disagreement: bool,
+        max_processes: usize,
+        queue_bound: usize,
+    ) -> Arc<Self> {
+        Arc::new(SecondaryRegistry {
+            policy,
+            dump_dir,
+            secondary_rlimit,
+            inject_disagreement,
+            queue_bound: queue_bound.max(1),
+            permits: Mutex::new(max_processes.max(1)),
+            permits_cv: Condvar::new(),
+            outstanding: Mutex::new(0),
+            outstanding_cv: Condvar::new(),
+            outcomes: Mutex::new(Vec::new()),
+            handles: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// Spawn a background worker owning one cvc5 process for a single bucket's `Context`.
+    /// `startup` is the cvc5-only startup text (logic + incremental) accumulated by the
+    /// context; the worker appends the rlimit-per budget before any declarations.
+    pub fn spawn_secondary(self: &Arc<Self>, startup: Vec<u8>) -> SecondaryChannel {
+        let (tx, rx) = sync_channel::<SecondaryJob>(self.queue_bound);
+        let registry = Arc::clone(self);
+        let handle = std::thread::spawn(move || secondary_worker(registry, startup, rx));
+        self.handles.lock().unwrap().push(handle);
+        SecondaryChannel { tx, registry: Arc::clone(self) }
+    }
+
+    fn acquire_permit(&self) {
+        let mut n = self.permits.lock().unwrap();
+        while *n == 0 {
+            n = self.permits_cv.wait(n).unwrap();
+        }
+        *n -= 1;
+    }
+
+    fn release_permit(&self) {
+        let mut n = self.permits.lock().unwrap();
+        *n += 1;
+        self.permits_cv.notify_one();
+    }
+
+    fn job_enqueued(&self) {
+        let mut n = self.outstanding.lock().unwrap();
+        *n += 1;
+    }
+
+    fn job_reconciled(&self) {
+        let mut n = self.outstanding.lock().unwrap();
+        *n -= 1;
+        if *n == 0 {
+            self.outstanding_cv.notify_all();
+        }
+    }
+
+    fn record(&self, outcome: CrossCheckOutcome) {
+        self.outcomes.lock().unwrap().push(outcome);
+    }
+
+    /// Reconcile one check-sat's verdicts and record any resulting outcome.
+    fn reconcile_and_record(
+        &self,
+        primary: SolverVerdict,
+        secondary: SolverVerdict,
+        function: &str,
+        query_id: u64,
+        transcript: &[u8],
+        primary_lines: &[String],
+        secondary_lines: &[String],
+    ) {
+        use SolverVerdict::*;
+        match reconcile(self.policy, primary, Some(secondary)) {
+            CrossCheckAction::UsePrimary => {}
+            CrossCheckAction::UsePrimaryWithWarning(_) => {
+                CROSS_CHECK_WARN_COUNT.fetch_add(1, Ordering::Relaxed);
+                let msg = match (primary, secondary) {
+                    (Unsat, _) => format!(
+                        "cross-check: cvc5 could not independently confirm the proof of {}",
+                        function
+                    ),
+                    (Unknown, Unsat) => format!(
+                        "cross-check: z3 left {} unknown but cvc5 proved it (consider making cvc5 the primary solver)",
+                        function
+                    ),
+                    _ => {
+                        format!("cross-check: the secondary solver could not confirm {}", function)
+                    }
+                };
+                self.record(CrossCheckOutcome::Warning(msg));
+            }
+            CrossCheckAction::HardError(reason) => {
+                let dumped = self
+                    .dump(
+                        function,
+                        query_id,
+                        transcript,
+                        primary_lines,
+                        secondary_lines,
+                        primary,
+                        secondary,
+                    )
+                    .map(|p| format!("; query and both transcripts dumped to {}", p.display()))
+                    .unwrap_or_default();
+                let msg = format!(
+                    "cross-check disagreement in {}: z3 reported {} but cvc5 reported {} on the \
+                     identical query{} ({})",
+                    function,
+                    primary.name(),
+                    secondary.name(),
+                    dumped,
+                    reason,
+                );
+                self.record(CrossCheckOutcome::HardError(msg));
+            }
+        }
+    }
+
+    /// Write the accumulated solver-neutral query plus both solvers' response transcripts to
+    /// `.verus-solver-log/disagreement-<n>.smt2`.
+    fn dump(
+        &self,
+        function: &str,
+        _query_id: u64,
+        transcript: &[u8],
+        primary_lines: &[String],
+        secondary_lines: &[String],
+        primary_verdict: SolverVerdict,
+        secondary_verdict: SolverVerdict,
+    ) -> Option<PathBuf> {
+        std::fs::create_dir_all(&self.dump_dir).ok()?;
+        let n = DISAGREEMENT_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = self.dump_dir.join(format!("disagreement-{}.smt2", n));
+        let mut out = String::new();
+        out += &format!(";; cross-check disagreement for {}\n", function);
+        out += &format!(
+            ";; z3 (primary) = {}, cvc5 (secondary) = {}\n",
+            primary_verdict.name(),
+            secondary_verdict.name(),
+        );
+        out += ";; ======== solver-neutral query (identical text sent to both) ========\n";
+        out += &String::from_utf8_lossy(transcript);
+        out += "\n;; ======== z3 (primary) response transcript ========\n";
+        for line in primary_lines {
+            out += ";; ";
+            out += line;
+            out += "\n";
+        }
+        out += ";; ======== cvc5 (secondary) response transcript ========\n";
+        for line in secondary_lines {
+            out += ";; ";
+            out += line;
+            out += "\n";
+        }
+        std::fs::write(&path, out).ok()?;
+        Some(path)
+    }
+
+    /// MANDATORY crate-end join (design constraint 4). Block until every enqueued secondary
+    /// check-sat has been reconciled, or `timeout` elapses (a still-outstanding secondary is
+    /// then treated as `unknown`, so it never turns into a spurious error). Returns all
+    /// accumulated outcomes for the caller to surface as diagnostics.
+    ///
+    /// Returns `(outcomes, timed_out)`: when `timed_out` is true, some secondary queries were
+    /// still in flight at the deadline and were left un-reconciled (counted as `unknown`).
+    pub fn join_all(&self, timeout: Duration) -> (Vec<CrossCheckOutcome>, bool) {
+        let mut timed_out = false;
+        {
+            let mut n = self.outstanding.lock().unwrap();
+            let deadline = Instant::now() + timeout;
+            while *n > 0 {
+                let now = Instant::now();
+                if now >= deadline {
+                    timed_out = true;
+                    break;
+                }
+                let (guard, res) = self.outstanding_cv.wait_timeout(n, deadline - now).unwrap();
+                n = guard;
+                if res.timed_out() && *n > 0 {
+                    timed_out = true;
+                    break;
+                }
+            }
+        }
+        let handles = std::mem::take(&mut *self.handles.lock().unwrap());
+        if timed_out {
+            // Honour the timeout: do not block on workers still solving. Contexts (senders)
+            // are dropped, so each worker terminates once its rlimit-bounded queue drains;
+            // we simply do not wait for it. Any process still alive is reaped at process exit.
+            for handle in handles {
+                if handle.is_finished() {
+                    let _ = handle.join();
+                }
+            }
+        } else {
+            // All queued check-sats reconciled; workers are draining their tails and will
+            // exit promptly (each cvc5 solve is rlimit-bounded), so joining cannot hang.
+            for handle in handles {
+                let _ = handle.join();
+            }
+        }
+        (std::mem::take(&mut *self.outcomes.lock().unwrap()), timed_out)
+    }
+}
+
+/// The primary-thread handle to one bucket's detached secondary worker. Dropping it closes
+/// the channel, which lets the worker drain and exit.
+pub struct SecondaryChannel {
+    tx: SyncSender<SecondaryJob>,
+    registry: Arc<SecondaryRegistry>,
+}
+
+impl SecondaryChannel {
+    /// Enqueue solver-neutral declarations / push / pop for the secondary (ordered).
+    pub fn send_commands(&self, commands: Vec<u8>) {
+        let _ = self.tx.send(SecondaryJob::Commands(commands));
+    }
+
+    /// Enqueue a check-sat with its already-known primary verdict. Accounts the job as
+    /// outstanding so the crate-end join waits for its reconciliation.
+    pub fn send_check_sat(
+        &self,
+        neutral_commands: Vec<u8>,
+        primary_lines: Vec<String>,
+        primary_verdict: SolverVerdict,
+        function: String,
+        query_id: u64,
+    ) {
+        self.registry.job_enqueued();
+        let job = SecondaryJob::CheckSat {
+            neutral_commands,
+            primary_verdict,
+            primary_lines,
+            function,
+            query_id,
+        };
+        if self.tx.send(job).is_err() {
+            // The worker is gone (should not happen before crate end); un-account the job so
+            // the join does not wait forever.
+            self.registry.job_reconciled();
+        }
+    }
+}
+
+/// Body of a secondary worker thread: own one cvc5 process and service its ordered job queue.
+fn secondary_worker(
+    registry: Arc<SecondaryRegistry>,
+    startup: Vec<u8>,
+    rx: Receiver<SecondaryJob>,
+) {
+    let mut process: Option<SmtProcess> = None;
+    let mut have_permit = false;
+    // The solver-neutral text seen so far, for the disagreement dump.
+    let mut transcript: Vec<u8> = Vec::new();
+
+    while let Ok(job) = rx.recv() {
+        // Launch cvc5 lazily on the first job, so a context that never issues a default-prover
+        // query neither spawns a process nor holds a permit.
+        if process.is_none() {
+            registry.acquire_permit();
+            have_permit = true;
+            let mut proc = SmtProcess::launch(&SmtSolver::Cvc5, None);
+            let mut s = startup.clone();
+            if registry.secondary_rlimit > 0 {
+                s.extend_from_slice(
+                    format!("(set-option :rlimit-per {})\n", registry.secondary_rlimit).as_bytes(),
+                );
+            }
+            if !s.is_empty() {
+                let _ = proc.send_commands(s);
+            }
+            process = Some(proc);
+        }
+        let proc = process.as_mut().unwrap();
+        match job {
+            SecondaryJob::Commands(commands) => {
+                transcript.extend_from_slice(&commands);
+                let _ = proc.send_commands(commands);
+            }
+            SecondaryJob::CheckSat {
+                neutral_commands,
+                primary_verdict,
+                primary_lines,
+                function,
+                query_id,
+            } => {
+                transcript.extend_from_slice(&neutral_commands);
+                let secondary_lines = proc.send_commands(neutral_commands);
+                let mut secondary_verdict = SolverVerdict::from_lines(&secondary_lines);
+                if registry.inject_disagreement && primary_verdict == SolverVerdict::Unsat {
+                    secondary_verdict = SolverVerdict::Sat;
+                }
+                registry.reconcile_and_record(
+                    primary_verdict,
+                    secondary_verdict,
+                    &function,
+                    query_id,
+                    &transcript,
+                    &primary_lines,
+                    &secondary_lines,
+                );
+                registry.job_reconciled();
+            }
+        }
+    }
+
+    if have_permit {
+        registry.release_permit();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,10 +656,7 @@ mod tests {
         // No recognised verdict is never mistaken for a proof.
         assert_eq!(SolverVerdict::from_lines(&["(error \"boom\")".to_string()]), Unknown);
         // Last verdict wins (e.g. push/pop bookkeeping before the real answer).
-        assert_eq!(
-            SolverVerdict::from_lines(&["sat".to_string(), "unsat".to_string()]),
-            Unsat
-        );
+        assert_eq!(SolverVerdict::from_lines(&["sat".to_string(), "unsat".to_string()]), Unsat);
     }
 
     #[test]
@@ -276,10 +692,7 @@ mod tests {
             reconcile(Warn, Unsat, Some(Unknown)),
             CrossCheckAction::UsePrimaryWithWarning(_)
         ));
-        assert!(matches!(
-            reconcile(Strict, Unsat, Some(Unknown)),
-            CrossCheckAction::HardError(_)
-        ));
+        assert!(matches!(reconcile(Strict, Unsat, Some(Unknown)), CrossCheckAction::HardError(_)));
     }
 
     #[test]
