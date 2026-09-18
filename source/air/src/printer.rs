@@ -80,6 +80,9 @@ pub struct Printer {
     // print as SMT, not as AIR
     print_as_smt: bool,
     solver: SmtSolver,
+    // Emit solver-neutral (standard SMT-LIB) text: drop Z3-only annotations such as
+    // `:skolemid` so the identical stream is valid for a second solver (design 05 §2.1).
+    neutral: bool,
 }
 
 impl Printer {
@@ -88,7 +91,11 @@ impl Printer {
         print_as_smt: bool,
         solver: SmtSolver,
     ) -> Self {
-        Printer { message_interface, print_as_smt, solver }
+        Printer { message_interface, print_as_smt, solver, neutral: false }
+    }
+
+    pub fn set_neutral(&mut self, neutral: bool) {
+        self.neutral = neutral;
     }
 
     pub(crate) fn typ_to_node(&self, typ: &Typ) -> Node {
@@ -379,7 +386,7 @@ impl Printer {
                         if let Some(s) = qid {
                             nodes.push(str_to_node(":qid"));
                             nodes.push(str_to_node(s));
-                            if matches!(self.solver, SmtSolver::Z3) {
+                            if matches!(self.solver, SmtSolver::Z3) && !self.neutral {
                                 nodes.push(str_to_node(":skolemid"));
                                 nodes.push(str_to_node(&mk_skolem_id(s)));
                             }

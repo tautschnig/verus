@@ -178,7 +178,9 @@ pub(crate) fn smt_check_assertion<'ctx>(
     context.smt_log.log_get_info("version");
     let smt_init_start_time = std::time::Instant::now();
     let smt_data = context.smt_log.take_pipe_data();
-    let early_smt_output = context.get_smt_process().send_commands(smt_data);
+    // Under cross-check this chunk carries the declarations + query the secondary needs to
+    // stay in lockstep; send_fanned mirrors it (draining the secondary's version reply).
+    let early_smt_output = context.send_fanned(smt_data);
     context.time_smt_init += smt_init_start_time.elapsed();
     for line in early_smt_output {
         if line.starts_with(GET_VERSION_RESPONSE_PREFIX) {
@@ -212,7 +214,8 @@ pub(crate) fn smt_check_assertion<'ctx>(
         context.smt_log.log_assert(&None, &disabled_expr);
     }
 
-    if matches!(context.solver, SmtSolver::Z3) {
+    let cross_check = context.cross_check_enabled();
+    if matches!(context.solver, SmtSolver::Z3) && !cross_check {
         context.smt_log.log_set_option("rlimit", &context.rlimit.to_string());
         context.set_solver_option_u32("rlimit", context.rlimit, false);
     }
@@ -222,21 +225,41 @@ pub(crate) fn smt_check_assertion<'ctx>(
     // Run SMT solver
     let smt_run_start_time = std::time::Instant::now();
     let smt_data = context.smt_log.take_pipe_data();
-    let commands_handle = context.get_smt_process().send_commands_async(smt_data);
-    let smt_output = if let Some((report_threshold, report_fn)) = report_long_running {
-        match commands_handle.wait_timeout(*report_threshold) {
-            Ok(smt_output) => smt_output,
-            Err(handle) => {
-                report_fn(smt_run_start_time.elapsed(), false);
-                let smt_output = handle.wait();
-                report_fn(smt_run_start_time.elapsed(), true);
-                smt_output
-            }
-        }
+    let (smt_output, secondary_output) = if cross_check {
+        // The shared stream stays solver-neutral: inject the Z3-only rlimit into the primary
+        // stream only, and fan the identical check-sat text to both solvers in parallel.
+        let primary_prefix =
+            format!("(set-option :rlimit {})\n", context.rlimit).into_bytes();
+        context.check_sat_fanned(smt_data, primary_prefix, report_long_running)
     } else {
-        commands_handle.wait()
+        let commands_handle = context.get_smt_process().send_commands_async(smt_data);
+        let smt_output = if let Some((report_threshold, report_fn)) = report_long_running {
+            match commands_handle.wait_timeout(*report_threshold) {
+                Ok(smt_output) => smt_output,
+                Err(handle) => {
+                    report_fn(smt_run_start_time.elapsed(), false);
+                    let smt_output = handle.wait();
+                    report_fn(smt_run_start_time.elapsed(), true);
+                    smt_output
+                }
+            }
+        } else {
+            commands_handle.wait()
+        };
+        (smt_output, None)
     };
     context.time_smt_run += smt_run_start_time.elapsed();
+
+    // Cross-check reconciliation (design 05 §2.2): compare the two verdicts on the identical
+    // query before interpreting the primary's. An unsat/sat disagreement (or, under Strict,
+    // an unconfirmed proof) becomes a hard error dumped to .verus-solver-log; a Warn-level
+    // non-confirmation emits a warning and defers to the primary.
+    if let Some(secondary_output) = &secondary_output {
+        if let Some(err) = context.cross_check_finish(diagnostics, &smt_output, secondary_output) {
+            context.state = ContextState::FoundResult;
+            return ValidityResult::Invalid(None, Some(err), None);
+        }
+    }
 
     #[derive(PartialEq, Eq)]
     enum SmtOutput {
@@ -267,7 +290,7 @@ pub(crate) fn smt_check_assertion<'ctx>(
         }
     }
 
-    if matches!(context.solver, SmtSolver::Z3) {
+    if matches!(context.solver, SmtSolver::Z3) && !cross_check {
         context.smt_log.log_set_option("rlimit", "0");
         context.set_solver_option_u32("rlimit", 0, false);
     }
@@ -378,6 +401,9 @@ pub(crate) fn smt_check_assertion<'ctx>(
 pub(crate) fn smt_get_rlimit_count(context: &mut Context) -> Result<u64, ValidityResult> {
     assert!(matches!(context.solver, SmtSolver::Z3)); // the CVC5 output format for statistics is different
 
+    // Under cross-check, the accumulated declarations must reach the secondary before this
+    // Z3-only statistics query (which is sent to the primary alone).
+    context.flush_shared_pending();
     context.smt_log.log_get_info("all-statistics");
     let smt_data = context.smt_log.take_pipe_data();
     let smt_output = context.get_smt_process().send_commands(smt_data);

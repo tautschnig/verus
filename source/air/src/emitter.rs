@@ -40,6 +40,12 @@ impl Emitter {
         self.log = writer;
     }
 
+    /// Emit solver-neutral text (drop Z3-only `:skolemid` annotations) so the identical
+    /// stream is valid for a second solver during cross-checking (design 05 §2.1).
+    pub fn set_neutral(&mut self, neutral: bool) {
+        self.printer.set_neutral(neutral);
+    }
+
     fn is_none(&self) -> bool {
         self.pipe_buffer.is_none() && self.log.is_none()
     }

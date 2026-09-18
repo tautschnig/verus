@@ -118,6 +118,7 @@ pub struct ArgsX {
     pub use_crate_name: bool,
     pub solver: SmtSolver,
     pub cross_check: air::solver_set::CrossCheckPolicy,
+    pub cross_check_inject_disagreement: bool,
     pub axiom_usage_info: bool,
     pub check_api_safety: bool,
     pub no_bv_simplify: bool,
@@ -168,6 +169,7 @@ impl ArgsX {
             use_crate_name: Default::default(),
             solver: Default::default(),
             cross_check: Default::default(),
+            cross_check_inject_disagreement: Default::default(),
             axiom_usage_info: Default::default(),
             check_api_safety: Default::default(),
             no_bv_simplify: Default::default(),
@@ -414,6 +416,7 @@ pub fn parse_args_with_imports(
     const EXTENDED_CVC5: &str = "cvc5";
     const EXTENDED_CROSS_CHECK: &str = "cross-check";
     const EXTENDED_CROSS_CHECK_STRICT: &str = "cross-check-strict";
+    const EXTENDED_CROSS_CHECK_INJECT_DISAGREEMENT: &str = "cross-check-inject-disagreement";
     const EXTENDED_ALLOW_INLINE_AIR: &str = "allow-inline-air";
     const EXTENDED_USE_CRATE_NAME: &str = "use-crate-name";
     const EXTENDED_AXIOM_USAGE_INFO: &str = "axiom-usage-info";
@@ -434,11 +437,15 @@ pub fn parse_args_with_imports(
         (EXTENDED_CVC5, "Use the cvc5 SMT solver, rather than the default (Z3)"),
         (
             EXTENDED_CROSS_CHECK,
-            "Cross-check each query with a second solver (warn mode): use the primary verdict but warn if the secondary cannot confirm a proof, and hard-error on an unsat/sat disagreement. (Skeleton: parsed but not yet wired into the verification pipeline.)",
+            "Cross-check each query with a second solver (warn mode): run the identical solver-neutral query on a cvc5 secondary alongside the Z3 primary, use the primary verdict but warn if the secondary cannot confirm a proof, and hard-error (dumping both transcripts to .verus-solver-log) on an unsat/sat disagreement.",
         ),
         (
             EXTENDED_CROSS_CHECK_STRICT,
-            "Like cross-check, but also hard-error when the secondary solver cannot independently confirm a proof. (Skeleton: parsed but not yet wired.)",
+            "Like cross-check, but also hard-error when the secondary solver cannot independently confirm a proof.",
+        ),
+        (
+            EXTENDED_CROSS_CHECK_INJECT_DISAGREEMENT,
+            "Test-only: under cross-check, force the secondary to report sat on a primary unsat, exercising the hard-error disagreement path deterministically.",
         ),
         (EXTENDED_ALLOW_INLINE_AIR, "Allow the POTENTIALLY UNSOUND use of inline_air_stmt"),
         (
@@ -855,6 +862,8 @@ pub fn parse_args_with_imports(
         } else {
             air::solver_set::CrossCheckPolicy::Off
         },
+        cross_check_inject_disagreement: extended
+            .contains_key(EXTENDED_CROSS_CHECK_INJECT_DISAGREEMENT),
         axiom_usage_info: extended.contains_key(EXTENDED_AXIOM_USAGE_INFO),
         check_api_safety: extended.contains_key(EXTENDED_CHECK_API_SAFETY),
         no_bv_simplify: extended.contains_key(EXTENDED_NO_BV_SIMPLIFY),
