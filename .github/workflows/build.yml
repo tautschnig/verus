@@ -58,6 +58,16 @@ jobs:
           ./tools/get-z3.sh
           echo "z3 version $(./z3 --version)"
 
+      - name: get cvc5
+        working-directory: ./source
+        run: |
+          ./tools/get-cvc5.sh
+          if [[ -f ./cvc5.exe ]]; then
+            echo "cvc5 version $(./cvc5.exe --version | head -n 1)"
+          else
+            echo "cvc5 version $(./cvc5 --version | head -n 1)"
+          fi
+
       - name: setup rust
         uses: dtolnay/rust-toolchain@master
         with:
@@ -90,6 +100,16 @@ jobs:
           test -f "$z3"
           cp "$z3" ./target-verus/release/
           "./target-verus/release/$(basename "$z3")" --version
+
+          if [[ -f ./cvc5.exe ]]; then
+            cvc5=./cvc5.exe
+          else
+            cvc5=./cvc5
+          fi
+
+          test -f "$cvc5"
+          cp "$cvc5" ./target-verus/release/
+          "./target-verus/release/$(basename "$cvc5")" --version | head -n 1
 
       - name: create archive
         working-directory: ./source
