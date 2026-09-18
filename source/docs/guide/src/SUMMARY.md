@@ -124,6 +124,7 @@
 
 - [Installation and setup]()
   - [IDE Support](ide_support.md)
+  - [Choosing and cross-checking the SMT solver](./solvers.md)
   - [Installing and configuring Singular](./install-singular.md)
 
 - [Project setup and development](./projects.md)
