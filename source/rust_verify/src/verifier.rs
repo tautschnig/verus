@@ -1101,6 +1101,9 @@ impl Verifier {
         let CommandsWithContextX { context, commands, prover_choice, skip_recommends: _ } =
             &*commands_with_context;
         let context = context.with_desc_prefix(desc_prefix);
+        if air_context.cross_check_enabled() {
+            air_context.set_cross_check_function(fun_as_friendly_rust_name(function_name));
+        }
         if commands.len() > 0 {
             air_context.blank_line();
             air_context.comment(comment);
@@ -1241,6 +1244,25 @@ impl Verifier {
         // A by(bit_vector) query is self-contained, so it runs prelude-free: it omits the
         // recommended-options preset, the prelude, and the bucket background.
         let bitvector = prover_choice == vir::def::ProverChoice::BitVector;
+        // Dual-solver cross-check (design 05 §2): enable a cvc5 secondary alongside the Z3
+        // primary for the default prover. Nonlinear/bit-vector queries spin off into their
+        // own tuned contexts and are left single-solver for now. Must be set up before the
+        // recommended options and prelude so the shared stream is solver-neutral.
+        if self.args.cross_check != air::solver_set::CrossCheckPolicy::Off
+            && prover_choice == vir::def::ProverChoice::DefaultProver
+        {
+            let cvc5_rlimit = if self.args.rlimit == f32::INFINITY {
+                0
+            } else {
+                (self.args.rlimit * RLIMIT_PER_SECOND_CVC5).min(u32::MAX as f32) as u32
+            };
+            air_context.enable_cross_check(
+                self.args.cross_check,
+                cvc5_rlimit,
+                self.args.cross_check_inject_disagreement,
+                std::path::PathBuf::from(crate::config::SOLVER_LOG_DIR),
+            );
+        }
         if !bitvector {
             air_context.set_solver_option("air_recommended_options", "true");
         } else {
@@ -1316,7 +1338,11 @@ impl Verifier {
             bucket_id,
             query_function_path_counter,
             is_rerun,
-            PreludeConfig { arch_word_bits: ctx.arch_word_bits, solver: self.args.solver },
+            PreludeConfig {
+                arch_word_bits: ctx.arch_word_bits,
+                solver: self.args.solver,
+                neutral_height: self.args.cross_check != air::solver_set::CrossCheckPolicy::Off,
+            },
             profile_file_name,
             prover_choice,
         )?;
@@ -1373,7 +1399,11 @@ impl Verifier {
             bucket_id,
             None,
             false,
-            PreludeConfig { arch_word_bits: ctx.arch_word_bits, solver: self.args.solver },
+            PreludeConfig {
+                arch_word_bits: ctx.arch_word_bits,
+                solver: self.args.solver,
+                neutral_height: self.args.cross_check != air::solver_set::CrossCheckPolicy::Off,
+            },
             profile_all_file_name.as_ref(),
             vir::def::ProverChoice::DefaultProver,
         )?;
