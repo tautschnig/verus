@@ -1235,6 +1235,34 @@ impl Verifier {
             )?;
             air_context.set_smt_log(Box::new(file));
         }
+        // -V emit-smt-proofs=DIR: tee the exact cvc5-clean SMT-LIB query stream for this
+        // bucket into DIR, so it can be replayed offline through cvc5 with
+        // --produce-proofs --proof-format-mode=cpc --dump-proofs to obtain CPC proofs that
+        // Ethos can check (design 05, D4). Requires the cvc5 solver (validated in config)
+        // and rides on the neutral prelude so the emitted text carries no Z3-proprietary
+        // `(_ partial-order 0)` special relation.
+        if let Some(emit_dir) = &self.args.emit_smt_proofs {
+            let dir = std::path::PathBuf::from(emit_dir);
+            std::fs::create_dir_all(&dir).map_err(|err| {
+                io_vir_err(format!("could not create directory {}", dir.display()), err)
+            })?;
+            let file_name = self.log_file_name(
+                &dir,
+                Some(bucket_id),
+                Self::log_file_name_suffix(
+                    ctx,
+                    is_rerun,
+                    query_function_path_counter,
+                    self.expand_flag,
+                    crate::config::SMT_FILE_SUFFIX,
+                )
+                .as_str(),
+            );
+            let file = File::create(&file_name).map_err(|err| {
+                io_vir_err(format!("could not open file {}", file_name.display()), err)
+            })?;
+            air_context.set_smt_log(Box::new(file));
+        }
         if self.args.log_all || self.args.log_args.log_smt_transcript {
             let file = self.create_log_file(
                 Some(bucket_id),
@@ -1342,7 +1370,9 @@ impl Verifier {
             PreludeConfig {
                 arch_word_bits: ctx.arch_word_bits,
                 solver: self.args.solver,
-                neutral_height: self.args.cross_check != air::solver_set::CrossCheckPolicy::Off,
+                neutral_height: self.args.cross_check != air::solver_set::CrossCheckPolicy::Off
+                    || self.args.neutral_prelude
+                    || self.args.emit_smt_proofs.is_some(),
             },
             profile_file_name,
             prover_choice,
@@ -1403,7 +1433,9 @@ impl Verifier {
             PreludeConfig {
                 arch_word_bits: ctx.arch_word_bits,
                 solver: self.args.solver,
-                neutral_height: self.args.cross_check != air::solver_set::CrossCheckPolicy::Off,
+                neutral_height: self.args.cross_check != air::solver_set::CrossCheckPolicy::Off
+                    || self.args.neutral_prelude
+                    || self.args.emit_smt_proofs.is_some(),
             },
             profile_all_file_name.as_ref(),
             vir::def::ProverChoice::DefaultProver,
