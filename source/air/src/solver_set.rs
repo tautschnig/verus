@@ -27,6 +27,15 @@ pub enum SolverVerdict {
 }
 
 impl SolverVerdict {
+    /// Human-readable verdict name for diagnostics.
+    pub fn name(&self) -> &'static str {
+        match self {
+            SolverVerdict::Unsat => "unsat",
+            SolverVerdict::Sat => "sat",
+            SolverVerdict::Unknown => "unknown",
+        }
+    }
+
     /// Extract the verdict from a solver's response lines. The last recognised verdict
     /// wins (a query ends in exactly one `check-sat` result once acknowledgements are
     /// stripped); anything unrecognised is treated as `Unknown`, never as a proof.

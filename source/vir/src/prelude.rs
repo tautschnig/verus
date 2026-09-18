@@ -10,6 +10,10 @@ use sise::TreeNode as Node;
 pub struct PreludeConfig {
     pub arch_word_bits: crate::ast::ArchWordBits,
     pub solver: SmtSolver,
+    /// Emit the solver-neutral (axiomatised) partial-order height prelude even under Z3,
+    /// so the identical text is valid for a second solver during cross-checking
+    /// (design 05 §2.1). Also settable via VERUS_NEUTRAL_PRELUDE for cost measurement.
+    pub neutral_height: bool,
 }
 
 pub(crate) fn prelude_nodes(name_ctxt: &NameCtxt, config: PreludeConfig) -> Vec<Node> {
@@ -68,7 +72,7 @@ pub(crate) fn prelude_nodes(name_ctxt: &NameCtxt, config: PreludeConfig) -> Vec<
     // Z3's `(_ partial-order 0)` special relation, so the identical text is valid for both
     // solvers (design 05 §2.1). Opt-in via VERUS_NEUTRAL_PRELUDE so we can measure the cost
     // for Z3 alone (risk 1) without changing the default.
-    let neutral_prelude = std::env::var("VERUS_NEUTRAL_PRELUDE").is_ok();
+    let neutral_prelude = config.neutral_height || std::env::var("VERUS_NEUTRAL_PRELUDE").is_ok();
     let height_axioms = match config.solver {
         SmtSolver::Z3 if !neutral_prelude => nodes_vec!(
         (axiom (forall ((x [Height]) (y [Height])) (!
