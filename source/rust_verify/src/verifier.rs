@@ -2057,7 +2057,17 @@ impl Verifier {
                             // check-sat on the isolated `vac` context, so it never perturbs the
                             // canonical verdict. This detects dead-code obligations such as
                             // `if false { assert(..) }` (corpus V9).
-                            if self.args.vacuity_checks {
+                            //
+                            // Opt-out: `#[verifier::allow(unreachable_obligation)]` on the function
+                            // (or an enclosing item) silences this lint for that function. We check
+                            // it here and skip the whole probe loop, which also saves the solver the
+                            // corresponding reachability queries.
+                            if self.args.vacuity_checks
+                                && !function_opgen.ctx().global.fun_allows_warning(
+                                    &function.x.name,
+                                    &vir::messages::WarningAllow::UnreachableObligation,
+                                )
+                            {
                                 if let Some(vac) = vacuity_air_context.as_mut() {
                                     for cmds in commands_with_context_list.iter() {
                                         if cmds.prover_choice
