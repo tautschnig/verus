@@ -1,0 +1,1153 @@
+{
+  "schema": "verus-proof-coverage/1",
+  "artifact_version": "0.1",
+  "functions": [
+    {
+      "variant": "pc_fv%5ecac6bfa62bef28f73fa2a4fb0b1b3993f7a89ac12a21ba4fe6967c676235dc",
+      "fun": "assert_forall::forall_probe",
+      "cfg": {
+        "entry": "entry",
+        "exit": "exit",
+        "nodes": [
+          {
+            "id": "entry",
+            "kind": "entry"
+          },
+          {
+            "id": "exit",
+            "kind": "exit"
+          },
+          {
+            "id": "r.b0.b0.b0",
+            "kind": "dead_end",
+            "span": "proof_coverage/probes/assert_forall.rs:13:5: 13:11 (#0)"
+          },
+          {
+            "id": "r.b0.b0.b0.d.b0",
+            "kind": "assume",
+            "span": "proof_coverage/probes/assert_forall.rs:13:27: 13:38 (#0)"
+          },
+          {
+            "id": "r.b0.b0.b0.d.b1",
+            "kind": "assume",
+            "span": "proof_coverage/probes/assert_forall.rs:13:27: 13:38 (#0)"
+          },
+          {
+            "id": "r.b0.b0.b0.d.b2.b0",
+            "kind": "assign",
+            "span": "proof_coverage/probes/assert_forall.rs:14:16: 14:29 (#0)"
+          },
+          {
+            "id": "r.b0.b0.b0.d.b2.b1",
+            "kind": "assert",
+            "span": "proof_coverage/probes/assert_forall.rs:14:16: 14:29 (#0)"
+          },
+          {
+            "id": "r.b0.b0.b0.d.b2.b2",
+            "kind": "assume",
+            "span": "proof_coverage/probes/assert_forall.rs:14:16: 14:29 (#0)"
+          },
+          {
+            "id": "r.b0.b0.b0.d.b3",
+            "kind": "assert",
+            "span": "proof_coverage/probes/assert_forall.rs:13:47: 13:60 (#0)"
+          },
+          {
+            "id": "r.b0.b0.b1",
+            "kind": "assume",
+            "span": "proof_coverage/probes/assert_forall.rs:13:47: 13:60 (#0)"
+          },
+          {
+            "id": "r.b1",
+            "kind": "return",
+            "span": "proof_coverage/probes/assert_forall.rs:12:1: 16:2 (#0)"
+          }
+        ],
+        "edges": [
+          {
+            "from": "entry",
+            "to": "r.b0.b0.b0",
+            "kind": "next"
+          },
+          {
+            "from": "r.b0.b0.b0",
+            "to": "r.b0.b0.b0.d.b0",
+            "kind": "next"
+          },
+          {
+            "from": "r.b0.b0.b0.d.b0",
+            "to": "r.b0.b0.b0.d.b1",
+            "kind": "next"
+          },
+          {
+            "from": "r.b0.b0.b0.d.b1",
+            "to": "r.b0.b0.b0.d.b2.b0",
+            "kind": "next"
+          },
+          {
+            "from": "r.b0.b0.b0.d.b2.b0",
+            "to": "r.b0.b0.b0.d.b2.b1",
+            "kind": "next"
+          },
+          {
+            "from": "r.b0.b0.b0.d.b2.b1",
+            "to": "r.b0.b0.b0.d.b2.b2",
+            "kind": "next"
+          },
+          {
+            "from": "r.b0.b0.b0.d.b2.b2",
+            "to": "r.b0.b0.b0.d.b3",
+            "kind": "next"
+          },
+          {
+            "from": "r.b0.b0.b0",
+            "to": "r.b0.b0.b1",
+            "kind": "next"
+          },
+          {
+            "from": "r.b0.b0.b1",
+            "to": "r.b1",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1",
+            "to": "exit",
+            "kind": "return"
+          },
+          {
+            "from": "r.b1",
+            "to": "exit",
+            "kind": "next"
+          }
+        ]
+      },
+      "call_sites": [],
+      "sst_assumes": [
+        {
+          "intent": "HasType",
+          "span": "proof_coverage/probes/assert_forall.rs:13:27: 13:38 (#0)",
+          "recognizable": true,
+          "node": "r.b0.b0.b0.d.b0",
+          "sig": "app"
+        },
+        {
+          "intent": "AssertForallRequire",
+          "span": "proof_coverage/probes/assert_forall.rs:13:27: 13:38 (#0)",
+          "recognizable": false,
+          "node": "r.b0.b0.b0.d.b1",
+          "sig": "let"
+        },
+        {
+          "intent": "VarEquality",
+          "span": "proof_coverage/probes/assert_forall.rs:14:16: 14:29 (#0)",
+          "recognizable": false,
+          "node": "r.b0.b0.b0.d.b2.b0",
+          "sig": "eq(var,eq(app,binop(const,var)))"
+        },
+        {
+          "intent": "AssertedProposition",
+          "span": "proof_coverage/probes/assert_forall.rs:14:16: 14:29 (#0)",
+          "recognizable": true,
+          "node": "r.b0.b0.b0.d.b2.b2",
+          "sig": "var"
+        },
+        {
+          "intent": "AssertForallEnsures",
+          "span": "proof_coverage/probes/assert_forall.rs:13:47: 13:60 (#0)",
+          "recognizable": false,
+          "node": "r.b0.b0.b1",
+          "sig": "forall"
+        }
+      ],
+      "ens_spans": [
+        "proof_coverage/probes/assert_forall.rs:11:9: 11:53 (#0)"
+      ],
+      "req_spans": [],
+      "synthetic_bindings": [
+        "r.b0.b0.b0.d.b2.b0"
+      ],
+      "param_spans": [
+        "proof_coverage/probes/assert_forall.rs:9:7: 9:24 (#0)"
+      ],
+      "loops": []
+    },
+    {
+      "variant": "pc_fv%277126c99b9af512eeccb5242a1488dd67cc0e4e6908409f986a3b4dc5890cf6",
+      "fun": "assert_forall::main",
+      "cfg": {
+        "entry": "entry",
+        "exit": "exit",
+        "nodes": [
+          {
+            "id": "entry",
+            "kind": "entry"
+          },
+          {
+            "id": "exit",
+            "kind": "exit"
+          },
+          {
+            "id": "r.b0.b0.b0",
+            "kind": "call",
+            "span": "proof_coverage/probes/assert_forall.rs:20:9: 20:23 (#0)"
+          },
+          {
+            "id": "r.b1",
+            "kind": "return",
+            "span": "proof_coverage/probes/assert_forall.rs:19:11: 21:6 (#0)"
+          }
+        ],
+        "edges": [
+          {
+            "from": "entry",
+            "to": "r.b0.b0.b0",
+            "kind": "next"
+          },
+          {
+            "from": "r.b0.b0.b0",
+            "to": "r.b1",
+            "kind": "next"
+          },
+          {
+            "from": "r.b1",
+            "to": "exit",
+            "kind": "return"
+          },
+          {
+            "from": "r.b1",
+            "to": "exit",
+            "kind": "next"
+          }
+        ]
+      },
+      "call_sites": [
+        [
+          "r.b0.b0.b0",
+          "proof_coverage/probes/assert_forall.rs:20:9: 20:23 (#0)",
+          "assert_forall::forall_probe"
+        ]
+      ],
+      "sst_assumes": [],
+      "ens_spans": [],
+      "req_spans": [],
+      "param_spans": [
+        "proof_coverage/probes/assert_forall.rs:18:1: 18:10 (#0)"
+      ],
+      "loops": []
+    }
+  ],
+  "source_functions": [
+    {
+      "fun": "vstd::function::axiom_fn_mut_call_requires",
+      "friendly": "vstd::function::axiom_fn_mut_call_requires",
+      "krate": "vstd",
+      "local": false,
+      "mode": "proof",
+      "kind": {
+        "kind": "static"
+      },
+      "item": "function",
+      "module": "vstd::function",
+      "visibility": {
+        "scope": "public"
+      },
+      "body_visibility": {
+        "body": "visible",
+        "visibility": {
+          "scope": "restricted",
+          "module": "vstd::function"
+        }
+      },
+      "opaqueness": {
+        "opaqueness": "opaque"
+      },
+      "has_body": false,
+      "external_body": true,
+      "broadcast": true,
+      "span": "vstd/function.rs:135:1: 138:2 (#0)"
+    },
+    {
+      "fun": "vstd::function::axiom_fn_mut_call_ensures",
+      "friendly": "vstd::function::axiom_fn_mut_call_ensures",
+      "krate": "vstd",
+      "local": false,
+      "mode": "proof",
+      "kind": {
+        "kind": "static"
+      },
+      "item": "function",
+      "module": "vstd::function",
+      "visibility": {
+        "scope": "public"
+      },
+      "body_visibility": {
+        "body": "visible",
+        "visibility": {
+          "scope": "restricted",
+          "module": "vstd::function"
+        }
+      },
+      "opaqueness": {
+        "opaqueness": "opaque"
+      },
+      "has_body": false,
+      "external_body": true,
+      "broadcast": true,
+      "span": "vstd/function.rs:145:1: 149:2 (#0)"
+    },
+    {
+      "fun": "assert_forall::f",
+      "friendly": "assert_forall::f",
+      "krate": "assert_forall",
+      "local": true,
+      "mode": "spec",
+      "kind": {
+        "kind": "static"
+      },
+      "item": "function",
+      "module": "assert_forall",
+      "visibility": {
+        "scope": "restricted",
+        "module": "assert_forall"
+      },
+      "body_visibility": {
+        "body": "visible",
+        "visibility": {
+          "scope": "restricted",
+          "module": "assert_forall"
+        }
+      },
+      "opaqueness": {
+        "opaqueness": "revealed",
+        "visibility": {
+          "scope": "restricted",
+          "module": "assert_forall"
+        }
+      },
+      "has_body": true,
+      "external_body": false,
+      "broadcast": false,
+      "span": "proof_coverage/probes/assert_forall.rs:5:6: 5:25 (#0)"
+    },
+    {
+      "fun": "assert_forall::forall_probe",
+      "friendly": "assert_forall::forall_probe",
+      "krate": "assert_forall",
+      "local": true,
+      "mode": "proof",
+      "kind": {
+        "kind": "static"
+      },
+      "item": "function",
+      "module": "assert_forall",
+      "visibility": {
+        "scope": "restricted",
+        "module": "assert_forall"
+      },
+      "body_visibility": {
+        "body": "visible",
+        "visibility": {
+          "scope": "restricted",
+          "module": "assert_forall"
+        }
+      },
+      "opaqueness": {
+        "opaqueness": "opaque"
+      },
+      "has_body": true,
+      "external_body": false,
+      "broadcast": false,
+      "span": "proof_coverage/probes/assert_forall.rs:9:7: 9:24 (#0)"
+    },
+    {
+      "fun": "assert_forall::main",
+      "friendly": "assert_forall::main",
+      "krate": "assert_forall",
+      "local": true,
+      "mode": "exec",
+      "kind": {
+        "kind": "static"
+      },
+      "item": "function",
+      "module": "assert_forall",
+      "visibility": {
+        "scope": "restricted",
+        "module": "assert_forall"
+      },
+      "body_visibility": {
+        "body": "visible",
+        "visibility": {
+          "scope": "restricted",
+          "module": "assert_forall"
+        }
+      },
+      "opaqueness": {
+        "opaqueness": "opaque"
+      },
+      "has_body": true,
+      "external_body": false,
+      "broadcast": false,
+      "span": "proof_coverage/probes/assert_forall.rs:18:1: 18:10 (#0)"
+    }
+  ],
+  "queries": [
+    {
+      "id": 0,
+      "family": "batch",
+      "function_variant": "pc_fv%5ecac6bfa62bef28f73fa2a4fb0b1b3993f7a89ac12a21ba4fe6967c676235dc",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "assert_forall::forall_probe",
+      "desc": "function body check",
+      "span": "proof_coverage/probes/assert_forall.rs:9:7: 9:24 (#0)",
+      "ambient_batches": 34,
+      "occurrences": [
+        {
+          "path": "local._",
+          "role": "premise",
+          "carrier": "axiom(query_local)",
+          "origin": {
+            "kind": "generated",
+            "detail": "fuel"
+          },
+          "emission": {
+            "kind": "fuel",
+            "site": "function"
+          },
+          "span": "proof_coverage/probes/assert_forall.rs:9:7: 9:24 (#0)",
+          "label": "pc%0%local%0",
+          "rule": "sst.emitted_local_axiom"
+        },
+        {
+          "path": "b1.d.b0",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "generated",
+            "detail": "type_invariant"
+          },
+          "emission": {
+            "kind": "type_invariant",
+            "site": "statement"
+          },
+          "span": "proof_coverage/probes/assert_forall.rs:13:27: 13:38 (#0)",
+          "label": "pc%0%0",
+          "node": "r.b0.b0.b0.d.b0",
+          "rule": "air.type_invariant"
+        },
+        {
+          "path": "b1.d.b1",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "source",
+            "detail": "sst:AssertForallRequire"
+          },
+          "emission": {
+            "kind": "assert_forall",
+            "point": "hypothesis"
+          },
+          "span": "proof_coverage/probes/assert_forall.rs:13:47: 13:60 (#0)",
+          "label": "pc%0%1",
+          "node": "r.b0.b0.b0.d.b1",
+          "artifact": "assert_forall::forall_probe#forall.src0",
+          "rule": "sst.exact_lowering",
+          "join_rule": "join.forall_site"
+        },
+        {
+          "path": "b1.d.b2",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "sst:VarEquality"
+          },
+          "emission": {
+            "kind": "assignment_equality"
+          },
+          "span": "proof_coverage/probes/assert_forall.rs:14:16: 14:29 (#0)",
+          "label": "pc%0%2",
+          "node": "r.b0.b0.b0.d.b2.b0",
+          "rule": "sst.exact_lowering"
+        },
+        {
+          "path": "b1.d.b3",
+          "role": "obligation",
+          "carrier": "assert",
+          "origin": {
+            "kind": "source",
+            "detail": "assertion"
+          },
+          "emission": {
+            "kind": "assertion",
+            "point": "check"
+          },
+          "span": "proof_coverage/probes/assert_forall.rs:14:16: 14:29 (#0)",
+          "assert_id": "[0]",
+          "label": "pc%0%3",
+          "node": "r.b0.b0.b0.d.b2.b1",
+          "artifact": "assert_forall::forall_probe#assert.src0",
+          "rule": "msg.obligation_note",
+          "join_rule": "join.assert_site"
+        },
+        {
+          "path": "b1.d.b4",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "asserted_proposition"
+          },
+          "emission": {
+            "kind": "assertion",
+            "point": "establish"
+          },
+          "span": "proof_coverage/probes/assert_forall.rs:14:16: 14:29 (#0)",
+          "label": "pc%0%4",
+          "node": "r.b0.b0.b0.d.b2.b2",
+          "artifact": "assert_forall::forall_probe#assert.src0",
+          "rule": "walk.asserted_proposition",
+          "join_rule": "join.assert_site"
+        },
+        {
+          "path": "b1.d.b5",
+          "role": "obligation",
+          "carrier": "assert",
+          "origin": {
+            "kind": "source",
+            "detail": "assertion"
+          },
+          "emission": {
+            "kind": "assert_forall",
+            "point": "goal"
+          },
+          "span": "proof_coverage/probes/assert_forall.rs:13:47: 13:60 (#0)",
+          "assert_id": "[1]",
+          "label": "pc%0%5",
+          "node": "r.b0.b0.b0.d.b3",
+          "artifact": "assert_forall::forall_probe#forall.src0",
+          "rule": "msg.obligation_note",
+          "join_rule": "join.forall_site"
+        },
+        {
+          "path": "b2",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "derived",
+            "detail": "sst:AssertForallEnsures"
+          },
+          "emission": {
+            "kind": "assert_forall",
+            "point": "establish"
+          },
+          "span": "proof_coverage/probes/assert_forall.rs:13:47: 13:60 (#0)",
+          "label": "pc%0%6",
+          "node": "r.b0.b0.b1",
+          "artifact": "assert_forall::forall_probe#forall.src0",
+          "rule": "sst.exact_lowering",
+          "join_rule": "join.forall_site"
+        },
+        {
+          "path": "b3",
+          "role": "obligation",
+          "carrier": "assert",
+          "origin": {
+            "kind": "source",
+            "detail": "ensures"
+          },
+          "emission": {
+            "kind": "function_ensures"
+          },
+          "span": "proof_coverage/probes/assert_forall.rs:11:9: 11:53 (#0)",
+          "assert_id": "[2]",
+          "label": "pc%0%7",
+          "node": "exit",
+          "artifact": "assert_forall::forall_probe#ens[0]",
+          "rule": "msg.obligation_note",
+          "join_rule": "join.clause_span"
+        }
+      ],
+      "results": [
+        "valid"
+      ],
+      "shadow_result": "valid",
+      "evidence_backend": "unsat_core",
+      "core": [
+        "pc%0%0",
+        "pc%0%1",
+        "pc%0%2",
+        "pc%0%3",
+        "pc%0%5",
+        "pc%0%6",
+        "pc%0%7",
+        "pc%0%local%0",
+        "pc_a%a47f649a7b53ce33c306cd1400043b72",
+        "pc_a%cadcd396bf5c9acaea8b7e678d81db5f"
+      ]
+    },
+    {
+      "id": 1,
+      "family": "focused",
+      "parent": 0,
+      "parent_obligation_label": "pc%0%3",
+      "target_label": "pc%0%t%0%0",
+      "terminal_path": "",
+      "function_variant": "pc_fv%5ecac6bfa62bef28f73fa2a4fb0b1b3993f7a89ac12a21ba4fe6967c676235dc",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "assert_forall::forall_probe",
+      "desc": "function body check",
+      "span": "proof_coverage/probes/assert_forall.rs:9:7: 9:24 (#0)",
+      "ambient_batches": 34,
+      "available": [
+        "pc%0%0",
+        "pc%0%1",
+        "pc%0%2",
+        "pc%0%local%0",
+        "pc%0%t%0%0"
+      ],
+      "occurrences": [],
+      "results": [],
+      "shadow_result": "valid",
+      "evidence_backend": "unsat_core",
+      "core": [
+        "pc%0%0",
+        "pc%0%local%0",
+        "pc%0%t%0%0",
+        "pc_a%a47f649a7b53ce33c306cd1400043b72",
+        "pc_a%cadcd396bf5c9acaea8b7e678d81db5f"
+      ]
+    },
+    {
+      "id": 2,
+      "family": "focused",
+      "parent": 0,
+      "parent_obligation_label": "pc%0%5",
+      "target_label": "pc%0%t%1%0",
+      "terminal_path": "",
+      "function_variant": "pc_fv%5ecac6bfa62bef28f73fa2a4fb0b1b3993f7a89ac12a21ba4fe6967c676235dc",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "assert_forall::forall_probe",
+      "desc": "function body check",
+      "span": "proof_coverage/probes/assert_forall.rs:9:7: 9:24 (#0)",
+      "ambient_batches": 34,
+      "available": [
+        "pc%0%0",
+        "pc%0%1",
+        "pc%0%2",
+        "pc%0%4",
+        "pc%0%local%0",
+        "pc%0%t%1%0"
+      ],
+      "occurrences": [],
+      "results": [],
+      "shadow_result": "valid",
+      "evidence_backend": "unsat_core",
+      "core": [
+        "pc%0%1",
+        "pc%0%2",
+        "pc%0%4",
+        "pc%0%t%1%0"
+      ]
+    },
+    {
+      "id": 3,
+      "family": "focused",
+      "parent": 0,
+      "parent_obligation_label": "pc%0%7",
+      "target_label": "pc%0%t%2%0",
+      "terminal_path": "",
+      "function_variant": "pc_fv%5ecac6bfa62bef28f73fa2a4fb0b1b3993f7a89ac12a21ba4fe6967c676235dc",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "assert_forall::forall_probe",
+      "desc": "function body check",
+      "span": "proof_coverage/probes/assert_forall.rs:9:7: 9:24 (#0)",
+      "ambient_batches": 34,
+      "available": [
+        "pc%0%6",
+        "pc%0%local%0",
+        "pc%0%t%2%0"
+      ],
+      "occurrences": [],
+      "results": [],
+      "shadow_result": "valid",
+      "evidence_backend": "unsat_core",
+      "core": [
+        "pc%0%6",
+        "pc%0%t%2%0"
+      ]
+    },
+    {
+      "id": 4,
+      "family": "batch",
+      "function_variant": "pc_fv%277126c99b9af512eeccb5242a1488dd67cc0e4e6908409f986a3b4dc5890cf6",
+      "solver_context": 0,
+      "solver_config": {
+        "solver": "z3",
+        "options": [
+          [
+            "air_recommended_options",
+            "true"
+          ]
+        ],
+        "rlimit": 30000000,
+        "single_check_query": false,
+        "ignore_unexpected_smt": false,
+        "debug": false,
+        "expected_solver_version": "4.16.0"
+      },
+      "fun": "assert_forall::main",
+      "desc": "function body check",
+      "span": "proof_coverage/probes/assert_forall.rs:18:1: 18:10 (#0)",
+      "ambient_batches": 36,
+      "occurrences": [
+        {
+          "path": "local._",
+          "role": "premise",
+          "carrier": "axiom(query_local)",
+          "origin": {
+            "kind": "generated",
+            "detail": "fuel"
+          },
+          "emission": {
+            "kind": "fuel",
+            "site": "function"
+          },
+          "span": "proof_coverage/probes/assert_forall.rs:18:1: 18:10 (#0)",
+          "label": "pc%4%local%0",
+          "rule": "sst.emitted_local_axiom"
+        },
+        {
+          "path": "b1.b0",
+          "role": "premise",
+          "carrier": "assume",
+          "origin": {
+            "kind": "source",
+            "detail": "ensures_of:assert_forall::forall_probe"
+          },
+          "emission": {
+            "kind": "call_postcondition",
+            "callee": "assert_forall::forall_probe"
+          },
+          "span": "proof_coverage/probes/assert_forall.rs:20:9: 20:23 (#0)",
+          "label": "pc%4%0",
+          "node": "r.b0.b0.b0",
+          "artifact": "assert_forall::forall_probe#ens",
+          "rule": "air.callee_ensures",
+          "join_rule": "join.contract_aggregate"
+        }
+      ],
+      "results": [
+        "valid"
+      ],
+      "shadow_result": "valid",
+      "evidence_backend": "unsat_core",
+      "core": []
+    }
+  ],
+  "ambients": [
+    {
+      "label": "pc_a%726c23e568f15f210bad3f34534591ce",
+      "op": "Broadcast",
+      "owner": "vstd::function::axiom_fn_mut_call_requires",
+      "solver_contexts": [
+        0
+      ]
+    },
+    {
+      "label": "pc_a%a47f649a7b53ce33c306cd1400043b72",
+      "op": "SpecDefinition",
+      "owner": "assert_forall::f",
+      "solver_contexts": [
+        0
+      ]
+    },
+    {
+      "label": "pc_a%bf588da22bbbe2872c581a4ccfc3cc1a",
+      "op": "Broadcast",
+      "owner": "vstd::function::axiom_fn_mut_call_ensures",
+      "solver_contexts": [
+        0
+      ]
+    },
+    {
+      "label": "pc_a%c3fc51fc575eab10fff1dd088641180b",
+      "op": "ReqEns",
+      "owner": "assert_forall::forall_probe",
+      "solver_contexts": [
+        0
+      ]
+    },
+    {
+      "label": "pc_a%cadcd396bf5c9acaea8b7e678d81db5f",
+      "op": "SpecDefinition",
+      "owner": "assert_forall::f",
+      "solver_contexts": [
+        0
+      ]
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "assert_forall::f",
+      "kind": "function",
+      "owner": "assert_forall::f"
+    },
+    {
+      "id": "assert_forall::f#ens",
+      "kind": "ensures_aggregate",
+      "owner": "assert_forall::f",
+      "parent": "assert_forall::f"
+    },
+    {
+      "id": "assert_forall::f#req",
+      "kind": "requires_aggregate",
+      "owner": "assert_forall::f",
+      "parent": "assert_forall::f"
+    },
+    {
+      "id": "assert_forall::f#return.src0",
+      "kind": "return_binding",
+      "owner": "assert_forall::f",
+      "span": "proof_coverage/probes/assert_forall.rs:6:5: 6:10 (#0)",
+      "parent": "assert_forall::f"
+    },
+    {
+      "id": "assert_forall::forall_probe",
+      "kind": "function",
+      "owner": "assert_forall::forall_probe"
+    },
+    {
+      "id": "assert_forall::forall_probe#assert.src0",
+      "kind": "assertion",
+      "owner": "assert_forall::forall_probe",
+      "span": "proof_coverage/probes/assert_forall.rs:14:16: 14:29 (#0)",
+      "parent": "assert_forall::forall_probe"
+    },
+    {
+      "id": "assert_forall::forall_probe#call.src0",
+      "kind": "call_site",
+      "owner": "assert_forall::forall_probe",
+      "span": "proof_coverage/probes/assert_forall.rs:13:47: 13:51 (#0)",
+      "parent": "assert_forall::forall_probe",
+      "callee": "assert_forall::f"
+    },
+    {
+      "id": "assert_forall::forall_probe#call.src1",
+      "kind": "call_site",
+      "owner": "assert_forall::forall_probe",
+      "span": "proof_coverage/probes/assert_forall.rs:14:16: 14:20 (#0)",
+      "parent": "assert_forall::forall_probe",
+      "callee": "assert_forall::f"
+    },
+    {
+      "id": "assert_forall::forall_probe#ens",
+      "kind": "ensures_aggregate",
+      "owner": "assert_forall::forall_probe",
+      "parent": "assert_forall::forall_probe"
+    },
+    {
+      "id": "assert_forall::forall_probe#ens[0]",
+      "kind": "ensures_clause",
+      "owner": "assert_forall::forall_probe",
+      "span": "proof_coverage/probes/assert_forall.rs:11:9: 11:53 (#0)",
+      "parent": "assert_forall::forall_probe#ens"
+    },
+    {
+      "id": "assert_forall::forall_probe#forall.src0",
+      "kind": "assert_forall",
+      "owner": "assert_forall::forall_probe",
+      "span": "proof_coverage/probes/assert_forall.rs:13:47: 13:60 (#0)",
+      "parent": "assert_forall::forall_probe"
+    },
+    {
+      "id": "assert_forall::forall_probe#req",
+      "kind": "requires_aggregate",
+      "owner": "assert_forall::forall_probe",
+      "parent": "assert_forall::forall_probe"
+    },
+    {
+      "id": "assert_forall::main",
+      "kind": "function",
+      "owner": "assert_forall::main"
+    },
+    {
+      "id": "assert_forall::main#call.src0",
+      "kind": "call_site",
+      "owner": "assert_forall::main",
+      "span": "proof_coverage/probes/assert_forall.rs:20:9: 20:23 (#0)",
+      "parent": "assert_forall::main",
+      "callee": "assert_forall::forall_probe",
+      "cfg_node": "r.b0.b0.b0"
+    },
+    {
+      "id": "assert_forall::main#ens",
+      "kind": "ensures_aggregate",
+      "owner": "assert_forall::main",
+      "parent": "assert_forall::main"
+    },
+    {
+      "id": "assert_forall::main#req",
+      "kind": "requires_aggregate",
+      "owner": "assert_forall::main",
+      "parent": "assert_forall::main"
+    },
+    {
+      "id": "assert_forall::main#return.src0",
+      "kind": "return_binding",
+      "owner": "assert_forall::main",
+      "span": "proof_coverage/probes/assert_forall.rs:19:11: 21:6 (#0)",
+      "parent": "assert_forall::main"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_ensures",
+      "kind": "function",
+      "owner": "vstd::function::axiom_fn_mut_call_ensures"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_ensures#ens",
+      "kind": "ensures_aggregate",
+      "owner": "vstd::function::axiom_fn_mut_call_ensures",
+      "parent": "vstd::function::axiom_fn_mut_call_ensures"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_ensures#ens[0]",
+      "kind": "ensures_clause",
+      "owner": "vstd::function::axiom_fn_mut_call_ensures",
+      "span": "vstd/function.rs:153:9: 153:66 (#0)",
+      "parent": "vstd::function::axiom_fn_mut_call_ensures#ens"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_ensures#ens[1]",
+      "kind": "ensures_clause",
+      "owner": "vstd::function::axiom_fn_mut_call_ensures",
+      "span": "vstd/function.rs:154:9: 154:48 (#0)",
+      "parent": "vstd::function::axiom_fn_mut_call_ensures#ens"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_ensures#req",
+      "kind": "requires_aggregate",
+      "owner": "vstd::function::axiom_fn_mut_call_ensures",
+      "parent": "vstd::function::axiom_fn_mut_call_ensures"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_ensures#req[0]",
+      "kind": "requires_clause",
+      "owner": "vstd::function::axiom_fn_mut_call_ensures",
+      "span": "vstd/function.rs:151:20: 151:65 (#0)",
+      "parent": "vstd::function::axiom_fn_mut_call_ensures#req"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_requires",
+      "kind": "function",
+      "owner": "vstd::function::axiom_fn_mut_call_requires"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_requires#ens",
+      "kind": "ensures_aggregate",
+      "owner": "vstd::function::axiom_fn_mut_call_requires",
+      "parent": "vstd::function::axiom_fn_mut_call_requires"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_requires#ens[0]",
+      "kind": "ensures_clause",
+      "owner": "vstd::function::axiom_fn_mut_call_requires",
+      "span": "vstd/function.rs:142:20: 142:58 (#0)",
+      "parent": "vstd::function::axiom_fn_mut_call_requires#ens"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_requires#req",
+      "kind": "requires_aggregate",
+      "owner": "vstd::function::axiom_fn_mut_call_requires",
+      "parent": "vstd::function::axiom_fn_mut_call_requires"
+    },
+    {
+      "id": "vstd::function::axiom_fn_mut_call_requires#req[0]",
+      "kind": "requires_clause",
+      "owner": "vstd::function::axiom_fn_mut_call_requires",
+      "span": "vstd/function.rs:140:9: 140:59 (#0)",
+      "parent": "vstd::function::axiom_fn_mut_call_requires#req"
+    }
+  ],
+  "refinements": [],
+  "derivations": [
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%277126c99b9af512eeccb5242a1488dd67cc0e4e6908409f986a3b4dc5890cf6:r.b0.b0.b0"
+      ],
+      "outputs": [
+        "pc%4%0"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%5ecac6bfa62bef28f73fa2a4fb0b1b3993f7a89ac12a21ba4fe6967c676235dc:r.b0.b0.b0.d.b0"
+      ],
+      "outputs": [
+        "pc%0%0"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%5ecac6bfa62bef28f73fa2a4fb0b1b3993f7a89ac12a21ba4fe6967c676235dc:r.b0.b0.b0.d.b1"
+      ],
+      "outputs": [
+        "pc%0%1"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%5ecac6bfa62bef28f73fa2a4fb0b1b3993f7a89ac12a21ba4fe6967c676235dc:r.b0.b0.b0.d.b2.b0"
+      ],
+      "outputs": [
+        "pc%0%2"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%5ecac6bfa62bef28f73fa2a4fb0b1b3993f7a89ac12a21ba4fe6967c676235dc:r.b0.b0.b0.d.b2.b1"
+      ],
+      "outputs": [
+        "pc%0%3"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%5ecac6bfa62bef28f73fa2a4fb0b1b3993f7a89ac12a21ba4fe6967c676235dc:r.b0.b0.b0.d.b2.b2"
+      ],
+      "outputs": [
+        "pc%0%4"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%5ecac6bfa62bef28f73fa2a4fb0b1b3993f7a89ac12a21ba4fe6967c676235dc:r.b0.b0.b0.d.b3"
+      ],
+      "outputs": [
+        "pc%0%5"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%5ecac6bfa62bef28f73fa2a4fb0b1b3993f7a89ac12a21ba4fe6967c676235dc:r.b0.b0.b1"
+      ],
+      "outputs": [
+        "pc%0%6"
+      ]
+    },
+    {
+      "transform": "lower_statement",
+      "inputs": [
+        "pc_fv%5ecac6bfa62bef28f73fa2a4fb0b1b3993f7a89ac12a21ba4fe6967c676235dc:r.b1"
+      ],
+      "outputs": [
+        "pc%0%7"
+      ]
+    },
+    {
+      "transform": "terminal_split",
+      "inputs": [
+        "pc%0%3"
+      ],
+      "outputs": [
+        "pc%0%t%0%0"
+      ]
+    },
+    {
+      "transform": "terminal_split",
+      "inputs": [
+        "pc%0%5"
+      ],
+      "outputs": [
+        "pc%0%t%1%0"
+      ]
+    },
+    {
+      "transform": "terminal_split",
+      "inputs": [
+        "pc%0%7"
+      ],
+      "outputs": [
+        "pc%0%t%2%0"
+      ]
+    }
+  ],
+  "summary": {
+    "queries": 5,
+    "premises": 8,
+    "obligations": 3,
+    "unresolved_premises": 0,
+    "unresolved_obligations": 0,
+    "unresolved_buckets": [],
+    "results": [
+      [
+        "valid",
+        2
+      ]
+    ]
+  },
+  "record_id": "pc_r%48e50f8cdda2d17c2f766c4e7b46f330369137ec10966d49c158c6b864da0eb9"
+}
