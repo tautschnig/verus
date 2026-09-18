@@ -20,6 +20,10 @@ use crate::def::{
     snapshot_ident, suffix_global_id, suffix_local_unique_id, suffix_typ_param_ids,
 };
 use crate::messages::{Span, error, error_with_label};
+use crate::observer::{
+    EmissionSlot, EmissionSlotMap, EmittedClause, LocalAxiomMap, LocalAxiomSite, LoweredStatement,
+    LoweringFrame, LoweringProvenance, LoweringProvenanceMap, LoweringProvenanceMode, LoweringSite,
+};
 use crate::poly::{MonoTyp, MonoTypX, MonoTyps, typ_as_mono, typ_is_poly};
 use crate::sst::{ArithOp, BinaryOp, FuncCheckSst, Pars, PostConditionKind, Stms};
 use crate::sst::{
@@ -1598,6 +1602,15 @@ pub(crate) fn exp_to_expr(ctx: &Ctx, exp: &Exp, expr_ctxt: &ExprCtxt) -> Result<
     Ok(result)
 }
 
+/// One declared loop invariant, lowered, as carried through loop emission.
+///
+/// The last element is the clause's index in the *declaring* `invs` vector.
+/// It must be carried because lowering splits the declared invariants into
+/// `invs_entry` and `invs_exit`, pushing a clause with `at_entry && at_exit`
+/// into both: an index into either projection would not identify the source
+/// clause. It is passive provenance metadata and no lowering decision reads it.
+type LoopInvAir = (Span, Expr, Option<Arc<String>>, bool, usize);
+
 #[derive(Debug)]
 struct LoopInfo {
     loop_isolation: bool,
@@ -1606,8 +1619,8 @@ struct LoopInfo {
     loop_id: u64,
     air_break_label: Ident,
     some_cond: bool,
-    invs_entry: Arc<Vec<(Span, Expr, Option<Arc<String>>, bool)>>,
-    invs_exit: Arc<Vec<(Span, Expr, Option<Arc<String>>, bool)>>,
+    invs_entry: Arc<Vec<LoopInvAir>>,
+    invs_exit: Arc<Vec<LoopInvAir>>,
     decrease: crate::sst::Exps,
     au_branch_bool: Option<crate::sst::Exp>,
 }
@@ -1640,6 +1653,17 @@ struct State {
     post_condition_info: PostConditionInfo,
     loop_infos: Vec<LoopInfo>,
     static_prelude: Vec<Stmt>,
+    /// Passive metadata only. Absent on the normal verifier path so lowering
+    /// does not recursively traverse generated AIR statements for provenance.
+    lowering_provenance: Option<LoweringProvenanceState>,
+}
+
+#[derive(Default)]
+struct LoweringProvenanceState {
+    stack: Vec<LoweringFrame>,
+    statements: LoweringProvenanceMap,
+    slots: EmissionSlotMap,
+    local_axioms: LocalAxiomMap,
 }
 
 impl State {
@@ -1673,6 +1697,65 @@ impl State {
         sid
     }
 
+    fn record_lowered_statements(&mut self, stmts: &[Stmt]) {
+        let Some(provenance) = &mut self.lowering_provenance else {
+            return;
+        };
+        for stmt in stmts {
+            Self::record_lowered_statement_in(provenance, stmt);
+        }
+    }
+
+    fn record_lowered_statement(&mut self, stmt: &Stmt) {
+        let Some(provenance) = &mut self.lowering_provenance else {
+            return;
+        };
+        Self::record_lowered_statement_in(provenance, stmt);
+    }
+
+
+    fn record_lowered_statement_in(provenance: &mut LoweringProvenanceState, stmt: &Stmt) {
+        let record_self = |provenance: &mut LoweringProvenanceState| {
+            let emitted_at = provenance
+                .stack
+                .last()
+                .map(|frame| frame.site)
+                .unwrap_or(LoweringSite::QueryAssembly);
+            provenance.statements.entry(Arc::as_ptr(stmt) as usize).or_insert_with(|| {
+                LoweredStatement { source_chain: provenance.stack.clone(), emitted_at }
+            });
+        };
+        match &**stmt {
+            // Assignments are recorded too: `var_to_const` turns each into an
+            // equality assumption after this point, and a consumer that wants
+            // to cover that equality needs to know which statement made it.
+            // So are the control-flow joins (`Switch`, `Breakable`, `Break`):
+            // `var_to_const` inserts version-reconciliation equalities at them.
+            StmtX::Assume(..) | StmtX::Assert(..) | StmtX::Assign(..) | StmtX::Break(..) => {
+                record_self(provenance);
+            }
+            StmtX::Block(stmts) => {
+                for stmt in stmts.iter() {
+                    Self::record_lowered_statement_in(provenance, stmt);
+                }
+            }
+            StmtX::Switch(stmts) => {
+                record_self(provenance);
+                for stmt in stmts.iter() {
+                    Self::record_lowered_statement_in(provenance, stmt);
+                }
+            }
+            StmtX::Breakable(_, inner) => {
+                record_self(provenance);
+                Self::record_lowered_statement_in(provenance, inner);
+            }
+            StmtX::DeadEnd(inner) => {
+                Self::record_lowered_statement_in(provenance, inner);
+            }
+            StmtX::Havoc(..) | StmtX::Snapshot(..) => {}
+        }
+    }
+
     // fn get_assigned_set(&self, stm: &Stm) -> HashSet<Arc<String>> {
     //     if let Some(s) = self.assign_map.get(&Arc::as_ptr(stm)) {
     //         return s.clone();
@@ -1699,7 +1782,7 @@ pub(crate) fn assume_var(span: &Span, x: &UniqueIdent, exp: &Exp) -> Stm {
     let x_var = SpannedTyped::new(&span, &exp.typ, ExpX::Var(x.clone()));
     let eqx = ExpX::Binary(BinaryOp::Eq, x_var, exp.clone());
     let eq = SpannedTyped::new(&span, &Arc::new(TypX::Bool), eqx);
-    Spanned::new(span.clone(), StmX::Assume(eq))
+    Spanned::new(span.clone(), StmX::Assume(crate::sst::AssumeIntent::VarEquality, eq))
 }
 
 pub(crate) fn one_stmt(stmts: Vec<Stmt>) -> Stmt {
@@ -1879,7 +1962,104 @@ fn call_args_to_air(
     Ok(())
 }
 
+fn lowering_site(stm: &Stm) -> LoweringSite {
+    match &stm.x {
+        StmX::Call { .. } => LoweringSite::Call,
+        StmX::Assert(..) => LoweringSite::Assert,
+        StmX::AssertBitVector { .. } => LoweringSite::AssertBitVector,
+        StmX::AssertQuery { .. } => LoweringSite::AssertQuery,
+        StmX::AssertCompute(..) => LoweringSite::AssertCompute,
+        StmX::Assume(intent, ..) => LoweringSite::Assume(*intent),
+        StmX::Assign { lhs, .. } if lhs.is_init => LoweringSite::AssignInit,
+        StmX::Assign { .. } => LoweringSite::AssignUpdate,
+        StmX::Fuel(..) => LoweringSite::Fuel,
+        StmX::RevealString(..) => LoweringSite::RevealString,
+        StmX::RevealByteString(..) => LoweringSite::RevealByteString,
+        StmX::DeadEnd(..) => LoweringSite::DeadEnd,
+        StmX::Return { .. } => LoweringSite::Return,
+        StmX::BreakOrContinue { .. } => LoweringSite::BreakOrContinue,
+        StmX::If(..) => LoweringSite::If,
+        StmX::Loop { .. } => LoweringSite::Loop,
+        StmX::OpenInvariant(..) => LoweringSite::OpenInvariant,
+        StmX::ClosureInner { .. } => LoweringSite::ClosureInner,
+        StmX::Air(..) => LoweringSite::Air,
+        StmX::Block(..) => LoweringSite::Block,
+    }
+}
+
+/// Record which named slot of a multi-slot template emitted `stmt`, and which
+/// declared source clause it came from.
+///
+/// Passive metadata only, and a no-op on the normal verifier path. Called at
+/// the emission point, where the slot is a compile-time constant and the
+/// clause is the loop variable, so nothing is inferred or reconstructed.
+///
+/// `clause` must index the declaring list (the SST `invs` vector), not a
+/// projection such as `invs_entry`/`invs_exit`: loop lowering pushes a clause
+/// with `at_entry && at_exit` into both, so a projection index would give one
+/// source clause two identities.
+///
+/// Takes the provenance field rather than `&mut State` so it can be called
+/// while another `State` field is borrowed, and so it cannot reach anything
+/// the lowering decides.
+///
+/// First writer wins, matching `record_lowered_statement_in`.
+fn record_emission_slot(
+    provenance: &mut Option<LoweringProvenanceState>,
+    stmt: &Stmt,
+    slot: EmissionSlot,
+    clause: Option<usize>,
+    loop_id: Option<u64>,
+) {
+    let Some(provenance) = provenance else {
+        return;
+    };
+    provenance
+        .slots
+        .entry(Arc::as_ptr(stmt) as usize)
+        .or_insert(EmittedClause { slot, clause, loop_id });
+}
+
+/// Record which construction emitted a query-local axiom `decl`.
+///
+/// Passive metadata only, and a no-op on the normal verifier path. Called at
+/// the emission point, where the site is a compile-time constant and the
+/// declared item is the loop variable, so nothing is inferred.
+///
+/// Keyed by the `Decl` pointer: `local_shared` declarations are cloned into
+/// every query of the function by `Arc`, so one entry identifies the axiom
+/// wherever it appears. First writer wins, matching `record_emission_slot`.
+fn record_local_axiom(
+    provenance: &mut Option<LoweringProvenanceState>,
+    decl: &Decl,
+    site: LocalAxiomSite,
+) {
+    let Some(provenance) = provenance else {
+        return;
+    };
+    provenance.local_axioms.entry(Arc::as_ptr(decl) as usize).or_insert(site);
+}
+
 fn stm_to_stmts(ctx: &Ctx, state: &mut State, stm: &Stm) -> Result<Vec<Stmt>, VirErr> {
+    if state.lowering_provenance.is_none() {
+        return stm_to_stmts_inner(ctx, state, stm);
+    }
+
+    state
+        .lowering_provenance
+        .as_mut()
+        .unwrap()
+        .stack
+        .push(LoweringFrame { statement: Arc::as_ptr(stm) as usize, site: lowering_site(stm) });
+    let result = stm_to_stmts_inner(ctx, state, stm);
+    if let Ok(stmts) = &result {
+        state.record_lowered_statements(stmts);
+    }
+    state.lowering_provenance.as_mut().unwrap().stack.pop();
+    result
+}
+
+fn stm_to_stmts_inner(ctx: &Ctx, state: &mut State, stm: &Stm) -> Result<Vec<Stmt>, VirErr> {
     let typ_to_ids = |typ| typ_to_ids(ctx, typ);
     let expr_ctxt = &ExprCtxt::new();
     let result = match &stm.x {
@@ -2248,7 +2428,13 @@ fn stm_to_stmts(ctx: &Ctx, state: &mut State, stm: &Stm) -> Result<Vec<Stmt>, Vi
             for (x, typ) in typ_inv_vars.iter() {
                 let typ_inv = typ_invariant(ctx, typ, &ident_var(&suffix_local_unique_id(x)));
                 if let Some(expr) = typ_inv {
-                    local.push(mk_unnamed_axiom(expr));
+                    let axiom = mk_unnamed_axiom(expr);
+                    record_local_axiom(
+                        &mut state.lowering_provenance,
+                        &axiom,
+                        LocalAxiomSite::AssertQueryTypeInvariant,
+                    );
+                    local.push(axiom);
                 }
             }
 
@@ -2287,7 +2473,28 @@ fn stm_to_stmts(ctx: &Ctx, state: &mut State, stm: &Stm) -> Result<Vec<Stmt>, Vi
 
             let queries = bv_to_queries(ctx, requires, ensures)?;
 
-            for (query, error_desc) in queries.into_iter() {
+            for bv in queries.into_iter() {
+                // Passive provenance: the requires clauses arrive as
+                // query-local axioms and the ensures clauses as asserts.
+                for (axiom, clause) in &bv.requires_axioms {
+                    record_local_axiom(
+                        &mut state.lowering_provenance,
+                        axiom,
+                        LocalAxiomSite::AssertQueryRequires { clause: *clause },
+                    );
+                }
+                for (assert, clause) in &bv.ensures_asserts {
+                    // Recorded now, under the AssertBitVector frame, rather
+                    // than by the query-assembly completeness guard later.
+                    state.record_lowered_statement(assert);
+                    record_emission_slot(
+                        &mut state.lowering_provenance,
+                        assert,
+                        EmissionSlot::BitVectorAssertQueryEnsures,
+                        Some(*clause),
+                        None,
+                    );
+                }
                 state.commands.push(CommandsWithContextX::new(
                     ctx.fun
                         .as_ref()
@@ -2295,15 +2502,15 @@ fn stm_to_stmts(ctx: &Ctx, state: &mut State, stm: &Stm) -> Result<Vec<Stmt>, Vi
                         .current_fun
                         .clone(),
                     stm.span.clone(),
-                    error_desc,
-                    Arc::new(vec![Arc::new(CommandX::CheckValid(query))]),
+                    bv.error_desc,
+                    Arc::new(vec![Arc::new(CommandX::CheckValid(bv.query))]),
                     ProverChoice::BitVector,
                     true,
                 ));
             }
             vec![]
         }
-        StmX::Assume(expr) => {
+        StmX::Assume(_intent, expr) => {
             if ctx.debug {
                 state.map_span(&stm, SpanKind::Full);
             }
@@ -2439,7 +2646,13 @@ fn stm_to_stmts(ctx: &Ctx, state: &mut State, stm: &Stm) -> Result<Vec<Stmt>, Vi
                 } else {
                     error_with_label(&stm.span, "loop invariant not satisfied", "at this continue")
                 };
-                for (span, inv, msg, both) in invs.iter() {
+                let transfer_loop_id = loop_info.loop_id;
+                let transfer_slot = if *is_break {
+                    EmissionSlot::LoopAtBreak
+                } else {
+                    EmissionSlot::LoopAtContinue
+                };
+                for (span, inv, msg, both, clause) in invs.iter() {
                     let mut error = base_error.secondary_label(span, "failed this invariant");
                     if let Some(msg) = msg {
                         error = error.secondary_label(span, &**msg);
@@ -2450,7 +2663,15 @@ fn stm_to_stmts(ctx: &Ctx, state: &mut State, stm: &Stm) -> Result<Vec<Stmt>, Vi
                             and use 'ensures' for what is true at the break)";
                         error = error.secondary_label(span, msg);
                     }
-                    stmts.push(Arc::new(StmtX::Assert(None, error, None, inv.clone())));
+                    let inv_stmt = Arc::new(StmtX::Assert(None, error, None, inv.clone()));
+                    record_emission_slot(
+                        &mut state.lowering_provenance,
+                        &inv_stmt,
+                        transfer_slot,
+                        Some(*clause),
+                        Some(transfer_loop_id),
+                    );
+                    stmts.push(inv_stmt);
                 }
                 let decrease = &loop_info.decrease;
                 if !is_break && decrease.len() > 0 {
@@ -2509,6 +2730,20 @@ fn stm_to_stmts(ctx: &Ctx, state: &mut State, stm: &Stm) -> Result<Vec<Stmt>, Vi
             let neg_cond = Arc::new(ExprX::Unary(air::ast::UnaryOp::Not, pos_cond.clone()));
             let pos_assume = Arc::new(StmtX::Assume(pos_cond));
             let neg_assume = Arc::new(StmtX::Assume(neg_cond));
+            record_emission_slot(
+                &mut state.lowering_provenance,
+                &pos_assume,
+                EmissionSlot::BranchThen,
+                None,
+                None,
+            );
+            record_emission_slot(
+                &mut state.lowering_provenance,
+                &neg_assume,
+                EmissionSlot::BranchElse,
+                None,
+                None,
+            );
             let mut lhss = stm_to_stmts(ctx, state, lhs)?;
             let mut rhss = match rhs {
                 None => vec![],
@@ -2659,14 +2894,28 @@ fn loop_to_stmts(
         let neg_cond = Arc::new(ExprX::Unary(air::ast::UnaryOp::Not, pos_cond.clone()));
         let pos_assume = Arc::new(StmtX::Assume(pos_cond));
         let neg_assume = Arc::new(StmtX::Assume(neg_cond));
+        record_emission_slot(
+            &mut state.lowering_provenance,
+            &pos_assume,
+            EmissionSlot::LoopEntryCondition,
+            None,
+            Some(*id),
+        );
+        record_emission_slot(
+            &mut state.lowering_provenance,
+            &neg_assume,
+            EmissionSlot::LoopExitCondition,
+            None,
+            Some(*id),
+        );
         (Some(cond_stm), Some(pos_assume), Some(neg_assume))
     } else {
         (None, None, None)
     };
-    let mut invs_entry: Vec<(Span, Expr, Option<Arc<String>>, bool)> = Vec::new();
-    let mut invs_exit: Vec<(Span, Expr, Option<Arc<String>>, bool)> = Vec::new();
+    let mut invs_entry: Vec<LoopInvAir> = Vec::new();
+    let mut invs_exit: Vec<LoopInvAir> = Vec::new();
     let modified_vars = modified_vars.as_ref().unwrap();
-    for inv in invs.iter() {
+    for (clause, inv) in invs.iter().enumerate() {
         let expr = exp_to_expr(ctx, &inv.inv, expr_ctxt)?;
         if cond.is_some() {
             assert!(inv.at_entry);
@@ -2674,10 +2923,10 @@ fn loop_to_stmts(
         }
         let both = inv.at_entry && inv.at_exit;
         if inv.at_entry {
-            invs_entry.push((inv.inv.span.clone(), expr.clone(), None, both));
+            invs_entry.push((inv.inv.span.clone(), expr.clone(), None, both, clause));
         }
         if inv.at_exit {
-            invs_exit.push((inv.inv.span.clone(), expr.clone(), None, both));
+            invs_exit.push((inv.inv.span.clone(), expr.clone(), None, both, clause));
         }
     }
     let invs_entry = Arc::new(invs_entry);
@@ -2771,7 +3020,13 @@ fn loop_to_stmts(
         for (x, typ) in typ_inv_vars.iter() {
             let typ_inv = typ_invariant(ctx, typ, &ident_var(&suffix_local_unique_id(x)));
             if let Some(expr) = typ_inv {
-                local.push(mk_unnamed_axiom(expr));
+                let axiom = mk_unnamed_axiom(expr);
+                record_local_axiom(
+                    &mut state.lowering_provenance,
+                    &axiom,
+                    LocalAxiomSite::LoopTypeInvariant { loop_id: *id },
+                );
+                local.push(axiom);
             }
         }
 
@@ -2813,8 +3068,10 @@ fn loop_to_stmts(
 
     // Assume invariants for the beginning of the loop body.
     // (These need to go after the above Havoc statements.)
-    for (_, inv, _, _) in invs_entry.iter() {
-        air_body.push(Arc::new(StmtX::Assume(inv.clone())));
+    for (_, inv, _, _, clause) in invs_entry.iter() {
+        let inv_stmt = Arc::new(StmtX::Assume(inv.clone()));
+        record_emission_slot(&mut state.lowering_provenance, &inv_stmt, EmissionSlot::LoopBodyEntry, Some(*clause), Some(*id));
+        air_body.push(inv_stmt);
     }
     for dec in decrease_init.iter() {
         air_body.append(&mut stm_to_stmts(ctx, state, dec)?);
@@ -2859,13 +3116,14 @@ fn loop_to_stmts(
     }
 
     if !ctx.checking_spec_preconditions() {
-        for (span, inv, msg, _) in invs_entry.iter() {
+        for (span, inv, msg, _, clause) in invs_entry.iter() {
             let mut error = error(span, crate::def::INV_FAIL_LOOP_END);
             if let Some(msg) = msg {
                 error = error.secondary_label(span, &**msg);
             }
-            let inv_stmt = StmtX::Assert(None, error, None, inv.clone());
-            air_body.push(Arc::new(inv_stmt));
+            let inv_stmt = Arc::new(StmtX::Assert(None, error, None, inv.clone()));
+            record_emission_slot(&mut state.lowering_provenance, &inv_stmt, EmissionSlot::LoopMaintain, Some(*clause), Some(*id));
+            air_body.push(inv_stmt);
         }
         if decrease.len() > 0 {
             let dec_exp = crate::recursion::check_decrease(
@@ -2899,6 +3157,7 @@ fn loop_to_stmts(
     };
     if loop_isolation {
         let assertion = assertion.clone();
+        state.record_lowered_statement(&assertion);
         let query = Arc::new(QueryX { local: Arc::new(local), assertion });
         let loop_cmd_context = CommandsWithContextX::new(
             ctx.fun.as_ref().expect("asserts are expected to be in a function").current_fun.clone(),
@@ -2914,13 +3173,14 @@ fn loop_to_stmts(
     // At original site of while loop, assert invariant, havoc, assume invariant + neg_cond
     let mut stmts: Vec<Stmt> = Vec::new();
     if !ctx.checking_spec_preconditions() {
-        for (span, inv, msg, _) in invs_entry.iter() {
+        for (span, inv, msg, _, clause) in invs_entry.iter() {
             let mut error = error(span, crate::def::INV_FAIL_LOOP_FRONT);
             if let Some(msg) = msg {
                 error = error.secondary_label(span, &**msg);
             }
-            let inv_stmt = StmtX::Assert(None, error, None, inv.clone());
-            stmts.push(Arc::new(inv_stmt));
+            let inv_stmt = Arc::new(StmtX::Assert(None, error, None, inv.clone()));
+            record_emission_slot(&mut state.lowering_provenance, &inv_stmt, EmissionSlot::LoopEstablish, Some(*clause), Some(*id));
+            stmts.push(inv_stmt);
         }
     }
     if !loop_isolation {
@@ -2931,9 +3191,10 @@ fn loop_to_stmts(
     if loop_isolation {
         stmts.push(Arc::new(StmtX::Snapshot(snapshot_ident(SNAPSHOT_LOOP))));
         modified_vars.emit_havocs(ctx, SNAPSHOT_LOOP, &mut stmts);
-        for (_, inv, _, _) in invs_exit.iter() {
-            let inv_stmt = StmtX::Assume(inv.clone());
-            stmts.push(Arc::new(inv_stmt));
+        for (_, inv, _, _, clause) in invs_exit.iter() {
+            let inv_stmt = Arc::new(StmtX::Assume(inv.clone()));
+            record_emission_slot(&mut state.lowering_provenance, &inv_stmt, EmissionSlot::LoopExit, Some(*clause), Some(*id));
+            stmts.push(inv_stmt);
         }
     }
     if let Some(cond_stmts) = &cond_stmts {
@@ -3026,7 +3287,10 @@ fn byte_string_indices_to_air(ctx: &Ctx, lit: Arc<Vec<u8>>) -> Expr {
     Arc::new(ExprX::Multi(MultiOp::And, Arc::new(facts)))
 }
 
-fn set_fuel(ctx: &Ctx, local: &mut Vec<Decl>, hidden: &Vec<Fun>) {
+/// The query-local fuel axiom for a function body: default fuel, or the
+/// non-default set of hidden functions. Returned rather than pushed so the
+/// caller can record its emission site.
+fn fuel_axiom(ctx: &Ctx, hidden: &Vec<Fun>) -> Decl {
     let fuel_expr = if hidden.len() == 0 {
         str_var(&FUEL_DEFAULTS)
     } else {
@@ -3059,7 +3323,7 @@ fn set_fuel(ctx: &Ctx, local: &mut Vec<Decl>, hidden: &Vec<Fun>) {
         let or = Arc::new(ExprX::Multi(air::ast::MultiOp::Or, Arc::new(disjuncts)));
         mk_bind_expr(&bind, &or)
     };
-    local.push(mk_unnamed_axiom(fuel_expr));
+    mk_unnamed_axiom(fuel_expr)
 }
 
 fn mk_static_prelude(ctx: &Ctx, statics: &Vec<Fun>) -> Vec<Stmt> {
@@ -3087,6 +3351,7 @@ pub(crate) fn body_stm_to_air(
     is_integer_ring: bool,
     is_bit_vector_mode: bool,
     is_nonlinear: bool,
+    lowering_provenance_mode: LoweringProvenanceMode,
 ) -> Result<(Vec<CommandsWithContext>, Vec<(Span, SnapPos)>), VirErr> {
     let FuncCheckSst {
         reqs,
@@ -3106,15 +3371,41 @@ pub(crate) fn body_stm_to_air(
         let queries = bv_to_queries(ctx, reqs, &post_condition.ens_exps)?;
         let mut commands = vec![];
 
-        for (query, error_desc) in queries.into_iter() {
-            commands.push(CommandsWithContextX::new(
+        for bv in queries.into_iter() {
+            // A `by(bit_vector)` body has no SST lowering, so the sidecar for
+            // its query is built here: requires clauses as query-local axioms,
+            // ensures clauses as asserts, both by declaring ordinal.
+            let mut provenance =
+                lowering_provenance_mode.is_enabled().then(LoweringProvenanceState::default);
+            for (axiom, clause) in &bv.requires_axioms {
+                record_local_axiom(&mut provenance, axiom, LocalAxiomSite::Requires { clause: *clause });
+            }
+            for (assert, clause) in &bv.ensures_asserts {
+                record_emission_slot(
+                    &mut provenance,
+                    assert,
+                    EmissionSlot::BitVectorFunctionEnsures,
+                    Some(*clause),
+                    None,
+                );
+            }
+            let mut command = CommandsWithContextX::new(
                 ctx.fun.as_ref().expect("function expected here").current_fun.clone(),
                 func_span.clone(),
-                error_desc,
-                Arc::new(vec![Arc::new(CommandX::CheckValid(query))]),
+                bv.error_desc,
+                Arc::new(vec![Arc::new(CommandX::CheckValid(bv.query))]),
                 ProverChoice::BitVector,
                 true,
-            ));
+            );
+            if let Some(provenance) = provenance {
+                Arc::make_mut(&mut command).lowering_provenance = Arc::new(LoweringProvenance {
+                    lowered_body: None,
+                    statements: provenance.statements,
+                    slots: provenance.slots,
+                    local_axioms: provenance.local_axioms,
+                });
+            }
+            commands.push(command);
         }
 
         return Ok((commands, vec![]));
@@ -3124,6 +3415,10 @@ pub(crate) fn body_stm_to_air(
     // Some declarations (local_shared) are shared among the queries.
     // Others are private to each query.
     let mut local_shared: Vec<Decl> = Vec::new();
+    // Created before `local_shared` so the shared query-local axioms below
+    // can record their emission site; moved into `State` unchanged.
+    let mut lowering_provenance =
+        lowering_provenance_mode.is_enabled().then(LoweringProvenanceState::default);
 
     for x in typ_params.iter() {
         for (x, t) in crate::def::suffix_typ_param_ids_types(x) {
@@ -3138,7 +3433,9 @@ pub(crate) fn body_stm_to_air(
         });
     }
 
-    set_fuel(ctx, &mut local_shared, hidden);
+    let fuel = fuel_axiom(ctx, hidden);
+    record_local_axiom(&mut lowering_provenance, &fuel, LocalAxiomSite::Fuel);
+    local_shared.push(fuel);
 
     let initial_sid = Arc::new("0_entry".to_string());
 
@@ -3160,9 +3457,11 @@ pub(crate) fn body_stm_to_air(
         }
     };
 
-    for e in crate::traits::trait_bounds_to_air(ctx, typ_bounds) {
+    for (index, e) in crate::traits::trait_bounds_to_air(ctx, typ_bounds).into_iter().enumerate() {
         // The outer query already has this in reqs, but inner queries need it separately:
-        local_shared.push(Arc::new(DeclX::Axiom(air::ast::Axiom { named: None, expr: e })));
+        let axiom = Arc::new(DeclX::Axiom(air::ast::Axiom { named: None, expr: e }));
+        record_local_axiom(&mut lowering_provenance, &axiom, LocalAxiomSite::TraitBound { index });
+        local_shared.push(axiom);
     }
 
     let mut local = local_shared.clone();
@@ -3184,6 +3483,7 @@ pub(crate) fn body_stm_to_air(
         },
         loop_infos: Vec::new(),
         static_prelude: mk_static_prelude(ctx, statics),
+        lowering_provenance,
     };
 
     let stm = crate::sst_vars::compute_assign_info(&mut state.assign_map, params, local_decls, stm);
@@ -3203,20 +3503,36 @@ pub(crate) fn body_stm_to_air(
     }
 
     let assertion = one_stmt(stmts);
+    // Static-prelude assumptions and any other query-assembly statements are
+    // not produced by an SST statement wrapper. Give them an explicit
+    // generated root rather than leaving the sidecar partial.
+    state.record_lowered_statement(&assertion);
 
     if !is_integer_ring {
-        for param in params.iter() {
+        for (index, param) in params.iter().enumerate() {
             let typ_inv = typ_invariant(ctx, &param.x.typ, &ident_var(&param.x.name.lower()));
             if let Some(expr) = typ_inv {
-                local.push(mk_unnamed_axiom(expr));
+                let axiom = mk_unnamed_axiom(expr);
+                record_local_axiom(
+                    &mut state.lowering_provenance,
+                    &axiom,
+                    LocalAxiomSite::ParamTypeInvariant { param: index },
+                );
+                local.push(axiom);
             }
         }
     }
 
-    for req in reqs.iter() {
+    for (clause, req) in reqs.iter().enumerate() {
         let expr_ctxt = &ExprCtxt::new_mode(ExprMode::BodyPre);
         let e = exp_to_expr(ctx, &req, expr_ctxt)?;
-        local.push(mk_unnamed_axiom(e));
+        let axiom = mk_unnamed_axiom(e);
+        record_local_axiom(
+            &mut state.lowering_provenance,
+            &axiom,
+            LocalAxiomSite::Requires { clause },
+        );
+        local.push(axiom);
     }
 
     if is_integer_ring {
@@ -3288,6 +3604,35 @@ pub(crate) fn body_stm_to_air(
             if is_nonlinear { ProverChoice::Nonlinear } else { ProverChoice::DefaultProver },
             is_integer_ring || is_nonlinear,
         ));
+    }
+    // Completeness guard for query families assembled outside the ordinary
+    // statement-return path. Entries already attributed under an SST lowering
+    // stack are preserved; only genuinely untagged statements receive the
+    // explicit QueryAssembly root.
+    if state.lowering_provenance.is_some() {
+        let query_assertions: Vec<Stmt> = state
+            .commands
+            .iter()
+            .flat_map(|commands| commands.commands.iter())
+            .filter_map(|command| match &**command {
+                CommandX::CheckValid(query) => Some(query.assertion.clone()),
+                _ => None,
+            })
+            .collect();
+        for assertion in &query_assertions {
+            state.record_lowered_statement(assertion);
+        }
+
+        let provenance = state.lowering_provenance.take().unwrap();
+        let lowering_provenance = Arc::new(LoweringProvenance {
+            slots: provenance.slots,
+            lowered_body: Some(stm.clone()),
+            statements: provenance.statements,
+            local_axioms: provenance.local_axioms,
+        });
+        for commands in &mut state.commands {
+            Arc::make_mut(commands).lowering_provenance = lowering_provenance.clone();
+        }
     }
     Ok((state.commands, state.snap_map))
 }
@@ -3443,4 +3788,34 @@ fn opaque_ty_additional_stmts(
         _ => {}
     }
     Ok(stmts)
+}
+
+#[cfg(test)]
+mod provenance_tests {
+    use super::*;
+
+    #[test]
+    fn enabled_recorder_preserves_nested_air_provenance() {
+        let assume = Arc::new(StmtX::Assume(air::ast_util::mk_true()));
+        let block = Arc::new(StmtX::Block(Arc::new(vec![assume.clone()])));
+        let frame = LoweringFrame {
+            statement: 17,
+            site: LoweringSite::Assume(crate::sst::AssumeIntent::UserAssume),
+        };
+        let mut provenance = LoweringProvenanceState {
+            stack: vec![frame.clone()],
+            statements: LoweringProvenanceMap::new(),
+            slots: EmissionSlotMap::new(),
+            local_axioms: LocalAxiomMap::new(),
+        };
+
+        State::record_lowered_statement_in(&mut provenance, &block);
+
+        let recorded = provenance
+            .statements
+            .get(&(Arc::as_ptr(&assume) as usize))
+            .expect("nested AIR assumption should be recorded");
+        assert_eq!(recorded.source_chain, vec![frame]);
+        assert_eq!(recorded.emitted_at, LoweringSite::Assume(crate::sst::AssumeIntent::UserAssume));
+    }
 }

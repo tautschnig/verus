@@ -343,7 +343,7 @@ fn stm_assign(
         StmX::Assert(..)
         | StmX::AssertBitVector { .. }
         | StmX::AssertCompute(..)
-        | StmX::Assume(_)
+        | StmX::Assume(..)
         | StmX::Fuel(..)
         | StmX::RevealString(_)
         | StmX::RevealByteString(..)
@@ -494,7 +494,7 @@ fn stm_mutations(param_typs: &[(VarIdent, Typ)], mutations: &mut HavocSet, stm: 
         StmX::Assert(..)
         | StmX::AssertBitVector { .. }
         | StmX::AssertCompute(..)
-        | StmX::Assume(_)
+        | StmX::Assume(..)
         | StmX::Fuel(..)
         | StmX::RevealString(_)
         | StmX::RevealByteString(_)

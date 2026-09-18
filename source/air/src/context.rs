@@ -72,10 +72,24 @@ impl<'a, 'b: 'a> Default for QueryContext<'a, 'b> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SmtSolver {
     Z3,
     Cvc5,
+}
+
+/// Immutable snapshot sufficient to replay the solver configuration that AIR
+/// has received from Verus. The option history is ordered because later
+/// settings may deliberately override earlier ones.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SolverReplayConfig {
+    pub solver: SmtSolver,
+    pub option_history: Vec<(String, String)>,
+    pub rlimit: u32,
+    pub single_check_query: bool,
+    pub ignore_unexpected_smt: bool,
+    pub debug: bool,
+    pub expected_solver_version: Option<String>,
 }
 
 impl Default for SmtSolver {
@@ -94,7 +108,14 @@ impl SmtSolver {
     }
 }
 
+/// Monotonically increasing identifier distinguishing solver contexts
+/// (spinoff contexts replay ambient declarations into a fresh solver, so
+/// observers must track availability per context).
+static CONTEXT_ID_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub struct Context {
+    /// Unique id for this solver context; see `CONTEXT_ID_COUNTER`.
+    pub context_id: u64,
     pub(crate) message_interface: Arc<dyn crate::messages::MessageInterface>,
     smt_process: Option<SmtProcess>,
     pub(crate) axiom_infos: ScopeMap<Ident, Arc<AxiomInfo>>,
@@ -146,6 +167,17 @@ pub struct Context {
     cross_check_function: Option<String>,
     /// Per-context monotonic query id, tagged onto each secondary check-sat job.
     cross_check_query_counter: u64,
+    /// Public solver-option calls made by the verifier. Options carried by
+    /// `CommandX::SetOption` are excluded because the command stream itself
+    /// is replayed.
+    pub(crate) option_history: Vec<(String, String)>,
+    /// Optional rewrite of a query after SSA (`var_to_const`) and before
+    /// `block_to_assert`, given the SSA generation trace. Never set on a
+    /// canonical context; a passive consumer replaying queries into its own
+    /// context uses it to label the equalities SSA generates.
+    pub ssa_rewrite: Option<
+        Box<dyn FnMut(&Query, &crate::var_to_const::SsaTrace) -> Query + Send>,
+    >,
 }
 
 impl Context {
@@ -154,6 +186,7 @@ impl Context {
         solver: SmtSolver,
     ) -> Self {
         let mut context = Context {
+            context_id: CONTEXT_ID_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             message_interface: message_interface.clone(),
             smt_process: None,
             axiom_infos: ScopeMap::new(),
@@ -220,6 +253,8 @@ impl Context {
             cross_check_secondary_startup: Vec::new(),
             cross_check_function: None,
             cross_check_query_counter: 0,
+            option_history: Vec::new(),
+            ssa_rewrite: None,
         };
         context.axiom_infos.push_scope(false);
         context.array_map.push_scope(false);
@@ -421,6 +456,30 @@ impl Context {
         self.ignore_unexpected_smt = ignore_unexpected_smt;
     }
 
+    pub fn get_ignore_unexpected_smt(&self) -> bool {
+        self.ignore_unexpected_smt
+    }
+
+    pub fn get_rlimit(&self) -> u32 {
+        self.rlimit
+    }
+
+    pub fn get_single_check_query(&self) -> bool {
+        self.single_check_query
+    }
+
+    pub fn replay_config(&self) -> SolverReplayConfig {
+        SolverReplayConfig {
+            solver: self.solver,
+            option_history: self.option_history.clone(),
+            rlimit: self.rlimit,
+            single_check_query: self.single_check_query,
+            ignore_unexpected_smt: self.ignore_unexpected_smt,
+            debug: self.debug,
+            expected_solver_version: self.expected_solver_version.clone(),
+        }
+    }
+
     pub fn get_time(&self) -> (Duration, Duration) {
         (self.time_smt_init, self.time_smt_run)
     }
@@ -472,6 +531,11 @@ impl Context {
         assert!(matches!(self.state, ContextState::NotStarted));
         self.usage_info_enabled = true;
         self.set_solver_option_bool("produce-unsat-cores", true, true);
+    }
+
+    pub fn enable_proof_production(&mut self) {
+        assert!(matches!(self.state, ContextState::NotStarted));
+        self.set_solver_option_bool("produce-proofs", true, true);
     }
 
     // emit blank line into log files
@@ -591,6 +655,20 @@ impl Context {
     }
 
     pub fn set_solver_option(&mut self, option: &str, value: &str) {
+        // Record the public option calls so an observer can replay the
+        // canonical solver configuration. Passive: never read on a canonical
+        // context.
+        self.option_history.push((option.to_string(), value.to_string()));
+        self.set_solver_option_impl(option, value);
+    }
+
+    /// Alias used by passive consumers replaying queries into their own
+    /// solver contexts; records into `option_history` like `set_solver_option`.
+    pub fn set_z3_param(&mut self, option: &str, value: &str) {
+        self.set_solver_option(option, value);
+    }
+
+    fn set_solver_option_impl(&mut self, option: &str, value: &str) {
         if value == "true" {
             self.set_solver_option_bool(option, true, true);
         } else if value == "false" {
@@ -698,7 +776,12 @@ impl Context {
             Ok(query) => query,
             Err(err) => return ValidityResult::TypeError(err),
         };
-        let (query, snapshots, local_vars) = crate::var_to_const::lower_query(&query);
+        let (query, snapshots, local_vars, ssa_trace) = crate::var_to_const::lower_query(&query);
+        // Passive post-SSA rewrite hook; unset on every canonical context.
+        let query = match &mut self.ssa_rewrite {
+            Some(rewrite) => rewrite(&query, &ssa_trace),
+            None => query,
+        };
         self.air_middle_log.log_query(&query);
         let query = crate::block_to_assert::lower_query(message_interface, &query);
         self.air_final_log.log_query(&query);
@@ -783,7 +866,7 @@ impl Context {
                 ValidityResult::Valid(UsageInfo::None)
             }
             CommandX::SetOption(option, value) => {
-                self.set_solver_option(option, value);
+                self.set_solver_option_impl(option, value);
                 ValidityResult::Valid(UsageInfo::None)
             }
             CommandX::Global(decl) => {
