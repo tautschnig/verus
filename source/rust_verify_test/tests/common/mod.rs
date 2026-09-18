@@ -324,6 +324,15 @@ pub fn run_verus(
         } else if *option == "-V spinoff-all" {
             verus_args.push("-V".to_string());
             verus_args.push("spinoff-all".to_string());
+        } else if *option == "-V cross-check" {
+            verus_args.push("-V".to_string());
+            verus_args.push("cross-check".to_string());
+        } else if *option == "-V cross-check-strict" {
+            verus_args.push("-V".to_string());
+            verus_args.push("cross-check-strict".to_string());
+        } else if *option == "-V cross-check-inject-disagreement" {
+            verus_args.push("-V".to_string());
+            verus_args.push("cross-check-inject-disagreement".to_string());
         } else if *option == "--is-core" {
             verus_args.push("--is-core".to_string());
             is_core = true;
@@ -417,6 +426,22 @@ pub fn run_verus(
     }
 
     let mut child = std::process::Command::new(bin);
+    child.env(
+        "VERUS_CVC5_PATH",
+        std::env::var("VERUS_CVC5_PATH")
+            .map(|p| {
+                let p = std::path::PathBuf::from(p);
+                (if p.is_relative() { std::path::PathBuf::from("..").join(p) } else { p })
+                    .into_os_string()
+            })
+            .unwrap_or({
+                if cfg!(target_os = "windows") {
+                    std::ffi::OsString::from("..\\cvc5.exe")
+                } else {
+                    std::ffi::OsString::from("../cvc5")
+                }
+            }),
+    );
     child.env(
         "VERUS_Z3_PATH",
         std::env::var("VERUS_Z3_PATH")
