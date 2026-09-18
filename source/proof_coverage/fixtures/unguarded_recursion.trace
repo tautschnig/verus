@@ -1,0 +1,5 @@
+explain pc%18%6  —  Ungrounded
+#1 recursion_contracts::spin#ens[0] @ function.ensures  [ensures] proof_coverage/probes/recursion_contracts.rs:45:13: 45:19 (#0)  —  Ungrounded
+    provenance: elaborates from recursion_contracts::spin#ens[0]  [attribution: msg.obligation_note]  [join: join.clause_span]
+    UNGROUNDED: not derivable from roots — every candidate justification is circular or disconnected
+    UNMEASURED: no strong evidence (batch witness, if any, is not proof dependence)

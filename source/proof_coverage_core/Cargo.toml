@@ -1,0 +1,13 @@
+[package]
+name = "proof_coverage_core"
+version = "0.1.0"
+edition = "2024"
+
+# Verifier-independent proof-coverage core: the record schema, the typed
+# verification-argument graph (explanations, findings), generic auditing,
+# and the rule-ledger schema. No vir, air, or Verus-adapter dependencies:
+# it consumes emitted JSON records only and compiles on its own.
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }

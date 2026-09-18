@@ -1,0 +1,16 @@
+[package]
+name = "proof_coverage"
+version = "0.1.0"
+edition = "2024"
+
+# The proof-coverage consumer. Depends only on `vir` and `air` — never on
+# rustc internals — and contains all proof-coverage policy: classification,
+# provenance tables, record emission. The verifier knows nothing about this
+# crate except the observer registration in rust_verify.
+[dependencies]
+proof_coverage_core = { path = "../proof_coverage_core" }
+air = { workspace = true }
+vir = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }

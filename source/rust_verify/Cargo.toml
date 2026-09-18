@@ -25,6 +25,7 @@ serde = { workspace = true }
 sha2 = { workspace = true }
 sise = { workspace = true }
 vir = { workspace = true }
+proof_coverage = { path = "../proof_coverage", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 win32job = "1"
@@ -36,6 +37,8 @@ rust_verify_test_macros = { path = "../rust_verify_test_macros" }
 cargo-verus-toolchains = { workspace = true }
 
 [features]
+default = ["proof-coverage"]
+proof-coverage = ["dep:proof_coverage"]
 singular = ["vir/singular", "air/singular"]
 
 [package.metadata.rust-analyzer]
