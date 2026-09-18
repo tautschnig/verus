@@ -454,7 +454,7 @@ pub fn parse_args_with_imports(
         ),
         (
             EXTENDED_VACUITY_CHECKS,
-            "Warn (do not error) when a verified function's `requires` clauses are unsatisfiable, making every obligation in it vacuous. A lint; it never changes a verification verdict.",
+            "Warn (do not error) when a verified function's `requires` clauses are unsatisfiable, making every obligation in it vacuous. Also warns when a branch-guarded obligation is unreachable (its path condition is unsatisfiable), i.e. dead code that is only vacuously verified. Deliberate contradiction idioms are exempt by construction: an `assert(false)`, a `proof_from_false`/`unreached` call, and any obligation dominated by such a contradiction in the same branch are never reported. To silence the remaining unreachable-obligation warnings for a function, annotate it with `#[verifier::allow(unreachable_obligation)]`. A lint; it never changes a verification verdict.",
         ),
     ];
 
