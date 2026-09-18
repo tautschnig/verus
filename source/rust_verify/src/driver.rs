@@ -221,7 +221,8 @@ pub(crate) fn run_compile_from_expansion(
     do_compile: bool,
     vstd: Vstd,
 ) -> Result<(), ()> {
-    let tmp_dir = std::env::temp_dir().join(format!("verus-compile-from-expansion-{}", std::process::id()));
+    let tmp_dir =
+        std::env::temp_dir().join(format!("verus-compile-from-expansion-{}", std::process::id()));
     if let Err(e) = std::fs::create_dir_all(&tmp_dir) {
         eprintln!("error: [compile-from-expansion] could not create temp dir: {}", e);
         return Err(());
@@ -273,9 +274,7 @@ pub(crate) fn run_compile_from_expansion(
     // that the pretty-printed crate already carries in its header, causing duplicates).
     let mut comp_args: Vec<String> = rustc_args_base
         .into_iter()
-        .map(|a| {
-            if a.ends_with(".rs") { expanded_path.display().to_string() } else { a }
-        })
+        .map(|a| if a.ends_with(".rs") { expanded_path.display().to_string() } else { a })
         .collect();
     comp_args.extend(["--cfg", "verus_only", "--cfg", "verus_keep_ghost"].map(|s| s.to_string()));
     if matches!(vstd, Vstd::IsCore | Vstd::ImportedViaCore) {
