@@ -198,11 +198,7 @@ fn classify_obligation_note_inner(note: &str) -> Classification {
         c(OriginKind::Source, "ensures", EmissionRole::FunctionEnsures)
     } else if note == PRECONDITION_FAILURE {
         // The callee is named by the checked formula, attached by the walker.
-        c(
-            OriginKind::Source,
-            "requires_of_callee",
-            EmissionRole::CallPrecondition { callee: None },
-        )
+        c(OriginKind::Source, "requires_of_callee", EmissionRole::CallPrecondition { callee: None })
     } else if note == DEC_FAIL_LOOP_CONTINUE {
         c(
             OriginKind::Generated,

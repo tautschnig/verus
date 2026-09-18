@@ -175,9 +175,7 @@ pub struct Context {
     /// `block_to_assert`, given the SSA generation trace. Never set on a
     /// canonical context; a passive consumer replaying queries into its own
     /// context uses it to label the equalities SSA generates.
-    pub ssa_rewrite: Option<
-        Box<dyn FnMut(&Query, &crate::var_to_const::SsaTrace) -> Query + Send>,
-    >,
+    pub ssa_rewrite: Option<Box<dyn FnMut(&Query, &crate::var_to_const::SsaTrace) -> Query + Send>>,
 }
 
 impl Context {
