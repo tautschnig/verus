@@ -39,9 +39,7 @@ fn solver_version(env_var: &str) -> serde_json::Value {
     };
     let out = std::process::Command::new(&path).arg("--version").output();
     let version = match out {
-        Ok(o) => {
-            String::from_utf8_lossy(&o.stdout).lines().next().unwrap_or("").trim().to_string()
-        }
+        Ok(o) => String::from_utf8_lossy(&o.stdout).lines().next().unwrap_or("").trim().to_string(),
         Err(_) => String::new(),
     };
     serde_json::json!({ "path": path, "version": version })
@@ -85,8 +83,8 @@ struct ExpansionRecipe {
     edition: String,
     crate_type: String,
     verus_root: Option<String>,
-    externs: Vec<String>, // "name=path" as passed
-    cfgs: Vec<String>,    // erase-pass cfgs
+    externs: Vec<String>,     // "name=path" as passed
+    cfgs: Vec<String>,        // erase-pass cfgs
     crate_attrs: Vec<String>, // -Zcrate-attr=<value> (tool-attribute registration etc.)
 }
 
@@ -96,10 +94,7 @@ struct ExpansionRecipe {
 /// attributes such as `#[verusfmt::skip]` / `#[verifier::…]`
 /// (cert/d1/OPTION-B-REFUTED.md §Secondary finding).
 fn crate_attrs() -> Vec<String> {
-    let mut a = vec![
-        "allow(internal_features)".to_string(),
-        "allow(unused_features)".to_string(),
-    ];
+    let mut a = vec!["allow(internal_features)".to_string(), "allow(unused_features)".to_string()];
     for feature in &[
         "stmt_expr_attributes",
         "box_patterns",
@@ -236,6 +231,61 @@ fn compute_expansion_hash(
 
 /// Emit the certificate. Errors are reported as warnings; certificate emission
 /// never fails an otherwise-successful verification run.
+/// D1 explanation leg: when a proof-coverage record was produced in the same
+/// run (`-V proof-coverage` with `VERUS_PROOF_COVERAGE_OUT`), embed the parts
+/// of it that a certificate consumer can use. Two things improve over the
+/// syntactic scan above: `source_functions[].external_body` is a *semantic*
+/// (VIR-level) inventory of trusted bodies, and `summary.obligations` /
+/// per-query `core` tell which source facts the solver actually used.
+fn proof_coverage_explanation() -> serde_json::Value {
+    let Some(path) = std::env::var_os("VERUS_PROOF_COVERAGE_OUT") else {
+        return serde_json::Value::Null;
+    };
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return serde_json::Value::Null;
+    };
+    let Ok(rec) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return serde_json::Value::Null;
+    };
+    let external_body: Vec<serde_json::Value> = rec["source_functions"]
+        .as_array()
+        .map(|fs| {
+            fs.iter()
+                .filter(|f| f["local"].as_bool() == Some(true) && f["external_body"].as_bool() == Some(true))
+                .map(|f| serde_json::json!({ "function": f["fun"], "span": f["span"], "mode": f["mode"] }))
+                .collect()
+        })
+        .unwrap_or_default();
+    let queries: Vec<serde_json::Value> = rec["queries"]
+        .as_array()
+        .map(|qs| {
+            qs.iter()
+                .map(|q| {
+                    serde_json::json!({
+                        "function": q["fun"],
+                        "desc": q["desc"],
+                        "span": q["span"],
+                        "results": q["results"],
+                        "evidence_backend": q["evidence_backend"],
+                        "core_size": q["core"].as_array().map(|c| c.len()),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    serde_json::json!({
+        "method": "proof-coverage-record",
+        "record_path": path.to_string_lossy(),
+        "record_sha256": sha256_hex(text.as_bytes()),
+        "summary": rec["summary"],
+        "external_body_functions": external_body,
+        "queries": queries,
+        "note": "Solver evidence (unsat cores) is solver-dependent and not minimal; \
+                 absence of a fact from a core is a heuristic, presence is not a proof \
+                 of necessity. Vacuous obligations are reported in summary.",
+    })
+}
+
 pub fn emit_certificate(
     dir: &str,
     verifier: &Verifier,
@@ -333,8 +383,9 @@ fn emit_certificate_inner(
             "verified": verifier.count_verified,
             "errors": verifier.count_errors,
         },
+        "explanation": proof_coverage_explanation(),
         "trusted_constructs": {
-            "method": "syntactic-scan",
+            "method": "syntactic-scan (see `explanation.external_body_functions` for the VIR-level inventory when available)",
             "constructs": ["assume", "admit", "external_body", "assume_specification"],
             "occurrences": trusted,
         },

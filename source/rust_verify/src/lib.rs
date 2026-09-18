@@ -36,9 +36,9 @@ pub mod consts;
 
 mod automatic_derive;
 mod boundary_suggestions;
-pub mod certificate;
 pub mod cargo_verus;
 pub mod cargo_verus_dep_tracker;
+pub mod certificate;
 pub mod context;
 pub mod debugger;
 pub mod def;
