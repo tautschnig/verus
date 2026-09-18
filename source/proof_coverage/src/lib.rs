@@ -399,7 +399,7 @@ impl CoverageProducer {
                 Self::collect_pattern_source_ids(left, out);
                 Self::collect_pattern_source_ids(right, out);
             }
-            PatternX::Wildcard(_) | PatternX::Expr(_) | PatternX::Range(_, _) => {}
+            PatternX::Wildcard | PatternX::Expr(_) | PatternX::Range(_, _) => {}
         }
     }
 
