@@ -366,9 +366,7 @@ pub fn run(
             let verus_sha = crate::util::verus_build_info().sha;
             crate::certificate::emit_certificate(dir, &verifier, &rustc_args, verus_sha);
         } else {
-            eprintln!(
-                "note: not emitting proof certificate because verification did not succeed"
-            );
+            eprintln!("note: not emitting proof certificate because verification did not succeed");
         }
     }
 

@@ -344,7 +344,8 @@ pub fn parse_args_with_imports(
     const OPT_EXPAND_ERRORS: &str = "expand-errors";
 
     const OPT_LOG_DIR: &str = "log-dir";
-    const OPT_EMIT_CERTIFICATE: &str = "emit-certificate";    const OPT_LOG_ALL: &str = "log-all";
+    const OPT_EMIT_CERTIFICATE: &str = "emit-certificate";
+    const OPT_LOG_ALL: &str = "log-all";
     const OPT_LOG_MULTI: &str = "log";
 
     const LOG_VIR: &str = "vir";
