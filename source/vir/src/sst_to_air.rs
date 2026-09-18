@@ -3708,7 +3708,7 @@ pub(crate) fn precondition_satisfiability_to_air(
         });
     }
 
-    set_fuel(ctx, &mut local, hidden);
+    local.push(fuel_axiom(ctx, hidden));
 
     for e in crate::traits::trait_bounds_to_air(ctx, typ_bounds) {
         local.push(Arc::new(DeclX::Axiom(air::ast::Axiom { named: None, expr: e })));

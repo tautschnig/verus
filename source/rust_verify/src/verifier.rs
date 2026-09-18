@@ -2203,8 +2203,7 @@ impl Verifier {
                 assertion,
             });
             let cmd = std::sync::Arc::new(CommandX::CheckValid(query));
-            let result =
-                vac.command(&*message_interface, reporter, &cmd, Default::default());
+            let result = vac.command(&*message_interface, reporter, &cmd, Default::default());
             if let ValidityResult::Valid(_) = result {
                 reporter.report(
                     &vir::messages::error_bare(format!(

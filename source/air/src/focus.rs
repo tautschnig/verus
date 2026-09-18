@@ -33,9 +33,7 @@ fn collect_assert_ids_rec(
         | StmtX::Assign(..)
         | StmtX::Snapshot(..)
         | StmtX::Break(..) => {}
-        StmtX::DeadEnd(s) | StmtX::Breakable(_, s) => {
-            collect_assert_ids_rec(s, under_switch, out)
-        }
+        StmtX::DeadEnd(s) | StmtX::Breakable(_, s) => collect_assert_ids_rec(s, under_switch, out),
         StmtX::Block(stmts) => {
             for s in stmts.iter() {
                 collect_assert_ids_rec(s, under_switch, out);
@@ -79,9 +77,7 @@ fn replace_assert_with_false(stmt: &Stmt, assert_id: &AssertId) -> Stmt {
         | StmtX::Assign(..)
         | StmtX::Snapshot(..)
         | StmtX::Break(..) => stmt.clone(),
-        StmtX::DeadEnd(s) => {
-            Arc::new(StmtX::DeadEnd(replace_assert_with_false(s, assert_id)))
-        }
+        StmtX::DeadEnd(s) => Arc::new(StmtX::DeadEnd(replace_assert_with_false(s, assert_id))),
         StmtX::Breakable(label, s) => {
             Arc::new(StmtX::Breakable(label.clone(), replace_assert_with_false(s, assert_id)))
         }
