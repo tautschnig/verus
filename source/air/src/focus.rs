@@ -62,9 +62,7 @@ fn reaches_contradiction(stmt: &Stmt) -> bool {
         // A block reaches a contradiction if any of its (sequential) statements does.
         StmtX::Block(stmts) => stmts.iter().any(|s| reaches_contradiction(s)),
         // A switch reaches a contradiction only if *every* branch does.
-        StmtX::Switch(stmts) => {
-            !stmts.is_empty() && stmts.iter().all(|s| reaches_contradiction(s))
-        }
+        StmtX::Switch(stmts) => !stmts.is_empty() && stmts.iter().all(|s| reaches_contradiction(s)),
         StmtX::Assume(..)
         | StmtX::Havoc(..)
         | StmtX::Assign(..)
