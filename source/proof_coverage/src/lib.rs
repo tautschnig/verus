@@ -391,6 +391,11 @@ impl CoverageProducer {
                 Self::collect_pattern_source_ids(left, out);
                 Self::collect_pattern_source_ids(right, out);
             }
+            PatternX::Slice { prefix, suffix, .. } => {
+                for sub_pat in prefix.iter().chain(suffix.iter()) {
+                    Self::collect_pattern_source_ids(sub_pat, out);
+                }
+            }
             PatternX::Wildcard | PatternX::Expr(_) | PatternX::Range(_, _) => {}
         }
     }
