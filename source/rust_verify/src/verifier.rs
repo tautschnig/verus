@@ -1616,7 +1616,13 @@ impl Verifier {
                 bucket_id,
                 None,
                 false,
-                PreludeConfig { arch_word_bits: ctx.arch_word_bits, solver: self.args.solver },
+                PreludeConfig {
+                    arch_word_bits: ctx.arch_word_bits,
+                    solver: self.args.solver,
+                    neutral_height: self.args.cross_check != air::solver_set::CrossCheckPolicy::Off
+                        || self.args.neutral_prelude
+                        || self.args.emit_smt_proofs.is_some(),
+                },
                 None,
                 vir::def::ProverChoice::DefaultProver,
             )?;
