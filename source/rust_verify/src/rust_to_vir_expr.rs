@@ -935,7 +935,9 @@ pub(crate) fn pattern_to_vir_unadjusted<'tcx>(
             let kind = match &*vir::ast_util::undecorate_typ(&pat_typ) {
                 TypX::Primitive(vir::ast::Primitive::Array, _) => vir::ast::ArrayKind::Array,
                 TypX::Primitive(vir::ast::Primitive::Slice, _) => vir::ast::ArrayKind::Slice,
-                _ => unsupported_err!(pat.span, "slice pattern on a non-array, non-slice type", pat),
+                _ => {
+                    unsupported_err!(pat.span, "slice pattern on a non-array, non-slice type", pat)
+                }
             };
             let has_rest = match slice {
                 None => false,

@@ -902,7 +902,12 @@ pub enum PatternX {
     /// (or, with a rest, is at least) `prefix.len() + suffix.len()` and each element
     /// pattern matches the element at its position; suffix elements are counted from
     /// the end. A bound rest (`r @ ..`) is not represented.
-    Slice { kind: ArrayKind, prefix: Patterns, has_rest: bool, suffix: Patterns },
+    Slice {
+        kind: ArrayKind,
+        prefix: Patterns,
+        has_rest: bool,
+        suffix: Patterns,
+    },
 }
 
 /// Arms of match expressions

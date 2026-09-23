@@ -230,17 +230,18 @@ fn pattern_to_exprs_rec(
                 mk_eq(&pattern.span, &len, &n_const(n))
             };
             let mut test = len_test;
-            let mut check_elem = |idx: Expr, sub: &Pattern, test: &mut Expr| -> Result<(), VirErr> {
-                let elem_place = SpannedTyped::new(
-                    &sub.span,
-                    &sub.typ,
-                    PlaceX::Index(place.clone(), idx, *kind, BoundsCheck::Allow),
-                );
-                let sub_test = pattern_to_exprs_rec(ctx, sub, &elem_place, bindings, in_immut)?;
-                let and = ExprX::Logical(LogicalOp::And, test.clone(), sub_test);
-                *test = SpannedTyped::new(&pattern.span, &t_bool, and);
-                Ok(())
-            };
+            let mut check_elem =
+                |idx: Expr, sub: &Pattern, test: &mut Expr| -> Result<(), VirErr> {
+                    let elem_place = SpannedTyped::new(
+                        &sub.span,
+                        &sub.typ,
+                        PlaceX::Index(place.clone(), idx, *kind, BoundsCheck::Allow),
+                    );
+                    let sub_test = pattern_to_exprs_rec(ctx, sub, &elem_place, bindings, in_immut)?;
+                    let and = ExprX::Logical(LogicalOp::And, test.clone(), sub_test);
+                    *test = SpannedTyped::new(&pattern.span, &t_bool, and);
+                    Ok(())
+                };
             for (i, sub) in prefix.iter().enumerate() {
                 check_elem(n_const(i), sub, &mut test)?;
             }
@@ -250,7 +251,11 @@ fn pattern_to_exprs_rec(
                 let idx = SpannedTyped::new(
                     &pattern.span,
                     &int_typ,
-                    ExprX::Binary(BinaryOp::Arith(ArithOp::Sub(OverflowBehavior::Allow)), len.clone(), back),
+                    ExprX::Binary(
+                        BinaryOp::Arith(ArithOp::Sub(OverflowBehavior::Allow)),
+                        len.clone(),
+                        back,
+                    ),
                 );
                 check_elem(idx, sub, &mut test)?;
             }
