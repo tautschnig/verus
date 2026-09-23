@@ -342,3 +342,75 @@ test_verify_one_file! {
         }
     } => Ok(())
 }
+
+test_verify_one_file! {
+    #[test] slice_windows_spec verus_code! {
+        use vstd::prelude::*;
+        use vstd::std_specs::iter::IteratorSpec;
+        use vstd::std_specs::slice::spec_windows;
+
+        spec fn asc_count(s: Seq<u64>, upto: int) -> int
+            decreases upto
+        {
+            if upto <= 0 { 0int } else { asc_count(s, upto - 1) + (if s[upto - 1] <= s[upto] { 1int } else { 0int }) }
+        }
+
+        fn count_ascending_pairs(s: &[u64]) -> (r: usize)
+            requires s.len() >= 1,
+            ensures r == asc_count(s@, s.len() - 1),
+        {
+            let mut r: usize = 0;
+            for w in it: s.windows(2)
+                invariant
+                    it.seq().len() == s.len() - 1,
+                    forall|i: int| 0 <= i < it.seq().len() ==> (#[trigger] it.seq()[i])@ == s@.subrange(i, i + 2),
+                    r == asc_count(s@, it.index()),
+                    r <= it.index(),
+                    it.index() <= s.len() - 1,
+            {
+                assert(w@ == s@.subrange(it.index(), it.index() + 2));
+                if w[0] <= w[1] { r = r + 1; }
+            }
+            r
+        }
+
+        fn windows_facts(s: &[u64])
+            requires s.len() >= 2,
+        {
+            let w = s.windows(2);
+            assert(w.remaining().len() == s.len() - 1);
+            assert(w.remaining()[0]@ == s@.subrange(0, 2));
+            assert(spec_windows(s@, 2)[0] == s@.subrange(0, 2));
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] slice_windows_zero_fails verus_code! {
+        use vstd::prelude::*;
+        fn windows_zero_size(s: &[u64]) {
+            let _w = s.windows(0); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    #[test] slice_chunks_spec verus_code! {
+        use vstd::prelude::*;
+        use vstd::std_specs::iter::IteratorSpec;
+        use vstd::std_specs::slice::spec_chunks;
+
+        fn chunk_facts(s: &[u64], idx: Ghost<int>)
+            requires s.len() == 5, 0 <= idx@ < 3,
+        {
+            let c = s.chunks(2);
+            assert(c.remaining().len() == 3);
+            assert(spec_chunks(s@, 2)[idx@] == s@.subrange(idx@ * 2, if (idx@ + 1) * 2 <= 5 { (idx@ + 1) * 2 } else { 5 }));
+            assert(c.remaining()[2]@ == s@.subrange(4, 5));
+        }
+
+        fn chunks_zero_size(s: &[u64]) {
+            let _c = s.chunks(0); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
