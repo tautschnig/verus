@@ -2,7 +2,7 @@ use super::super::prelude::*;
 use super::super::seq::{
     group_seq_lemmas, lemma_seq_empty, lemma_seq_subrange_index, lemma_seq_subrange_len,
 };
-use core::iter::{Filter, FromIterator, Iterator, Rev, Skip, StepBy, Take, Zip};
+use core::iter::{Filter, FlatMap, FromIterator, Iterator, Rev, Skip, StepBy, Take, Zip};
 
 use verus as verus_skip_verusfmt;
 verus_skip_verusfmt! {
@@ -202,6 +202,20 @@ pub trait ExIterator {
                         predicate.ensures((#[trigger] &old(self).remaining()[i],), false)
                 }
             };
+
+    // We can't provide the ensures directly here, since Rust doesn't think that FlatMap<Self, U, F> is an iterator
+    #[verifier::impls_cannot_extend_spec]
+    fn flat_map<U, F>(self, f: F) -> (r: FlatMap<Self, U, F>)
+        where
+            Self: Sized,
+            U: IntoIterator,
+            F: FnMut(Self::Item) -> U,
+        requires
+            self.obeys_prophetic_iter_laws(),
+            forall |k| #![auto] 0 <= k < self.remaining().len() ==> call_requires(f, (self.remaining()[k], )),
+        ensures
+            self.obeys_prophetic_iter_laws() ==> flat_map_post(self, f, r),
+    ;
 
     fn map<B, F>(self, f: F) -> (r: core::iter::Map<Self, F>)
         where
@@ -793,6 +807,75 @@ impl <I> DoubleEndedIteratorSpecImpl for Take<I>
 }
 
 /********************************************************************************
+ * Definitions for `flat_map()`
+ *
+ * `i.flat_map(f)` yields, for each item `x` of `i` in order, every item of the iterator
+ * `f(x).into_iter()`. The specification exposes that structure as a sequence of
+ * per-item inner sequences (`flat_map_parts`) whose concatenation is `remaining`.
+ ********************************************************************************/
+#[verifier::external_body]
+#[verifier::external_type_specification]
+#[verifier::reject_recursive_types(I)]
+#[verifier::reject_recursive_types(U)]
+#[verifier::reject_recursive_types(F)]
+pub struct ExFlatMap<I, U: IntoIterator, F>(FlatMap<I, U, F>);
+
+// Ghost accessors for the inner iterator and the function
+pub uninterp spec fn flat_map_iter<I, U: IntoIterator, F>(r: FlatMap<I, U, F>) -> I;
+pub uninterp spec fn flat_map_fun<I, U: IntoIterator, F>(r: FlatMap<I, U, F>) -> F;
+
+/// The inner sequences, one per item of the inner iterator, in order.
+pub uninterp spec fn flat_map_parts<I, U: IntoIterator, F>(r: FlatMap<I, U, F>) -> Seq<Seq<U::Item>>;
+
+pub uninterp spec fn flat_map_post<I, U: IntoIterator, F>(i: I, f: F, r: FlatMap<I, U, F>) -> bool;
+
+pub broadcast axiom fn flat_map_postcondition<I, U, F>(i: I, f: F, r: FlatMap<I, U, F>)
+    where
+        I: IteratorSpec,
+        U: IntoIterator,
+        F: FnMut(I::Item) -> U,
+    requires
+        i.obeys_prophetic_iter_laws(),
+        #[trigger] flat_map_post(i, f, r),
+    ensures
+        flat_map_iter(r) == i,
+        flat_map_fun(r) == f,
+        // one inner sequence per inner item, each produced by `f` then `into_iter`
+        flat_map_parts(r).len() == i.remaining().len(),
+        forall |k| 0 <= k < i.remaining().len() ==>
+            exists |u: U, inner: U::IntoIter|
+                #[trigger] call_ensures(f, (i.remaining()[k],), u)
+                && #[trigger] call_ensures(U::into_iter, (u,), inner)
+                && #[trigger] flat_map_parts(r)[k] == inner.remaining(),
+        IteratorSpec::remaining(&r) == flat_map_parts(r).flatten(),
+        IteratorSpec::will_return_none(&r) ==> i.will_return_none(),
+        IteratorSpec::decrease(&r) is Some == i.decrease() is Some,
+;
+
+impl <I, U, F> IteratorSpecImpl for FlatMap<I, U, F>
+    where
+        I: Iterator + IteratorSpec,
+        U: IntoIterator,
+        F: FnMut(I::Item) -> U,
+{
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool {
+        flat_map_iter(*self).obeys_prophetic_iter_laws()
+    }
+
+    #[verifier::prophetic]
+    uninterp spec fn remaining(&self) -> Seq<U::Item>;
+
+    #[verifier::prophetic]
+    uninterp spec fn will_return_none(&self) -> bool;
+
+    uninterp spec fn decrease(&self) -> Option<nat>;
+
+    open spec fn peek(&self, index: int) -> Option<U::Item> {
+        None
+    }
+}
+
+/********************************************************************************
  * Definitions for `zip()`
  ********************************************************************************/
 #[verifier::external_body]
@@ -1002,6 +1085,7 @@ pub broadcast group group_iter_axioms {
     take_postcondition,
     skip_postcondition,
     step_by_postcondition,
+    flat_map_postcondition,
     map_postcondition,
 }
 

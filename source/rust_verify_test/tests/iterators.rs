@@ -414,3 +414,30 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] flat_map_spec verus_code! {
+        use vstd::prelude::*;
+        use vstd::std_specs::iter::{IteratorSpec, flat_map_parts};
+
+        fn count_all(vs: &Vec<Vec<u64>>) -> (s: u64)
+            requires vs.len() <= 100,
+        {
+            let mut s: u64 = 0;
+            for _x in vs.iter().flat_map(|inner: &Vec<u64>| inner.iter())
+                invariant s <= 100,
+            {
+                s = if s < 100 { s + 1 } else { s };
+            }
+            s
+        }
+
+        fn facts(v: &Vec<u64>)
+            requires v.len() == 2,
+        {
+            let fm = v.iter().flat_map(|x: &u64| vec![*x, *x]);
+            assert(flat_map_parts(fm).len() == 2);
+            assert(fm.remaining() == flat_map_parts(fm).flatten());
+        }
+    } => Ok(())
+}
