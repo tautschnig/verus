@@ -811,13 +811,14 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
-    #[test] destructuring_assignment_unsupported verus_code! {
+    #[test] destructuring_assignment_basic verus_code! {
         fn test() {
             let mut a = 0;
             let mut b = 0;
             (a, b) = (1, 2);
+            assert(a == 1 && b == 2);
         }
-    } => Err(err) => assert_vir_error_msg(err, "The verifier does not yet support the following Rust feature: destructuring assignment")
+    } => Ok(())
 }
 
 test_verify_one_file! {
