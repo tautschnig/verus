@@ -718,7 +718,12 @@ pub(crate) fn pattern_to_vir_unadjusted<'tcx>(
 ) -> Result<vir::ast::Pattern, VirErr> {
     let tcx = bctx.ctxt.tcx;
     let mut pat_typ = typ_of_node_unadjusted(bctx, pat.span, &pat.hir_id)?;
-    unsupported_err_unless!(pat.default_binding_modes, pat.span, "destructuring assignment");
+    // `default_binding_modes == false` marks the patterns rustc synthesizes when it
+    // desugars a destructuring assignment `(a, b) = (x, y)` into
+    // `{ let (lhs0, lhs1) = (x, y); a = lhs0; b = lhs1; }`. The temporaries make the
+    // aliasing case (`(a, b) = (b, a)`) correct by construction, the binding modes are
+    // recorded in `pat_binding_modes` like any other pattern's, and no pattern
+    // adjustments are applied to these patterns, so they need no special treatment.
     let pattern = match &pat.kind {
         PatKind::Wild => PatternX::Wildcard,
         PatKind::Binding(_binding_mode, canonical, x, subpat) => {
