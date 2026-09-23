@@ -9,7 +9,7 @@ use super::range::{
 use core::ops::{
     Index, IndexMut, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive,
 };
-use core::slice::{Chunks, Iter, IterMut, SliceIndex};
+use core::slice::{Chunks, Iter, IterMut, SliceIndex, Windows};
 
 use verus as verus_skip_verusfmt;
 verus_skip_verusfmt! {
@@ -459,6 +459,56 @@ pub assume_specification<'a, T> [<&'a [T] as core::iter::IntoIterator>::into_ite
         IteratorSpec::remaining(&iter) == s@.as_ref(),
         into_iter_elts(iter) == IteratorSpec::remaining(&iter).unref(),
         IteratorSpec::decrease(&iter) is Some,
+;
+
+/***********************************************************************************************
+ * Definitions for `slice::Windows` (the iterator behind `<[T]>::windows`)
+ *
+ * `s.windows(k)` yields the `s.len() - k + 1` overlapping subslices of length `k` (none when
+ * `s.len() < k`). Each item is a `&[T]` whose view is the corresponding subrange of `s@`.
+ ***********************************************************************************************/
+#[verifier::external_type_specification]
+#[verifier::external_body]
+#[verifier::accept_recursive_types(T)]
+pub struct ExWindows<'a, T: 'a>(Windows<'a, T>);
+
+/// The underlying slice's contents, and the window size, of a `Windows` iterator.
+pub uninterp spec fn windows_elts<'a, T: 'a>(w: Windows<'a, T>) -> Seq<T>;
+pub uninterp spec fn windows_size<'a, T: 'a>(w: Windows<'a, T>) -> nat;
+
+/// The sequence of windows of size `k` over `s`, as sequences.
+pub open spec fn spec_windows<T>(s: Seq<T>, k: nat) -> Seq<Seq<T>> {
+    if k == 0 || s.len() < k {
+        Seq::empty()
+    } else {
+        Seq::new((s.len() - k + 1) as nat, |i: int| s.subrange(i, i + k))
+    }
+}
+
+impl <'a, T: 'a> super::iter::IteratorSpecImpl for Windows<'a, T> {
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool {
+        true
+    }
+
+    uninterp spec fn remaining(&self) -> Seq<Self::Item>;
+    uninterp spec fn will_return_none(&self) -> bool;
+    uninterp spec fn decrease(&self) -> Option<nat>;
+
+    open spec fn peek(&self, index: int) -> Option<Self::Item> {
+        None
+    }
+}
+
+pub assume_specification<'a, T>[ <[T]>::windows ](s: &'a [T], size: usize) -> (w: Windows<'a, T>)
+    requires
+        size > 0,
+    ensures
+        windows_elts(w) == s@,
+        windows_size(w) == size as nat,
+        IteratorSpec::remaining(&w).len() == spec_windows(s@, size as nat).len(),
+        forall|i: int| 0 <= i < IteratorSpec::remaining(&w).len()
+            ==> (#[trigger] IteratorSpec::remaining(&w)[i])@ == s@.subrange(i, i + size),
+        IteratorSpec::decrease(&w) is Some,
 ;
 
 /***********************************************************************************************
