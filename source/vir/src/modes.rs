@@ -992,6 +992,12 @@ fn add_pattern_rec(
             check_expr_has_mode(ctxt, record, typing, mode, expr, mode, &Proph::No)?;
             Ok(())
         }
+        PatternX::Slice { prefix, suffix, .. } => {
+            for p in prefix.iter().chain(suffix.iter()) {
+                add_pattern_rec(ctxt, record, typing, decls, mode, p)?;
+            }
+            Ok(())
+        }
         PatternX::Range(expr1, expr2) => {
             if let Some(expr1) = expr1 {
                 check_expr_in_pattern(expr1)?;
@@ -1005,12 +1011,6 @@ fn add_pattern_rec(
         }
         PatternX::ImmutRef(sub_pat) => add_pattern_rec(ctxt, record, typing, decls, mode, sub_pat),
         PatternX::MutRef(sub_pat) => add_pattern_rec(ctxt, record, typing, decls, mode, sub_pat),
-        PatternX::Slice(pats) => {
-            for pat in pats.iter() {
-                add_pattern_rec(ctxt, record, typing, decls, mode, pat)?;
-            }
-            Ok(())
-        }
     }
 }
 

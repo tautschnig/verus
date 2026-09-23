@@ -913,13 +913,21 @@ pub(crate) trait AstVisitor<R: Returner, Err, Scope: Scoper> {
                 let p = self.visit_pattern(p)?;
                 R::ret(|| pattern_new(PatternX::ImmutRef(R::get(p))))
             }
+            PatternX::Slice { kind, prefix, has_rest, suffix } => {
+                let prefix = self.visit_patterns(prefix)?;
+                let suffix = self.visit_patterns(suffix)?;
+                R::ret(|| {
+                    pattern_new(PatternX::Slice {
+                        kind: *kind,
+                        prefix: R::get_vec_a(prefix),
+                        has_rest: *has_rest,
+                        suffix: R::get_vec_a(suffix),
+                    })
+                })
+            }
             PatternX::MutRef(p) => {
                 let p = self.visit_pattern(p)?;
                 R::ret(|| pattern_new(PatternX::MutRef(R::get(p))))
-            }
-            PatternX::Slice(patterns) => {
-                let ps = self.visit_patterns(patterns)?;
-                R::ret(|| pattern_new(PatternX::Slice(R::get_vec_a(ps))))
             }
         }
     }
@@ -1608,13 +1616,13 @@ fn insert_pattern_vars(map: &mut VisitorScopeMap, pattern: &Pattern, init: bool)
         }
         PatternX::Expr(_) => {}
         PatternX::Range(_, _) => {}
+        PatternX::Slice { prefix, suffix, .. } => {
+            for p in prefix.iter().chain(suffix.iter()) {
+                insert_pattern_vars(map, p, init);
+            }
+        }
         PatternX::MutRef(pat1) | PatternX::ImmutRef(pat1) => {
             insert_pattern_vars(map, pat1, init);
-        }
-        PatternX::Slice(pats) => {
-            for pat in pats.iter() {
-                insert_pattern_vars(map, pat, init);
-            }
         }
     }
 }

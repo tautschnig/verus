@@ -195,6 +195,35 @@ fn reach_function_inner(ctxt: &Ctxt, state: &mut State, name: &Fun, fully_reach:
     }
 }
 
+/// Slice patterns are lowered (after pruning) to `Length` and `Index` on the matched
+/// value, so the vstd functions those lower to must be reached here.
+fn reach_pattern(ctxt: &Ctxt, state: &mut State, pattern: &Pattern) {
+    match &pattern.x {
+        PatternX::Slice { kind, prefix, suffix, .. } => {
+            if *kind == ArrayKind::Slice {
+                reach_function(ctxt, state, &fn_slice_len());
+                reach_function(ctxt, state, &fn_slice_index());
+            }
+            for p in prefix.iter().chain(suffix.iter()) {
+                reach_pattern(ctxt, state, p);
+            }
+        }
+        PatternX::Constructor(_, _, binders) => {
+            for b in binders.iter() {
+                reach_pattern(ctxt, state, &b.a);
+            }
+        }
+        PatternX::Or(a, b) => {
+            reach_pattern(ctxt, state, a);
+            reach_pattern(ctxt, state, b);
+        }
+        PatternX::Binding { sub_pat, .. }
+        | PatternX::ImmutRef(sub_pat)
+        | PatternX::MutRef(sub_pat) => reach_pattern(ctxt, state, sub_pat),
+        PatternX::Wildcard | PatternX::Var(_) | PatternX::Expr(_) | PatternX::Range(_, _) => {}
+    }
+}
+
 fn reach_function(ctxt: &Ctxt, state: &mut State, name: &Fun) {
     reach_function_inner(ctxt, state, name, true);
 }
@@ -539,6 +568,11 @@ fn traverse_reachable(ctxt: &Ctxt, state: &mut State) {
                     ExprX::Unary(UnaryOp::Length(ArrayKind::Slice), _) => {
                         reach_function(ctxt, state, &fn_slice_len());
                     }
+                    ExprX::Match(_, arms, _) => {
+                        for arm in arms.iter() {
+                            reach_pattern(ctxt, state, &arm.x.pattern);
+                        }
+                    }
                     ExprX::Binary(BinaryOp::Index(ArrayKind::Slice, bounds_check), _, _) => {
                         reach_function(ctxt, state, &fn_slice_index());
                         if *bounds_check != BoundsCheck::Allow {
@@ -600,7 +634,7 @@ fn traverse_reachable(ctxt: &Ctxt, state: &mut State) {
             };
             let fp = |state: &mut State, _: &mut VisitorScopeMap, pat: &Pattern| {
                 match &pat.x {
-                    PatternX::Slice(..) => match array_kind_of_typ(&pat.typ).0 {
+                    PatternX::Slice { kind, .. } => match kind {
                         ArrayKind::Array => {
                             reach_function(ctxt, state, &fn_array_update());
                         }

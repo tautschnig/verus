@@ -933,16 +933,35 @@ pub(crate) fn pattern_to_vir_unadjusted<'tcx>(
                 Mutability::Mut => PatternX::MutRef(subpattern),   // '&mut' pattern
             }
         }
-        PatKind::Slice(pats, inner, suffix) => {
-            if inner.is_some() || suffix.len() > 0 {
-                unsupported_err!(pat.span, "slice patterns with '..'", pat);
+        PatKind::Slice(before, slice, after) => {
+            // `[p_1, .., p_n]` or `[p_1, .., .., q_1, .., q_m]`. The matched type decides
+            // whether this is an array or a slice; match ergonomics through `&[T]` are
+            // handled by the pattern adjustments around this function.
+            let kind = match &*vir::ast_util::undecorate_typ(&pat_typ) {
+                TypX::Primitive(vir::ast::Primitive::Array, _) => vir::ast::ArrayKind::Array,
+                TypX::Primitive(vir::ast::Primitive::Slice, _) => vir::ast::ArrayKind::Slice,
+                _ => unsupported_err!(pat.span, "slice pattern on a non-array, non-slice type", pat),
+            };
+            let has_rest = match slice {
+                None => false,
+                Some(rest) => match &rest.kind {
+                    PatKind::Wild => true,
+                    _ => unsupported_err!(
+                        rest.span,
+                        "slice pattern with a bound rest (`x @ ..`)",
+                        rest
+                    ),
+                },
+            };
+            let mut prefix: Vec<vir::ast::Pattern> = Vec::new();
+            for p in before.iter() {
+                prefix.push(pattern_to_vir(bctx, p)?);
             }
-            let mut patterns = vec![];
-            for pat in pats.iter() {
-                let pattern = pattern_to_vir(bctx, pat)?;
-                patterns.push(pattern);
+            let mut suffix: Vec<vir::ast::Pattern> = Vec::new();
+            for p in after.iter() {
+                suffix.push(pattern_to_vir(bctx, p)?);
             }
-            PatternX::Slice(Arc::new(patterns))
+            PatternX::Slice { kind, prefix: Arc::new(prefix), has_rest, suffix: Arc::new(suffix) }
         }
         PatKind::Never => unsupported_err!(pat.span, "never patterns", pat),
         PatKind::Deref(_) => unsupported_err!(pat.span, "deref patterns", pat),

@@ -1935,6 +1935,11 @@ impl<'a> Builder<'a> {
             PatternX::Wildcard | PatternX::Expr(_) | PatternX::Range(_, _) => {
                 // nothing to do
             }
+            PatternX::Slice { prefix, suffix, .. } => {
+                for p in prefix.iter().chain(suffix.iter()) {
+                    self.scope_insert_pattern(p);
+                }
+            }
             PatternX::Var(binding) => {
                 self.scope_insert(&binding.name);
             }
@@ -1949,11 +1954,6 @@ impl<'a> Builder<'a> {
             }
             PatternX::Or(sub_pat, _) | PatternX::ImmutRef(sub_pat) | PatternX::MutRef(sub_pat) => {
                 self.scope_insert_pattern(sub_pat);
-            }
-            PatternX::Slice(patterns) => {
-                for p in patterns.iter() {
-                    self.scope_insert_pattern(p);
-                }
             }
         }
     }
@@ -2071,8 +2071,8 @@ pub fn pattern_all_bound_vars_with_ownership(
             }
             PatternX::Expr(_) => {}
             PatternX::Range(_, _) => {}
-            PatternX::Slice(patterns) => {
-                for p in patterns.iter() {
+            PatternX::Slice { prefix, suffix, .. } => {
+                for p in prefix.iter().chain(suffix.iter()) {
                     pattern_all_bound_vars_rec(p, out, modes);
                 }
             }
@@ -2151,6 +2151,18 @@ fn moves_and_muts_for_pattern(
                 moves_and_muts_for_pattern_rec(&pat2, projs, out, datatypes, modes, errors);
             }
             PatternX::Expr(..) | PatternX::Range(..) => {}
+            PatternX::Slice { prefix, suffix, .. } => {
+                // Element places have no projection representation here. Over-approximate:
+                // a move or mutable borrow of any element counts as a move or mutable
+                // borrow of the whole array (a conservative treatment; it can only reject).
+                for p in prefix.iter().chain(suffix.iter()) {
+                    let mut inner = vec![];
+                    moves_and_muts_for_pattern_rec(p, projs, &mut inner, datatypes, modes, errors);
+                    for (_projs, by_ref) in inner {
+                        out.push((projs.clone(), by_ref));
+                    }
+                }
+            }
             PatternX::ImmutRef(_) => {
                 // can skip this, nothing can be moved or mutated from behind an immutable ref
             }
@@ -2160,28 +2172,6 @@ fn moves_and_muts_for_pattern(
                 projs.push(proj);
                 moves_and_muts_for_pattern_rec(sub_pat, projs, out, datatypes, modes, errors);
                 projs.pop();
-            }
-            PatternX::Slice(sub_patterns) => {
-                let (kind, elem_typ) = crate::ast_util::array_kind_of_typ(&pattern.typ);
-                match kind {
-                    ArrayKind::Array => {
-                        for (i, sub_pat) in sub_patterns.iter().enumerate() {
-                            let proj = ProjectionTyped::Index(i, elem_typ.clone());
-                            projs.push(proj);
-                            moves_and_muts_for_pattern_rec(
-                                sub_pat, projs, out, datatypes, modes, errors,
-                            );
-                            projs.pop();
-                        }
-                    }
-                    ArrayKind::Slice => {
-                        // We can assume there are no moves out of a slice pattern
-                        // TODO: would be good to sanity check anyway
-                        if pattern_has_mut(pattern) {
-                            out.push((projs.clone(), ByRef::MutRef));
-                        }
-                    }
-                }
             }
         }
     }
@@ -2222,11 +2212,6 @@ fn check_illegal_muts(
         PatternX::Expr(_e) => {}
         PatternX::Range(_lower, _upper) => {}
         PatternX::ImmutRef(p) | PatternX::MutRef(p) => check_illegal_muts(p, datatypes, errors),
-        PatternX::Slice(pats) => {
-            for p in pats.iter() {
-                check_illegal_muts(p, datatypes, errors);
-            }
-        }
     }
 }
 
