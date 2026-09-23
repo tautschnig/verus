@@ -2,7 +2,7 @@ use super::super::prelude::*;
 use super::super::seq::{
     group_seq_lemmas, lemma_seq_empty, lemma_seq_subrange_index, lemma_seq_subrange_len,
 };
-use core::iter::{Filter, FlatMap, FromIterator, Iterator, Rev, Skip, StepBy, Take, Zip};
+use core::iter::{Chain, Filter, FlatMap, FromIterator, Iterator, Rev, Skip, StepBy, Take, Zip};
 
 use verus as verus_skip_verusfmt;
 verus_skip_verusfmt! {
@@ -143,6 +143,15 @@ pub trait ExIterator {
                         f.ensures((#[trigger] old(self).remaining()[i],), false)
                 }
             };
+
+    #[verifier::impls_cannot_extend_spec]
+    fn chain<U>(self, other: U) -> (r: Chain<Self, <U as IntoIterator>::IntoIter>)
+        where
+            Self: Sized,
+            U: IntoIterator<Item = Self::Item>,
+        ensures
+            self.obeys_prophetic_iter_laws() ==> chain_post(self, other, r),
+    ;
 
     fn collect<B>(self) -> (collection: B)
         where
@@ -807,6 +816,57 @@ impl <I> DoubleEndedIteratorSpecImpl for Take<I>
 }
 
 /********************************************************************************
+ * Definitions for `chain()`
+ ********************************************************************************/
+#[verifier::external_body]
+#[verifier::external_type_specification]
+#[verifier::reject_recursive_types(A)]
+#[verifier::reject_recursive_types(B)]
+pub struct ExChain<A, B>(Chain<A, B>);
+
+pub uninterp spec fn chain_iter_fst<A, B>(c: Chain<A, B>) -> A;
+pub uninterp spec fn chain_iter_snd<A, B>(c: Chain<A, B>) -> B;
+
+pub uninterp spec fn chain_post<I, U: IntoIterator>(i: I, other: U, r: Chain<I, <U as IntoIterator>::IntoIter>) -> bool;
+
+pub broadcast axiom fn chain_postcondition<I, U>(i: I, other: U, r: Chain<I, <U as IntoIterator>::IntoIter>)
+    where
+        I: Sized + IteratorSpec,
+        U: IntoIterator<Item = I::Item>,
+    requires
+        i.obeys_prophetic_iter_laws(),
+        #[trigger] chain_post(i, other, r),
+    ensures
+        call_ensures(U::into_iter, (other,), chain_iter_snd(r)),
+        chain_iter_fst(r) == i,
+        IteratorSpec::remaining(&r) == i.remaining() + chain_iter_snd(r).remaining(),
+        IteratorSpec::will_return_none(&r) ==> i.will_return_none() && chain_iter_snd(r).will_return_none(),
+        IteratorSpec::decrease(&r) is Some == (i.decrease() is Some && chain_iter_snd(r).decrease() is Some),
+;
+
+impl<A, B> IteratorSpecImpl for Chain<A, B>
+    where
+        A: Iterator + IteratorSpec,
+        B: Iterator<Item = A::Item> + IteratorSpec,
+{
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool {
+        chain_iter_fst(*self).obeys_prophetic_iter_laws() && chain_iter_snd(*self).obeys_prophetic_iter_laws()
+    }
+
+    #[verifier::prophetic]
+    uninterp spec fn remaining(&self) -> Seq<A::Item>;
+
+    #[verifier::prophetic]
+    uninterp spec fn will_return_none(&self) -> bool;
+
+    uninterp spec fn decrease(&self) -> Option<nat>;
+
+    open spec fn peek(&self, index: int) -> Option<A::Item> {
+        None
+    }
+}
+
+/********************************************************************************
  * Definitions for `flat_map()`
  *
  * `i.flat_map(f)` yields, for each item `x` of `i` in order, every item of the iterator
@@ -1086,6 +1146,7 @@ pub broadcast group group_iter_axioms {
     skip_postcondition,
     step_by_postcondition,
     flat_map_postcondition,
+    chain_postcondition,
     map_postcondition,
 }
 

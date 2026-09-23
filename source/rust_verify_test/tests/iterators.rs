@@ -441,3 +441,26 @@ test_verify_one_file! {
         }
     } => Ok(())
 }
+
+test_verify_one_file! {
+    #[test] chain_spec verus_code! {
+        use vstd::prelude::*;
+        use vstd::std_specs::iter::IteratorSpec;
+
+        fn collect_chain() {
+            let a = vec![1u32, 2];
+            let b = vec![3u32];
+            let c: Vec<u32> = a.into_iter().chain(b).collect();
+            assert(c@ == seq![1u32, 2, 3]);
+        }
+
+        fn order(a: &Vec<u64>, b: &Vec<u64>)
+            requires a.len() == 1, b.len() == 1,
+        {
+            let c = a.iter().chain(b.iter());
+            assert(c.remaining().len() == 2);
+            assert(*c.remaining()[0] == a[0]);
+            assert(*c.remaining()[1] == b[0]);
+        }
+    } => Ok(())
+}
