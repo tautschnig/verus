@@ -203,6 +203,59 @@ fn pattern_to_exprs_rec(
                 SpannedTyped::new(&sub_pat.span, &sub_pat.typ, PlaceX::DerefMut(place.clone()));
             pattern_to_exprs_rec(ctx, sub_pat, &deref_place, bindings, in_immut)
         }
+        PatternX::Slice { kind, prefix, has_rest, suffix } => {
+            // test: len == n (or len >= n with a rest), then each element sub-pattern
+            // against the element place. Element places carry BoundsCheck::Allow: they
+            // are only read after the length test succeeded (the test is a short-circuit
+            // conjunction and the bindings are declared after the test), so the index is
+            // in bounds on every path that reads it.
+            let int_typ = Arc::new(TypX::Int(IntRange::Int));
+            let n = prefix.len() + suffix.len();
+            let expr = read_place(&place);
+            let len = SpannedTyped::new(
+                &pattern.span,
+                &int_typ,
+                ExprX::Unary(UnaryOp::Length(*kind), expr),
+            );
+            let n_const = |k: usize| {
+                SpannedTyped::new(
+                    &pattern.span,
+                    &int_typ,
+                    ExprX::Const(crate::ast_util::const_int_from_u128(k as u128)),
+                )
+            };
+            let len_test = if *has_rest {
+                mk_ineq(&pattern.span, &n_const(n), &len, InequalityOp::Le)
+            } else {
+                mk_eq(&pattern.span, &len, &n_const(n))
+            };
+            let mut test = len_test;
+            let mut check_elem = |idx: Expr, sub: &Pattern, test: &mut Expr| -> Result<(), VirErr> {
+                let elem_place = SpannedTyped::new(
+                    &sub.span,
+                    &sub.typ,
+                    PlaceX::Index(place.clone(), idx, *kind, BoundsCheck::Allow),
+                );
+                let sub_test = pattern_to_exprs_rec(ctx, sub, &elem_place, bindings, in_immut)?;
+                let and = ExprX::Logical(LogicalOp::And, test.clone(), sub_test);
+                *test = SpannedTyped::new(&pattern.span, &t_bool, and);
+                Ok(())
+            };
+            for (i, sub) in prefix.iter().enumerate() {
+                check_elem(n_const(i), sub, &mut test)?;
+            }
+            for (j, sub) in suffix.iter().enumerate() {
+                // index = len - (suffix.len() - j)
+                let back = n_const(suffix.len() - j);
+                let idx = SpannedTyped::new(
+                    &pattern.span,
+                    &int_typ,
+                    ExprX::Binary(BinaryOp::Arith(ArithOp::Sub(OverflowBehavior::Allow)), len.clone(), back),
+                );
+                check_elem(idx, sub, &mut test)?;
+            }
+            Ok(test)
+        }
     }
 }
 
@@ -245,6 +298,9 @@ pub fn pattern_find_mut_binding(pattern: &Pattern) -> Option<Span> {
         }
         PatternX::Expr(_e) => None,
         PatternX::Range(_lower, _upper) => None,
+        PatternX::Slice { prefix, suffix, .. } => {
+            prefix.iter().chain(suffix.iter()).find_map(|p| pattern_find_mut_binding(p))
+        }
         PatternX::ImmutRef(p) | PatternX::MutRef(p) => pattern_find_mut_binding(p),
     }
 }
@@ -269,6 +325,9 @@ pub(crate) fn pattern_has_or(pattern: &Pattern) -> bool {
         PatternX::Or(_pat1, _pat2) => true,
         PatternX::Expr(_e) => false,
         PatternX::Range(_lower, _upper) => false,
+        PatternX::Slice { prefix, suffix, .. } => {
+            prefix.iter().chain(suffix.iter()).any(|p| pattern_has_or(p))
+        }
         PatternX::ImmutRef(p) | PatternX::MutRef(p) => pattern_has_or(p),
     }
 }
@@ -292,6 +351,9 @@ pub(crate) fn definitely_irrefutable(
         PatternX::Or(_pat1, _pat2) => false,
         PatternX::Expr(_e) => false,
         PatternX::Range(_lower, _upper) => false,
+        // A fixed-length array pattern with no rest is irrefutable when its length matches
+        // the type; that fact is not available here, so stay conservative.
+        PatternX::Slice { .. } => false,
         PatternX::ImmutRef(p) | PatternX::MutRef(p) => definitely_irrefutable(p, datatypes),
     }
 }

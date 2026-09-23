@@ -1642,3 +1642,125 @@ test_verify_one_file! {
         }
     } => Ok(())
 }
+
+test_verify_one_file! {
+    #[test] slice_patterns verus_code! {
+        use vstd::prelude::*;
+        fn head_or_zero(s: &[u64]) -> (r: u64)
+            ensures s.len() > 0 ==> r == s[0], s.len() == 0 ==> r == 0,
+        {
+            match s {
+                [] => 0,
+                [h, ..] => *h,
+            }
+        }
+        fn last(s: &[u64]) -> (r: u64)
+            requires s.len() >= 1,
+            ensures r == s[s.len() - 1],
+        {
+            match s {
+                [.., l] => *l,
+                [] => 0,
+            }
+        }
+        fn exact_pair(s: &[u64]) -> (r: bool)
+            ensures r == (s.len() == 2 && s[0] == s[1]),
+        {
+            match s {
+                [a, b] => *a == *b,
+                _ => false,
+            }
+        }
+        fn array_pat(a: [u64; 3]) -> (r: u64)
+            ensures r == a[2],
+        {
+            let [_, _, z] = a;
+            z
+        }
+        fn nested(s: &[Option<u64>]) -> (r: u64)
+            ensures (s.len() >= 1 && s[0] is Some) ==> r == s[0]->0,
+        {
+            match s {
+                [Some(x), ..] => *x,
+                _ => 0,
+            }
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] slice_patterns_fails verus_code! {
+        use vstd::prelude::*;
+        fn wrong(s: &[u64]) -> (r: u64)
+            requires s.len() >= 3,
+            ensures r == s[1], // FAILS
+        {
+            match s { [a, ..] => *a, _ => 0 }
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    #[test] slice_pattern_length_mismatch_fails verus_code! {
+        use vstd::prelude::*;
+        fn wrong2(s: &[u64]) -> (r: u64)
+            requires s.len() == 3,
+            ensures r == s[0], // FAILS
+        {
+            match s { [a, _] => *a, _ => 0 }
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    #[test] slice_pattern_bound_rest_unsupported verus_code! {
+        fn f(s: &[u64]) -> u64 {
+            match s { [h, rest @ ..] => *h, _ => 0 }
+        }
+    } => Err(err) => assert_vir_error_msg(err, "slice pattern with a bound rest")
+}
+
+test_verify_one_file! {
+    #[test] destructuring_assignment verus_code! {
+        use vstd::prelude::*;
+        struct S { a: u64, b: u64 }
+        fn swap_alias(x: u64, y: u64) -> (r: (u64, u64))
+            ensures r.0 == y, r.1 == x
+        {
+            let mut a = x; let mut b = y;
+            (a, b) = (b, a);
+            (a, b)
+        }
+        fn fields(s: &mut S, x: u64, y: u64)
+            ensures final(s).a == y, final(s).b == x
+        {
+            (s.a, s.b) = (y, x);
+        }
+        fn nested(x: u64, y: u64, z: u64) -> (r: (u64, u64, u64))
+            ensures r.0 == x && r.1 == y && r.2 == z
+        {
+            let (mut a, mut b, mut c) = (0u64, 0u64, 0u64);
+            ((a, b), c) = ((x, y), z);
+            (a, b, c)
+        }
+        fn wildcard(x: u64, y: u64) -> (r: u64)
+            ensures r == y
+        {
+            let mut b = 0u64;
+            (_, b) = (x, y);
+            b
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] destructuring_assignment_fails verus_code! {
+        fn wrong(x: u64, y: u64) -> (r: (u64, u64))
+            ensures r.0 == x // FAILS
+        {
+            let mut a = x; let mut b = y;
+            (a, b) = (b, a);
+            (a, b)
+        }
+    } => Err(err) => assert_one_fails(err)
+}

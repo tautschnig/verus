@@ -155,6 +155,10 @@ pub(crate) trait AstVisitor<R: Returner, Err, Scope: Scoper> {
         })
     }
 
+    fn visit_patterns(&mut self, pats: &Vec<Pattern>) -> Result<R::Vec<Pattern>, Err> {
+        R::map_vec(pats, &mut |p| self.visit_pattern(p))
+    }
+
     fn visit_binders_pattern(
         &mut self,
         binders: &air::ast::Binders<Pattern>,
@@ -900,6 +904,18 @@ pub(crate) trait AstVisitor<R: Returner, Err, Scope: Scoper> {
                 let p = self.visit_pattern(p)?;
                 R::ret(|| pattern_new(PatternX::ImmutRef(R::get(p))))
             }
+            PatternX::Slice { kind, prefix, has_rest, suffix } => {
+                let prefix = self.visit_patterns(prefix)?;
+                let suffix = self.visit_patterns(suffix)?;
+                R::ret(|| {
+                    pattern_new(PatternX::Slice {
+                        kind: *kind,
+                        prefix: R::get_vec_a(prefix),
+                        has_rest: *has_rest,
+                        suffix: R::get_vec_a(suffix),
+                    })
+                })
+            }
             PatternX::MutRef(p) => {
                 let p = self.visit_pattern(p)?;
                 R::ret(|| pattern_new(PatternX::MutRef(R::get(p))))
@@ -1593,6 +1609,11 @@ fn insert_pattern_vars(map: &mut VisitorScopeMap, pattern: &Pattern, init: bool)
         }
         PatternX::Expr(_) => {}
         PatternX::Range(_, _) => {}
+        PatternX::Slice { prefix, suffix, .. } => {
+            for p in prefix.iter().chain(suffix.iter()) {
+                insert_pattern_vars(map, p, init);
+            }
+        }
         PatternX::MutRef(pat1) | PatternX::ImmutRef(pat1) => {
             insert_pattern_vars(map, pat1, init);
         }

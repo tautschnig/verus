@@ -1889,6 +1889,11 @@ impl<'a> Builder<'a> {
             PatternX::Wildcard | PatternX::Expr(_) | PatternX::Range(_, _) => {
                 // nothing to do
             }
+            PatternX::Slice { prefix, suffix, .. } => {
+                for p in prefix.iter().chain(suffix.iter()) {
+                    self.scope_insert_pattern(p);
+                }
+            }
             PatternX::Var(binding) => {
                 self.scope_insert(&binding.name);
             }
@@ -2020,6 +2025,11 @@ pub fn pattern_all_bound_vars_with_ownership(
             }
             PatternX::Expr(_) => {}
             PatternX::Range(_, _) => {}
+            PatternX::Slice { prefix, suffix, .. } => {
+                for p in prefix.iter().chain(suffix.iter()) {
+                    pattern_all_bound_vars_rec(p, out, modes);
+                }
+            }
         }
     }
 
@@ -2085,6 +2095,18 @@ fn moves_and_muts_for_pattern(
                 moves_and_muts_for_pattern_rec(&pat2, projs, out, datatypes, modes, errors);
             }
             PatternX::Expr(..) | PatternX::Range(..) => {}
+            PatternX::Slice { prefix, suffix, .. } => {
+                // Element places have no projection representation here. Over-approximate:
+                // a move or mutable borrow of any element counts as a move or mutable
+                // borrow of the whole array (a conservative treatment; it can only reject).
+                for p in prefix.iter().chain(suffix.iter()) {
+                    let mut inner = vec![];
+                    moves_and_muts_for_pattern_rec(p, projs, &mut inner, datatypes, modes, errors);
+                    for (_projs, by_ref) in inner {
+                        out.push((projs.clone(), by_ref));
+                    }
+                }
+            }
             PatternX::ImmutRef(_) => {
                 // can skip this, nothing can be moved or mutated from behind an immutable ref
             }

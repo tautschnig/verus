@@ -443,11 +443,55 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
-    #[test] dyn_unsupported1 verus_code! {
-        trait T {}
-        fn test(d: &(dyn T + Send)) {
+    #[test] dyn_auto_traits verus_code! {
+        use vstd::prelude::*;
+        trait Animal {
+            spec fn spec_legs(&self) -> u64;
+            fn legs(&self) -> (r: u64) ensures r == self.spec_legs();
         }
-    } => Err(err) => assert_vir_error_msg(err, "The verifier does not yet support the following Rust feature: dyn with more that one trait")
+        struct Dog;
+        impl Animal for Dog {
+            spec fn spec_legs(&self) -> u64 { 4 }
+            fn legs(&self) -> (r: u64) ensures r == self.spec_legs() { 4 }
+        }
+        // auto-trait bounds carry no verification content and are accepted
+        fn count(a: &(dyn Animal + Send + Sync)) -> (r: u64)
+            ensures r == a.spec_legs()
+        {
+            a.legs()
+        }
+        // dropping the auto trait is an identity coercion: facts survive it
+        fn count_plain(a: &(dyn Animal + Send)) -> (r: u64)
+            ensures r == a.spec_legs()
+        {
+            let b: &dyn Animal = a;
+            b.legs()
+        }
+        fn total(zoo: &Vec<Box<dyn Animal + Send + Sync>>) -> (r: u64)
+            requires zoo.len() == 2,
+            ensures r == zoo[0].spec_legs() + zoo[1].spec_legs(),
+        {
+            let a = zoo[0].legs();
+            let b = zoo[1].legs();
+            assume(a + b <= u64::MAX);
+            a + b
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] dyn_auto_traits_fails verus_code! {
+        use vstd::prelude::*;
+        trait Animal {
+            spec fn spec_legs(&self) -> u64;
+            fn legs(&self) -> (r: u64) ensures r == self.spec_legs();
+        }
+        fn wrong(a: &(dyn Animal + Send)) -> (r: u64)
+            ensures r == a.spec_legs() + 1 // FAILS
+        {
+            a.legs()
+        }
+    } => Err(err) => assert_one_fails(err)
 }
 
 test_verify_one_file! {

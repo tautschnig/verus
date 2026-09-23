@@ -897,6 +897,12 @@ pub enum PatternX {
     /// and ultimately x will have type `&mut T`.
     MutRef(Pattern),
     ImmutRef(Pattern),
+    /// Slice or array pattern `[p_1, .., p_n]`, or `[p_1, .., p_n, .., q_1, .., q_m]` when
+    /// `has_rest` (a `..` between prefix and suffix). Matches when the length equals
+    /// (or, with a rest, is at least) `prefix.len() + suffix.len()` and each element
+    /// pattern matches the element at its position; suffix elements are counted from
+    /// the end. A bound rest (`r @ ..`) is not represented.
+    Slice { kind: ArrayKind, prefix: Patterns, has_rest: bool, suffix: Patterns },
 }
 
 /// Arms of match expressions
