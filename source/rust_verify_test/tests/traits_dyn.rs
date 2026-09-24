@@ -499,7 +499,7 @@ test_verify_one_file! {
         trait T {}
         fn test(d: &dyn Fn() -> ()) {
         }
-    } => Err(err) => assert_vir_error_msg(err, "The verifier does not yet support the following Rust feature: dyn with more that one trait")
+    } => Err(err) => assert_vir_error_msg(err, "The verifier does not yet support the following Rust feature: dyn with a binding of a supertrait's associated type")
 }
 
 test_verify_one_file! {
@@ -551,6 +551,147 @@ test_verify_one_file! {
                 // breaks carrying the precondition through:
                 owned(x);
             }
+        }
+    } => Ok(())
+}
+
+// dyn Trait<Assoc = T>: the binding is part of the dyn type's identity
+
+const DYN_PROJ_COMMON: &str = verus_code_str! {
+    trait Producer {
+        type Item;
+        spec fn peek(&self) -> Self::Item;
+        fn next(&self) -> (r: Self::Item)
+            ensures r == self.peek();
+    }
+    struct Ones;
+    impl Producer for Ones {
+        type Item = u64;
+        spec fn peek(&self) -> u64 { 1 }
+        fn next(&self) -> (r: u64) ensures r == self.peek() { 1 }
+    }
+    struct Twos;
+    impl Producer for Twos {
+        type Item = u64;
+        spec fn peek(&self) -> u64 { 2 }
+        fn next(&self) -> (r: u64) ensures r == self.peek() { 2 }
+    }
+    struct Flags;
+    impl Producer for Flags {
+        type Item = bool;
+        spec fn peek(&self) -> bool { true }
+        fn next(&self) -> (r: bool) ensures r == self.peek() { true }
+    }
+};
+
+test_verify_one_file! {
+    #[test] dyn_projection_basic DYN_PROJ_COMMON.to_string() + verus_code_str! {
+        fn use_dyn(p: &dyn Producer<Item = u64>) -> (r: u64)
+            ensures r == p.peek()
+        {
+            p.next()
+        }
+        fn use_dyn_b(p: &dyn Producer<Item = bool>) -> (r: bool)
+            ensures r == p.peek()
+        {
+            p.next()
+        }
+        fn test() {
+            let o = Ones;
+            let r = use_dyn(&o);
+            assert(r == 1);
+            let f = Flags;
+            let b = use_dyn_b(&f);
+            assert(b);
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] dyn_projection_heterogeneous DYN_PROJ_COMMON.to_string() + verus_code_str! {
+        use vstd::prelude::*;
+        fn sum(v: &Vec<Box<dyn Producer<Item = u64>>>) -> (r: u64)
+            requires v.len() == 2, v[0].peek() == 1, v[1].peek() == 2,
+            ensures r == 3
+        {
+            let a = v[0].next();
+            let b = v[1].next();
+            a + b
+        }
+        fn test() {
+            let mut v: Vec<Box<dyn Producer<Item = u64>>> = Vec::new();
+            let a: Box<dyn Producer<Item = u64>> = Box::new(Ones);
+            let b: Box<dyn Producer<Item = u64>> = Box::new(Twos);
+            v.push(a);
+            v.push(b);
+            let s = sum(&v);
+            assert(s == 3);
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] dyn_projection_wrong_post DYN_PROJ_COMMON.to_string() + verus_code_str! {
+        fn wrong(p: &dyn Producer<Item = u64>) -> (r: u64)
+            ensures r == 7 // FAILS
+        {
+            p.next()
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    // Two dyn types of one trait with different bindings must remain distinct types:
+    // conflating them would make their projection axioms contradict (Item == u64 and
+    // Item == bool for the same type id) and prove false.
+    #[test] dyn_projection_distinct_bindings_sound DYN_PROJ_COMMON.to_string() + verus_code_str! {
+        proof fn no_false(a: &dyn Producer<Item = u64>, b: &dyn Producer<Item = bool>) {
+            assert(false); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    #[test] dyn_projection_with_trait_args verus_code! {
+        trait Conv<A> {
+            type Out;
+            spec fn spec_conv(&self, a: A) -> Self::Out;
+            fn conv(&self, a: A) -> (r: Self::Out) ensures r == self.spec_conv(a);
+        }
+        struct Widen;
+        impl Conv<u8> for Widen {
+            type Out = u64;
+            spec fn spec_conv(&self, a: u8) -> u64 { a as u64 }
+            fn conv(&self, a: u8) -> (r: u64) ensures r == self.spec_conv(a) { a as u64 }
+        }
+        fn via(c: &dyn Conv<u8, Out = u64>, x: u8) -> (r: u64)
+            ensures r == c.spec_conv(x)
+        {
+            c.conv(x)
+        }
+        fn test() {
+            let w = Widen;
+            let r = via(&w, 5);
+            assert(r == 5);
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    // A dyn value's typing (has_type) is established by the to_dyn coercion, which also
+    // makes facts about collections of dyn values available (Vec::push postconditions).
+    #[test] dyn_vec_push_len verus_code! {
+        use vstd::prelude::*;
+        trait Shape { spec fn area(&self) -> int; }
+        struct Sq(u64);
+        impl Shape for Sq { spec fn area(&self) -> int { self.0 as int } }
+        fn test() {
+            let s1 = Sq(1);
+            let mut v: Vec<&dyn Shape> = Vec::new();
+            let a: &dyn Shape = &s1;
+            v.push(a);
+            assert(v@.len() == 1);
+            assert(v@[0] == a);
         }
     } => Ok(())
 }

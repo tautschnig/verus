@@ -155,8 +155,8 @@ pub fn types_equal(typ1: &Typ, typ2: &Typ) -> bool {
         (TypX::Datatype(path1, ts1, _), TypX::Datatype(path2, ts2, _)) => {
             path1 == path2 && n_types_equal(ts1, ts2)
         }
-        (TypX::Dyn(path1, ts1, _), TypX::Dyn(path2, ts2, _)) => {
-            path1 == path2 && n_types_equal(ts1, ts2)
+        (TypX::Dyn(path1, ts1, _, bs1), TypX::Dyn(path2, ts2, _, bs2)) => {
+            path1 == path2 && n_types_equal(ts1, ts2) && assoc_typ_bindings_equal(bs1, bs2)
         }
         (TypX::Primitive(p1, ts1), TypX::Primitive(p2, ts2)) => p1 == p2 && n_types_equal(ts1, ts2),
         (TypX::Decorate(d1, a1, t1), TypX::Decorate(d2, a2, t2)) => {
@@ -211,7 +211,7 @@ pub fn types_equal(typ1: &Typ, typ2: &Typ) -> bool {
         (TypX::SpecFn(_, _), _) => false,
         (TypX::AnonymousClosure(_, _, _, _), _) => false,
         (TypX::Datatype(_, _, _), _) => false,
-        (TypX::Dyn(_, _, _), _) => false,
+        (TypX::Dyn(_, _, _, _), _) => false,
         (TypX::Primitive(_, _), _) => false,
         (TypX::Decorate(..), _) => false,
         (TypX::Boxed(_), _) => false,
@@ -226,6 +226,14 @@ pub fn types_equal(typ1: &Typ, typ2: &Typ) -> bool {
         (TypX::Opaque { .. }, _) => false,
         (TypX::MutRef(..), _) => false,
     }
+}
+
+pub fn assoc_typ_bindings_equal(
+    bs1: &crate::ast::AssocTypBindings,
+    bs2: &crate::ast::AssocTypBindings,
+) -> bool {
+    bs1.len() == bs2.len()
+        && bs1.iter().zip(bs2.iter()).all(|((x1, t1), (x2, t2))| x1 == x2 && types_equal(t1, t2))
 }
 
 pub fn n_types_equal(typs1: &Typs, typs2: &Typs) -> bool {
@@ -1003,11 +1011,16 @@ pub fn typ_to_diagnostic_str(typ: &Typ) -> String {
                 format!("")
             }
         ),
-        TypX::Dyn(path, typs, _) => format!(
+        TypX::Dyn(path, typs, _, bindings) => format!(
             "dyn {}{}",
             path_as_friendly_rust_name(path),
-            if typs.len() > 0 {
-                format!("<{}>", typs_to_comma_separated_str(typs))
+            if typs.len() > 0 || bindings.len() > 0 {
+                let mut parts: Vec<String> =
+                    typs.iter().map(|t| typ_to_diagnostic_str(t)).collect();
+                for (name, t) in bindings.iter() {
+                    parts.push(format!("{} = {}", name, typ_to_diagnostic_str(t)));
+                }
+                format!("<{}>", parts.join(", "))
             } else {
                 format!("")
             }

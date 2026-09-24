@@ -1008,9 +1008,25 @@ pub(crate) trait AstVisitor<R: Returner, Err, Scope: Scoper> {
                     Arc::new(TypX::Datatype(path.clone(), R::get_vec_a(ts), impl_paths.clone()))
                 })
             }
-            TypX::Dyn(path, ts, impl_paths) => {
+            TypX::Dyn(path, ts, impl_paths, bindings) => {
                 let ts = self.visit_typs(ts)?;
-                R::ret(|| Arc::new(TypX::Dyn(path.clone(), R::get_vec_a(ts), impl_paths.clone())))
+                let binding_typs: Typs =
+                    Arc::new(bindings.iter().map(|(_, t)| t.clone()).collect());
+                let binding_typs = self.visit_typs(&binding_typs)?;
+                R::ret(|| {
+                    let binding_typs = R::get_vec(binding_typs);
+                    let bindings: Vec<(crate::ast::Ident, Typ)> = bindings
+                        .iter()
+                        .zip(binding_typs.into_iter())
+                        .map(|((name, _), t)| (name.clone(), t))
+                        .collect();
+                    Arc::new(TypX::Dyn(
+                        path.clone(),
+                        R::get_vec_a(ts),
+                        impl_paths.clone(),
+                        Arc::new(bindings),
+                    ))
+                })
             }
             TypX::Primitive(p, ts) => {
                 let ts = self.visit_typs(ts)?;

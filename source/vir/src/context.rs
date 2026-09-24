@@ -106,7 +106,11 @@ pub struct Ctx {
     pub(crate) datatypes_with_invariant: HashSet<Dt>,
     pub(crate) mono_types: Vec<MonoTyp>,
     pub(crate) spec_fn_types: Vec<usize>,
-    pub(crate) reached_dyn_traits: HashSet<Path>,
+    /// Traits used as `dyn` in the pruned crate, with the sorted names of the associated
+    /// types bound in those `dyn` types.
+    pub(crate) reached_dyn_traits: HashMap<Path, Vec<Ident>>,
+    /// For each trait impl, its associated-type definitions by name.
+    pub(crate) assoc_type_impls_by_impl: HashMap<Path, HashMap<Ident, crate::ast::Typ>>,
     pub(crate) used_builtins: crate::prune::UsedBuiltins,
     pub(crate) fndef_types: Vec<Fun>,
     pub(crate) resolved_typs: Vec<crate::resolve_axioms::ResolvableType>,
@@ -813,7 +817,7 @@ impl Ctx {
         module: Module,
         mono_types: Vec<MonoTyp>,
         spec_fn_types: Vec<usize>,
-        reached_dyn_traits: HashSet<Path>,
+        reached_dyn_traits: HashMap<Path, Vec<Ident>>,
         used_builtins: crate::prune::UsedBuiltins,
         fndef_types: Vec<Fun>,
         resolved_typs: Vec<crate::resolve_axioms::ResolvableType>,
@@ -865,6 +869,14 @@ impl Ctx {
         for opaque_type in krate.opaque_types.iter() {
             opaque_type_map.insert(opaque_type.x.name.clone(), opaque_type.clone());
         }
+        let mut assoc_type_impls_by_impl: HashMap<Path, HashMap<Ident, crate::ast::Typ>> =
+            HashMap::new();
+        for a in krate.assoc_type_impls.iter() {
+            assoc_type_impls_by_impl
+                .entry(a.x.impl_path.clone())
+                .or_insert_with(HashMap::new)
+                .insert(a.x.name.clone(), a.x.typ.clone());
+        }
 
         Ok(Ctx {
             module,
@@ -873,6 +885,7 @@ impl Ctx {
             mono_types,
             spec_fn_types,
             reached_dyn_traits,
+            assoc_type_impls_by_impl,
             used_builtins,
             fndef_types,
             resolved_typs,

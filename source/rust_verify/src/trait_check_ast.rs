@@ -36,7 +36,8 @@ pub(crate) enum TypX {
     TraitSelf,
     Tuple(Vec<Typ>),
     Datatype(Id, Vec<Id>, Vec<Typ>),
-    Dyn(Id, Vec<Typ>),
+    /// dyn Trait<args, A1 = t1, ...>
+    Dyn(Id, Vec<Typ>, Vec<(Id, Typ)>),
     Slice(Typ),
     StrSlice,
     Projection {

@@ -106,7 +106,8 @@ struct State {
     worklist_assoc_type_impls: Vec<AssocTypeGroup>,
     mono_abstract_datatypes: Option<HashSet<MonoTyp>>,
     spec_fn_types: HashSet<usize>,
-    dyn_traits: HashSet<Path>,
+    /// Traits used as `dyn`, with the (sorted) associated-type names bound in those uses.
+    dyn_traits: HashMap<Path, Vec<Ident>>,
     uses_array: bool,
     uses_bytestr: bool,
     uses_pointee_metadata: bool,
@@ -320,10 +321,23 @@ fn reach_typ(ctxt: &Ctxt, state: &mut State, typ: &Typ) {
         | TypX::PointeeMetadata(_) => {
             reach_type(ctxt, state, &typ_to_reached_type(typ));
         }
-        TypX::Dyn(trait_path, _, _) => {
+        TypX::Dyn(trait_path, _, _, bindings) => {
             reach_type(ctxt, state, &typ_to_reached_type(typ));
             reach_bound_trait(ctxt, state, trait_path);
-            state.dyn_traits.insert(trait_path.clone());
+            let names: Vec<Ident> = bindings.iter().map(|(x, _)| x.clone()).collect();
+            // Every associated type bound in a dyn type needs its declaration (the projection
+            // function) and the impls' definitions (for the dyn/impl spec-function axioms).
+            for name in names.iter() {
+                reach_assoc_type_decl(ctxt, state, &(trait_path.clone(), name.clone()));
+            }
+            match state.dyn_traits.insert(trait_path.clone(), names.clone()) {
+                Some(prev) if prev != names => {
+                    // Rust requires the same set of associated types to be bound in every
+                    // `dyn Trait<..>` type, so this cannot happen for well-typed input.
+                    panic!("internal error: inconsistent dyn bindings for {:?}", trait_path);
+                }
+                _ => {}
+            }
         }
         TypX::Opaque { def_path, .. } => {
             reach_opaque_type(ctxt, state, def_path);
@@ -937,7 +951,7 @@ pub struct PruneInfo {
     pub used_builtins: UsedBuiltins,
     pub fndef_types: Vec<Fun>,
     pub resolved_typs: Option<Vec<ResolvableType>>,
-    pub dyn_traits: HashSet<Path>,
+    pub dyn_traits: HashMap<Path, Vec<Ident>>,
 }
 
 pub fn prune_krate_for_module_or_krate(

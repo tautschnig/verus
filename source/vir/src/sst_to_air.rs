@@ -359,7 +359,9 @@ pub fn typ_to_ids(ctx: &Ctx, typ: &Typ) -> Vec<Expr> {
                 vec![t]
             }
         }
-        TypX::Dyn(name, typs, _) => mk_id(dyn_id(ctx, name, typs), crate::def::DECORATE_NIL_DYN),
+        TypX::Dyn(name, typs, _, bindings) => {
+            mk_id(dyn_id(ctx, name, typs, bindings), crate::def::DECORATE_NIL_DYN)
+        }
         TypX::Primitive(name, typs) => {
             let base = decoration_base_for_primitive(*name);
             mk_id(primitive_id(ctx, &name, typs), base)
@@ -462,10 +464,22 @@ pub(crate) fn datatype_id(ctx: &Ctx, path: &Path, typs: &Typs) -> Expr {
     air::ast_util::ident_apply_or_var(&f_name, &Arc::new(args))
 }
 
-fn dyn_id(ctx: &Ctx, tr: &Path, typs: &Typs) -> Expr {
+/// Type id of `dyn T<typs..., A1 = b1, ...>`: `DYN%T(ids(typs)..., ids(b1), ...)`.
+/// The bindings' ids are arguments of the id function, in the trait's associated-type
+/// order, so two dyn types with different bindings have different ids; this is what
+/// makes the projection axiom `proj%T%A(DYN%T(.., b, ..)) = b` sound.
+pub(crate) fn dyn_id(
+    ctx: &Ctx,
+    tr: &Path,
+    typs: &Typs,
+    bindings: &crate::ast::AssocTypBindings,
+) -> Expr {
     let f_name = ctx.name_ctxt.prefix_dyn_id(tr);
     let mut args: Vec<Expr> = Vec::new();
     for t in typs.iter() {
+        args.extend(typ_to_ids(ctx, t));
+    }
+    for (_, t) in bindings.iter() {
         args.extend(typ_to_ids(ctx, t));
     }
     air::ast_util::ident_apply_or_var(&f_name, &Arc::new(args))
@@ -1281,7 +1295,7 @@ pub(crate) fn exp_to_expr(ctx: &Ctx, exp: &Exp, expr_ctxt: &ExprCtxt) -> Result<
                 Arc::new(ExprX::Apply(str_ident(crate::def::HAS_RESOLVED), Arc::new(exprs)))
             }
             UnaryOpr::ToDyn(inner_self_typ) => {
-                let TypX::Dyn(trait_path, typ_args, _) = &*undecorate_typ(&exp.typ) else {
+                let TypX::Dyn(trait_path, typ_args, _, _) = &*undecorate_typ(&exp.typ) else {
                     panic!("ToDyn should have type TypX::Dyn: {:?}", exp.typ)
                 };
                 let mut args: Vec<Expr> = typ_to_ids(inner_self_typ);

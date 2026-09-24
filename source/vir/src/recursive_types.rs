@@ -264,9 +264,10 @@ fn check_positive_uses(
             check_impl_paths(impl_paths, &my_node)?;
             Ok(())
         }
-        TypX::Dyn(trait_path, ts, impl_paths) => {
-            for t in ts.iter() {
-                // For simplicity, just reject recursive types going through dyn T type args.
+        TypX::Dyn(trait_path, ts, impl_paths, bindings) => {
+            for t in ts.iter().chain(bindings.iter().map(|(_, t)| t)) {
+                // For simplicity, just reject recursive types going through dyn T type args
+                // or associated-type bindings.
                 check_positive_uses(datatype, global, local, None, t)?;
             }
             let trait_node = TypNode::Trait(trait_path.clone());
@@ -334,7 +335,7 @@ fn add_one_type_to_graph(type_graph: &mut Graph<TypNode>, src: &TypNode, typ: &T
             type_graph.add_edge(src.clone(), TypNode::TraitImpl(impl_path.clone()));
         }
     }
-    if let TypX::Dyn(path, _, impl_paths) = &**typ {
+    if let TypX::Dyn(path, _, impl_paths, _) = &**typ {
         type_graph.add_edge(src.clone(), TypNode::Trait(path.clone()));
         for impl_path in impl_paths.iter() {
             type_graph.add_edge(src.clone(), TypNode::TraitImpl(impl_path.clone()));
@@ -739,7 +740,7 @@ pub(crate) fn suppress_bound_in_trait_decl(
 
 pub(crate) fn add_trait_type_edges(call_graph: &mut GraphBuilder<Node>, src: &Node, typ: &Typ) {
     match &**typ {
-        TypX::Dyn(dyn_t_path, _, _) => {
+        TypX::Dyn(dyn_t_path, _, _, _) => {
             call_graph.add_edge(src.clone(), Node::Trait(dyn_t_path.clone()));
         }
         _ => {}

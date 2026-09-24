@@ -249,6 +249,11 @@ pub const QID_TRAIT_IMPL: &str = "trait_impl";
 pub const QID_TRAIT_TYPE_BOUNDS: &str = "trait_type_bounds";
 pub const QID_ASSOC_TYPE_BOUND: &str = "assoc_type_bound";
 pub const QID_ASSOC_TYPE_IMPL: &str = "assoc_type_impl";
+pub const QID_DYN_PROJECTION: &str = "dyn_projection";
+pub const QID_TO_DYN_TYPING: &str = "to_dyn_typing";
+/// Prefix of the type parameters standing for a dyn type's associated-type bindings in the
+/// dyn projection axioms (`traits::dyn_projection_axioms`).
+pub const DYN_BINDING_PARAM_PREFIX: &str = "dyn_binding";
 pub const QID_OPAQUE_TYPE_BOUND: &str = "opaque_type_bound";
 
 pub const VERUS_SPEC: &str = "VERUS_SPEC__";

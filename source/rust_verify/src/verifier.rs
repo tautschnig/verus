@@ -1573,6 +1573,10 @@ impl Verifier {
                 vir::assoc_types_to_air::assoc_type_impls_to_air(ctx, &krate.assoc_type_impls),
             ),
             CommandBatch::new(
+                "Dyn-Projections",
+                vir::traits::dyn_projection_axioms(ctx, &krate.traits),
+            ),
+            CommandBatch::new(
                 "Opaque-Type-Constructors",
                 vir::opaque_type_to_air::opaque_types_to_air(ctx, &krate.opaque_types),
             ),

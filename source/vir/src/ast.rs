@@ -289,8 +289,11 @@ pub enum TypX {
     FnDef(Fun, Typs, Option<Fun>),
     /// Datatype (concrete or abstract) applied to type arguments
     Datatype(Dt, Typs, ImplPaths),
-    /// dyn T<...args...> for some trait T (given by the Path) applied to trait type arguments
-    Dyn(Path, Typs, ImplPaths),
+    /// dyn T<...args..., A1 = t1, ...> for some trait T (given by the Path) applied to trait
+    /// type arguments, with T's associated types bound (`AssocTypBindings`, sorted by name).
+    /// The bindings are part of the type's identity: `dyn T<A = u8>` and `dyn T<A = u16>` are
+    /// distinct types with distinct type ids, so their projection axioms never meet.
+    Dyn(Path, Typs, ImplPaths, AssocTypBindings),
     /// When an opaque type is defined (e.g., by a function return), Rustc creates
     /// an unique opaque type constructor for it.
     /// This opaque type is just an instantiation of the opaque type constructor with args
@@ -964,6 +967,8 @@ pub enum ImplPath {
 /// type argument (see recursive_types.rs)
 // REVIEW: should trait_typ_args also have ImplPaths?
 pub type ImplPaths = Arc<Vec<ImplPath>>;
+/// Associated-type bindings of a `dyn` type, `(associated type name, bound type)`, sorted by name.
+pub type AssocTypBindings = Arc<Vec<(Ident, Typ)>>;
 
 #[derive(Clone, Debug, Serialize, Deserialize, ToDebugSNode)]
 pub struct CallTargetAttrs {

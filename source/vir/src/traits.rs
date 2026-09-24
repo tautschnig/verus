@@ -1020,7 +1020,12 @@ pub fn trait_decls_to_air(ctx: &Ctx, krate: &crate::sst::KrateSst) -> Commands {
         ));
         commands.push(Arc::new(CommandX::Global(decl_trait_bound)));
 
-        if ctx.reached_dyn_traits.contains(&tr.x.name) {
+        if let Some(binding_names) = ctx.reached_dyn_traits.get(&tr.x.name) {
+            // DYN%T takes the trait type arguments followed by the bound associated types
+            // (see sst_to_air::dyn_id).
+            for _ in binding_names.iter() {
+                iparams.extend(crate::def::types().iter().map(|s| str_typ(s)));
+            }
             let decl_trait_id = Arc::new(DeclX::fun_or_const(
                 ctx.name_ctxt.prefix_dyn_id(&tr.x.name),
                 Arc::new(iparams),
@@ -1033,9 +1038,79 @@ pub fn trait_decls_to_air(ctx: &Ctx, krate: &crate::sst::KrateSst) -> Commands {
             ));
             commands.push(Arc::new(CommandX::Global(decl_trait_id)));
             commands.push(Arc::new(CommandX::Global(decl_to_dyn)));
+            // The typing axiom for to_dyn%T mentions the projection functions, which are
+            // declared later; it is emitted by dyn_projection_axioms.
         }
     }
     Arc::new(commands)
+}
+
+/// Typing of the dyn coercion: a well-typed value of `Self` boxed into `dyn T<..>` is a
+/// well-typed value of the dyn type whose associated types are `Self`'s:
+///   forall Self t1..tm (x Poly). has_type(x, Self) ==>
+///     has_type(to_dyn%T(Self, t1..tm, x), DYN%T(t1..tm, proj%T%A1(Self, t1..tm), ...))
+/// The conclusion's bindings are the projections of `Self`, so for a concrete impl
+/// `impl T for S { type A1 = a; }` the assoc-type impl axiom rewrites them to `a`.
+fn to_dyn_typing_axiom(
+    ctx: &Ctx,
+    trait_path: &Path,
+    typ_params: &Vec<Ident>,
+    binding_names: &Vec<Ident>,
+) -> air::ast::Decl {
+    use crate::ast_util::LowerUniqueVar;
+    let self_param = crate::def::trait_self_type_param();
+    let mut all_typ_params: Vec<Ident> = vec![self_param.clone()];
+    all_typ_params.extend(typ_params.iter().cloned());
+    let self_typ: Typ = Arc::new(TypX::TypParam(self_param));
+    let typ_args: Vec<Typ> =
+        typ_params.iter().map(|x| Arc::new(TypX::TypParam(x.clone()))).collect();
+    let mut trait_typ_args: Vec<Typ> = vec![self_typ.clone()];
+    trait_typ_args.extend(typ_args.iter().cloned());
+    let bindings: Vec<(Ident, Typ)> = binding_names
+        .iter()
+        .map(|name| {
+            let proj = Arc::new(TypX::Projection {
+                trait_typ_args: Arc::new(trait_typ_args.clone()),
+                trait_path: trait_path.clone(),
+                name: name.clone(),
+            });
+            (name.clone(), proj)
+        })
+        .collect();
+    let dyn_typ = Arc::new(TypX::Dyn(
+        trait_path.clone(),
+        Arc::new(typ_args.clone()),
+        Arc::new(vec![]),
+        Arc::new(bindings),
+    ));
+    let x_name =
+        crate::ast_util::str_unique_var("to_dyn_value", crate::ast::VarIdentDisambiguate::AirLocal);
+    let x_typ: Typ = Arc::new(TypX::Boxed(self_typ.clone()));
+    let x_par = crate::def::Spanned::new(
+        ctx.global.no_span.clone(),
+        crate::sst::ParX { name: x_name.clone(), typ: x_typ, mode: crate::ast::Mode::Exec },
+    );
+    let x = ident_var(&x_name.lower());
+    let mut to_dyn_args: Vec<air::ast::Expr> = Vec::new();
+    for t in trait_typ_args.iter() {
+        to_dyn_args.extend(typ_to_ids(ctx, t));
+    }
+    to_dyn_args.push(x.clone());
+    let to_dyn = ident_apply(&ctx.name_ctxt.to_dyn(trait_path), &to_dyn_args);
+    let pre = crate::sst_to_air::expr_has_typ(ctx, &x, &self_typ);
+    let post = crate::sst_to_air::expr_has_typ(ctx, &to_dyn, &dyn_typ);
+    let qname =
+        format!("{}_{}", path_as_friendly_rust_name(trait_path), crate::def::QID_TO_DYN_TYPING);
+    let bind = crate::sst_to_air_func::func_bind_trig(
+        ctx,
+        qname,
+        &Arc::new(all_typ_params),
+        &Arc::new(vec![x_par]),
+        &vec![to_dyn],
+        None,
+    );
+    let forall = mk_bind_expr(&bind, &mk_implies(&pre, &post));
+    mk_unnamed_axiom(forall)
 }
 
 pub fn trait_bound_axioms(ctx: &Ctx, traits: &Vec<Trait>) -> Commands {
@@ -1078,6 +1153,88 @@ pub fn trait_bound_axioms(ctx: &Ctx, traits: &Vec<Trait>) -> Commands {
     Arc::new(commands)
 }
 
+/// For each trait T used as `dyn`: the typing axiom of `to_dyn%T` (see `to_dyn_typing_axiom`),
+/// and, when T has bound associated types A1..An, the projections of the dyn type are the
+/// bindings:
+///   forall t1..tm b1..bn. proj%T%Ai($dyn, DYN%T(t1..tm, b1..bn), t1..tm) == bi
+/// (one axiom per associated type and, with decorations, per projector component).
+/// Soundness: DYN%T is a fresh function of the bindings, so two dyn types with different
+/// bindings are different type ids and the axiom never equates two different bi's.
+pub fn dyn_projection_axioms(ctx: &Ctx, traits: &Vec<Trait>) -> Commands {
+    let mut commands: Vec<Command> = Vec::new();
+    for tr in traits {
+        let Some(binding_names) = ctx.reached_dyn_traits.get(&tr.x.name) else {
+            continue;
+        };
+        commands.push(Arc::new(CommandX::Global(to_dyn_typing_axiom(
+            ctx,
+            &tr.x.name,
+            &tr.x.typ_params.iter().map(|(x, _)| x.clone()).collect(),
+            binding_names,
+        ))));
+        if binding_names.len() == 0 {
+            continue;
+        }
+        // Quantified type parameters: the trait's type parameters and one per binding.
+        let mut typ_params: Vec<Ident> = tr.x.typ_params.iter().map(|(x, _)| x.clone()).collect();
+        let typ_args: Vec<Typ> =
+            typ_params.iter().map(|x| Arc::new(TypX::TypParam(x.clone()))).collect();
+        let mut bindings: Vec<(Ident, Typ)> = Vec::new();
+        for name in binding_names.iter() {
+            let param = Arc::new(format!("{}%{}", crate::def::DYN_BINDING_PARAM_PREFIX, name));
+            typ_params.push(param.clone());
+            bindings.push((name.clone(), Arc::new(TypX::TypParam(param))));
+        }
+        let dyn_typ = Arc::new(TypX::Dyn(
+            tr.x.name.clone(),
+            Arc::new(typ_args.clone()),
+            Arc::new(vec![]),
+            Arc::new(bindings.clone()),
+        ));
+        for (name, bound_typ) in bindings.iter() {
+            let mut push_command = |decoration: bool, index: usize| {
+                let projector = ctx.name_ctxt.projection(decoration, &tr.x.name, name);
+                let mut args: Vec<air::ast::Expr> = typ_to_ids(ctx, &dyn_typ);
+                for arg in typ_args.iter() {
+                    args.extend(typ_to_ids(ctx, arg));
+                }
+                let projection = ident_apply(&projector, &args);
+                let typ_id = typ_to_ids(ctx, bound_typ)[index].clone();
+                let eq = Arc::new(air::ast::ExprX::Binary(
+                    air::ast::BinaryOp::Eq,
+                    projection.clone(),
+                    typ_id,
+                ));
+                let qname = format!(
+                    "{}_{}_{}_{}",
+                    projector,
+                    path_as_friendly_rust_name(&tr.x.name),
+                    crate::def::QID_DYN_PROJECTION,
+                    decoration
+                );
+                let trigs = vec![projection];
+                let bind = crate::sst_to_air_func::func_bind_trig(
+                    ctx,
+                    qname,
+                    &Arc::new(typ_params.clone()),
+                    &Arc::new(vec![]),
+                    &trigs,
+                    None,
+                );
+                let forall = mk_bind_expr(&bind, &eq);
+                commands.push(Arc::new(CommandX::Global(air::ast_util::mk_unnamed_axiom(forall))));
+            };
+            if crate::context::DECORATE {
+                push_command(true, 0);
+                push_command(false, 1);
+            } else {
+                push_command(false, 0);
+            }
+        }
+    }
+    Arc::new(commands)
+}
+
 pub(crate) fn dyn_spec_fn_axiom(
     ctx: &Ctx,
     decl_commands: &mut Vec<Command>,
@@ -1100,9 +1257,23 @@ pub(crate) fn dyn_spec_fn_axiom(
     // Note: we don't need anything for exec/proof functions,
     // because dyn T just uses T's requires/ensures.
     use crate::ast_util::LowerUniqueVar;
-    let FunctionKind::TraitMethodImpl { method, trait_typ_args, .. } = &function.x.kind else {
+    let FunctionKind::TraitMethodImpl { method, trait_typ_args, impl_path, .. } = &function.x.kind
+    else {
         panic!("dyn_spec_fn_axiom expects TraitMethodImpl");
     };
+    // The dyn type on the left-hand side binds the trait's associated types to this impl's
+    // definitions of them: impl T for t0 { type A = a; } ==> dyn T<A = a>.
+    let binding_names = &ctx.reached_dyn_traits[trait_path];
+    let mut bindings: Vec<(Ident, Typ)> = Vec::new();
+    for name in binding_names.iter() {
+        match ctx.assoc_type_impls_by_impl.get(impl_path).and_then(|m| m.get(name)) {
+            Some(typ) => bindings.push((name.clone(), typ.clone())),
+            // Without the impl's definition of a bound associated type there is no dyn type
+            // to state the axiom for; omitting the axiom is sound (it only adds knowledge).
+            None => return,
+        }
+    }
+    let bindings = Arc::new(bindings);
     let mut typ_ids: Vec<air::ast::Expr> = Vec::new();
     let mut lhs_args: Vec<air::ast::Expr> = Vec::new();
     let mut rhs_args: Vec<air::ast::Expr> = Vec::new();
@@ -1111,8 +1282,12 @@ pub(crate) fn dyn_spec_fn_axiom(
         typ_ids.extend(typ_to_ids(ctx, targ));
         if n == 0 {
             let typ_args_no_self = Arc::new(trait_typ_args.iter().skip(1).cloned().collect());
-            let dyn_typ =
-                Arc::new(TypX::Dyn(trait_path.clone(), typ_args_no_self, Arc::new(vec![])));
+            let dyn_typ = Arc::new(TypX::Dyn(
+                trait_path.clone(),
+                typ_args_no_self,
+                Arc::new(vec![]),
+                bindings.clone(),
+            ));
             lhs_args.extend(typ_to_ids(ctx, &dyn_typ));
         } else {
             lhs_args.extend(typ_to_ids(ctx, targ));
@@ -1590,7 +1765,7 @@ pub fn get_dyn_traits(krate: &Krate) -> HashSet<Path> {
     use crate::ast_visitor::{AstVisitor, WalkTypVisitorEnv};
     let mut dyn_traits: HashSet<Path> = HashSet::new();
     let ft = &|dyn_traits: &mut HashSet<Path>, typ: &Typ| {
-        if let TypX::Dyn(trait_path, _, _) = &**typ {
+        if let TypX::Dyn(trait_path, _, _, _) = &**typ {
             dyn_traits.insert(trait_path.clone());
         }
         Ok(())
