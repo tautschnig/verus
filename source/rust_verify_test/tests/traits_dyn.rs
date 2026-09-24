@@ -761,3 +761,58 @@ test_verify_one_file! {
         }
     } => Ok(())
 }
+
+test_verify_one_file! {
+    // `&mut T` to `&mut dyn Trait`: the reference is a dyn view of the place; facts about
+    // the object after the call flow back to the concrete place
+    #[test] dyn_mut_ref_unsizing verus_code! {
+        trait Counter {
+            spec fn count(&self) -> int;
+            fn bump(&mut self) ensures final(self).count() == old(self).count() + 1;
+        }
+        struct C(u64);
+        impl Counter for C {
+            spec fn count(&self) -> int { self.0 as int }
+            fn bump(&mut self) ensures final(self).count() == old(self).count() + 1 {
+                assume(self.0 < 1000);
+                self.0 = self.0 + 1;
+            }
+        }
+        fn bump_twice(c: &mut dyn Counter) ensures final(c).count() == old(c).count() + 2 {
+            c.bump();
+            c.bump();
+        }
+        fn test() {
+            let mut c = C(5);
+            bump_twice(&mut c);
+            assert(c.count() == 7);
+            assert(c.0 == 7);
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] dyn_mut_ref_unsizing_wrong verus_code! {
+        trait Counter {
+            spec fn count(&self) -> int;
+            fn bump(&mut self) ensures final(self).count() == old(self).count() + 1;
+        }
+        struct C(u64);
+        impl Counter for C {
+            spec fn count(&self) -> int { self.0 as int }
+            fn bump(&mut self) ensures final(self).count() == old(self).count() + 1 {
+                assume(self.0 < 1000);
+                self.0 = self.0 + 1;
+            }
+        }
+        fn bump_twice(c: &mut dyn Counter) ensures final(c).count() == old(c).count() + 2 {
+            c.bump();
+            c.bump();
+        }
+        fn test() {
+            let mut c = C(5);
+            bump_twice(&mut c);
+            assert(c.0 == 8); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}

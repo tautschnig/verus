@@ -1761,6 +1761,42 @@ pub(crate) fn expr_to_vir_with_adjustments<'tcx>(
                 return Ok(ExprOrPlace::Expr(arg.consume(bctx, ty1)));
             }
 
+            // `&mut T` to `&mut dyn Trait`: the operand is always a (re)borrow of a place
+            // (rustc reborrows at coercion sites). The borrow is retyped to `&mut dyn Trait`;
+            // ast_to_sst's borrow lowering sees the type difference and models the borrow as
+            // a dyn view of the place: current == to_dyn(place), and the place's future value
+            // is a `T` witness whose to_dyn is the reference's future (the object behind the
+            // reference stays a `T` for the whole borrow).
+            if let (TyKind::Ref(_, t1, Mutability::Mut), TyKind::Ref(_, t2, Mutability::Mut)) =
+                (ty1.kind(), ty2.kind())
+            {
+                if matches!(t2.kind(), TyKind::Dynamic(..)) {
+                    let target_typ = bctx.mid_ty_to_vir(expr.span, &ty2)?;
+                    let arg = arg.consume(bctx, ty1);
+                    if matches!(t1.kind(), TyKind::Dynamic(..)) {
+                        // dropping auto-trait bounds only: same VIR type, identity
+                        if vir::ast_util::types_equal(&arg.typ, &target_typ) {
+                            return Ok(ExprOrPlace::Expr(arg));
+                        }
+                        unsupported_err!(expr.span, "unsizing between two dyn types");
+                    }
+                    match &arg.x {
+                        ExprX::BorrowMut(_)
+                        | ExprX::TwoPhaseBorrowMut(_)
+                        | ExprX::BorrowMutTracked(_) => {
+                            let e = bctx.spanned_typed_new(expr.span, &target_typ, arg.x.clone());
+                            return Ok(ExprOrPlace::Expr(e));
+                        }
+                        _ => {
+                            unsupported_err!(
+                                expr.span,
+                                "unsizing a mutable reference that is not a borrow of a place"
+                            );
+                        }
+                    }
+                }
+            }
+
             let (tyr1, tyr2) = remove_decoration_typs_for_unsizing(bctx.ctxt.tcx, ty1, ty2);
             // A `dyn Trait + Send` to `dyn Trait` coercion drops only auto-trait bounds,
             // which the VIR encoding does not carry; both sides have the same VIR type

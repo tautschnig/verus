@@ -2173,3 +2173,66 @@ test_verify_one_file! {
         }
     } => Ok(())
 }
+
+test_verify_one_file! {
+    // Calls through `&mut F` (a reborrow of the parameter) carry F's contract
+    #[test] fn_mut_through_mut_ref verus_code! {
+        use vstd::prelude::*;
+        fn call_mut<F: FnMut(u64) -> u64>(f: &mut F, x: u64) -> (r: u64)
+            requires f.requires((x,)),
+            ensures f.ensures((x,), r),
+        {
+            f(x)
+        }
+        fn call_dyn(f: &mut dyn FnMut(u64) -> u64, x: u64) -> (r: u64)
+            requires f.requires((x,)),
+            ensures f.ensures((x,), r),
+        {
+            f(x)
+        }
+        fn call_boxed(mut f: Box<dyn FnMut(u64) -> u64>, x: u64) -> (r: u64)
+            requires f.requires((x,)),
+            ensures f.ensures((x,), r),
+        {
+            f(x)
+        }
+        fn test() {
+            let mut c = |y: u64| -> (r: u64) requires y < 10 ensures r == y + 1 { y + 1 };
+            let r = call_mut(&mut c, 3);
+            assert(r == 4);
+            let mut d = |y: u64| -> (r: u64) requires y < 10 ensures r == 2 * y { 2 * y };
+            let s = call_dyn(&mut d, 3);
+            assert(s == 6);
+            let e = |y: u64| -> (r: u64) requires y < 10 ensures r == y + 5 { y + 5 };
+            let b: Box<dyn FnMut(u64) -> u64> = Box::new(e);
+            let t = call_boxed(b, 1);
+            assert(t == 6);
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] fn_mut_through_mut_ref_wrong verus_code! {
+        use vstd::prelude::*;
+        fn call_mut<F: FnMut(u64) -> u64>(f: &mut F, x: u64) -> (r: u64)
+            requires f.requires((x,)),
+            ensures f.ensures((x,), r),
+        {
+            f(x)
+        }
+        fn test() {
+            let mut c = |y: u64| -> (r: u64) requires y < 10 ensures r == y + 1 { y + 1 };
+            let r = call_mut(&mut c, 3);
+            assert(r == 5); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    #[test] fn_mut_through_mut_ref_precondition verus_code! {
+        use vstd::prelude::*;
+        fn test(f: &mut dyn FnMut(u64) -> u64) {
+            f(3); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}

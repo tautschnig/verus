@@ -4120,8 +4120,26 @@ fn borrow_mut_to_sst(
     // the latter if this is from mut_ref_tracked
     let has_typ_stm = assume_has_typ(&var_ident, &expr.typ, &expr.span);
 
+    let t = match &*expr.typ {
+        TypX::MutRef(t) => t.clone(),
+        _ => panic!("sst_mut_ref_future expected MutRef type"),
+    };
+    // An unsizing borrow `&mut place: &mut dyn Trait` of a place of type `T != dyn Trait`
+    // (see rust_to_vir_expr's Unsize handling): the reference is a dyn view of the place.
+    let place_typ = normal_exp.typ.clone();
+    let dyn_view = matches!(&*crate::ast_util::undecorate_typ(&t), TypX::Dyn(..))
+        && !matches!(&*crate::ast_util::undecorate_typ(&place_typ), TypX::Dyn(..));
+    let to_dyn = |e: &Exp| -> Exp {
+        SpannedTyped::new(
+            &expr.span,
+            &t,
+            ExpX::UnaryOpr(UnaryOpr::ToDyn(place_typ.clone()), e.clone()),
+        )
+    };
+
     let cur_exp = sst_mut_ref_current(&expr.span, &mut_ref_exp);
-    let equal = sst_equal(&expr.span, &cur_exp, &normal_exp);
+    let cur_value = if dyn_view { to_dyn(&normal_exp) } else { normal_exp.clone() };
+    let equal = sst_equal(&expr.span, &cur_exp, &cur_value);
     let assume_stm =
         Spanned::new(expr.span.clone(), StmX::Assume(AssumeIntent::MutRefCurrent, equal));
 
@@ -4133,14 +4151,27 @@ fn borrow_mut_to_sst(
 
     let sn = crate::ast::MutRefFutureSourceName::MutRefFuture;
     let future_expx = ExpX::Unary(UnaryOp::MutRefFuture(sn), mut_ref_exp.clone());
-    let t = match &*expr.typ {
-        TypX::MutRef(t) => t,
-        _ => panic!("sst_mut_ref_future expected MutRef type"),
-    };
     let future_exp = SpannedTyped::new(&expr.span, &t, future_expx);
 
+    let future_value = if dyn_view {
+        // The object behind the reference stays a `T`: the place's future value is a `T`
+        // witness whose dyn view is the reference's future value.
+        let (witness_ident, witness_exp) = state.declare_temp_var_stm(
+            &expr.span,
+            &place_typ,
+            PreLocalDeclKind::Immutable(Immutable(LocalDeclKind::BorrowMut)),
+        );
+        phase1_stms.push(assume_has_typ(&witness_ident, &place_typ, &expr.span));
+        let link = sst_equal(&expr.span, &to_dyn(&witness_exp), &future_exp);
+        phase1_stms
+            .push(Spanned::new(expr.span.clone(), StmX::Assume(AssumeIntent::MutRefCurrent, link)));
+        witness_exp
+    } else {
+        future_exp
+    };
+
     let assignx =
-        StmX::Assign { lhs: Dest { dest: lhs_exp.clone(), is_init: false }, rhs: future_exp };
+        StmX::Assign { lhs: Dest { dest: lhs_exp.clone(), is_init: false }, rhs: future_value };
     let assign = Spanned::new(expr.span.clone(), assignx);
 
     Ok((

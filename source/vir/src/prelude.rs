@@ -1038,6 +1038,29 @@ pub(crate) fn prelude_nodes(name_ctxt: &NameCtxt, config: PreludeConfig) -> Vec<
         (declare-fun [closure_ens] (/*[decoration] skipped */ [typ] [decoration] [typ] [Poly] [Poly] [Poly]) Bool)
         (declare-fun [default_ens] (/*[decoration] skipped */ [typ] [decoration] [typ] [Poly] [Poly] [Poly]) Bool)
 
+        // Calling through `&mut F` is core's blanket `impl<A, F: ?Sized + FnMut<A>> FnMut<A>
+        // for &mut F`, which calls `F::call_mut` on the referent; the model does not track
+        // state changes of the callable (current == future). So the contract of the call
+        // through the reference is F's contract on the current referent. Stated here for
+        // every F, sized or not (vstd's axiom_fn_mut_call_* cover only sized F, because
+        // call_requires takes F by value); for an F that is not FnMut both sides are
+        // uninterpreted, so the equation is harmless.
+        (axiom (forall ((fd [decoration]) (ft [typ]) (ad [decoration]) (at [typ]) (f [Poly]) (args [Poly])) (!
+            (= ([closure_req] ([type_id_mut_ref] fd ft) ad at f args)
+               ([closure_req] ft ad at ([mut_ref_current] f) args))
+            :pattern (([closure_req] ([type_id_mut_ref] fd ft) ad at f args))
+            :qid prelude_closure_req_mut_ref
+            :skolemid skolem_prelude_closure_req_mut_ref
+        )))
+        (axiom (forall ((fd [decoration]) (ft [typ]) (ad [decoration]) (at [typ]) (f [Poly]) (args [Poly]) (ret [Poly])) (!
+            (= ([closure_ens] ([type_id_mut_ref] fd ft) ad at f args ret)
+               (and ([closure_ens] ft ad at ([mut_ref_current] f) args ret)
+                    (= ([mut_ref_current] f) ([mut_ref_future] f))))
+            :pattern (([closure_ens] ([type_id_mut_ref] fd ft) ad at f args ret))
+            :qid prelude_closure_ens_mut_ref
+            :skolemid skolem_prelude_closure_ens_mut_ref
+        )))
+
         // Decreases
         (declare-fun [height] ([Poly]) [Height])
         (declare-fun [height_lt] ([Height] [Height]) Bool)
