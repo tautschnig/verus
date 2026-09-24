@@ -27,6 +27,10 @@
 /// discovered by the same `cargo kani` run.
 pub mod generated;
 
+/// Harnesses for the vstd specifications added on `internal/c3f0aa9`
+/// (windows, chunks, step_by, chain, flat_map, Pin, io printing).
+pub mod adaptors;
+
 use std::ops::{Bound, RangeBounds, RangeInclusive};
 
 // ===========================================================================
