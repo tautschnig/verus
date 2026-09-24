@@ -2859,8 +2859,40 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
                             &typ_of_expr_adjusted(bctx, expr.span, &arg.hir_id)?,
                             Some(arg_ty),
                         )?));
+                    } else if bctx.in_ghost {
+                        // Spec/proof code: IEEE negation, as `spec_neg` produces it.
+                        let varg = expr_to_vir_consume(bctx, arg)?;
+                        return mk_expr(ExprX::Unary(
+                            UnaryOp::IeeeFloat(vir::ast::IeeeFloatUnaryOp::Neg),
+                            varg,
+                        ));
                     } else {
-                        unsupported_err!(expr.span, "unary op negation of floating point")
+                        // Exec code: the operator is `<f64 as Neg>::neg`, specified by vstd
+                        // (std_specs/ops.rs), like the binary float operators below.
+                        let lang = tcx.lang_items();
+                        let Some(trait_id) = lang.neg_trait() else {
+                            crate::internal_err!(expr.span, "Neg trait not found");
+                        };
+                        let Some(assoc_fn) = tcx
+                            .associated_items(trait_id)
+                            .filter_by_name_unhygienic(rustc_span::symbol::sym::neg)
+                            .find(|item| {
+                                matches!(item.kind, rustc_middle::ty::AssocKind::Fn { .. })
+                            })
+                        else {
+                            crate::internal_err!(expr.span, "Neg::neg not found");
+                        };
+                        let float_ty = strip_ref(bctx.types.expr_ty_adjusted(arg));
+                        let substs = tcx.mk_args(&[float_ty.into()]);
+                        return Ok(ExprOrPlace::Expr(fn_call_to_vir(
+                            bctx,
+                            expr,
+                            assoc_fn.def_id,
+                            substs,
+                            expr.span,
+                            vec![arg],
+                            true,
+                        )?));
                     };
                 }
 

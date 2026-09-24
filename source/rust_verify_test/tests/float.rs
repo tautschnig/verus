@@ -228,12 +228,39 @@ test_verify_one_file! {
 
 test_verify_one_file! {
     #[test] f32_neg verus_code! {
+        use vstd::std_specs::ops::NegSpec;
         fn test() {
+            assume(forall|a: f32| a.neg_req());
             let x: f32 = 1.0;
             let y = -x;
 
             let x2 = &x;
             let y = -x2;
         }
-    } => Err(err) => assert_vir_error_msg(err, "The verifier does not yet support the following Rust feature: unary op negation of floating point")
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    // Exec negation of a float is `<f64 as Neg>::neg`, specified by vstd like the binary
+    // float operators: the caller establishes `neg_req`, and gets `neg_ensures`.
+    #[test] f64_exec_negation verus_code! {
+        use vstd::std_specs::ops::{NegSpec, neg_ensures};
+        fn neg(x: f64) -> (r: f64) ensures neg_ensures::<f64>(x, r) {
+            assume(forall|a: f64| a.neg_req());
+            -x
+        }
+        fn neg_ref(x: &f64) -> (r: f64) ensures neg_ensures::<f64>(*x, r) {
+            assume(forall|a: f64| a.neg_req());
+            -*x
+        }
+        spec fn sneg(x: f64) -> f64 { -x }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] f64_exec_negation_requires verus_code! {
+        fn neg(x: f64) -> f64 {
+            -x // FAILS: neg_req is not established
+        }
+    } => Err(err) => assert_one_fails(err)
 }
