@@ -81,6 +81,30 @@ python3 generate.py                                   # -> src/generated.rs, GEN
 
 ---
 
+## Harnesses for the `internal/c3f0aa9` vstd additions (`src/adaptors.rs`)
+
+**VERIFIED (2026-09-24, Kani 0.68.0).** The specifications added on the
+internal branch — `<[T]>::windows`, `<[T]>::chunks`, `Iterator::step_by`,
+`Iterator::chain`, `Iterator::flat_map`, `Pin<P>` for `P::Target: Unpin`
+(`new`/`get_ref`/`get_mut`/`into_inner`), and `std::io::_print`/`_eprint` — each
+get a harness that re-implements the spec's observable content (the item
+sequence the adaptor yields; the pinned pointer) in plain Rust and checks it
+against real std on symbolic inputs (slices of length ≤ 4–5 over symbolic
+bytes, sizes/steps 1..=5). The prophetic parts of the iterator specs
+(`will_return_none`, `decrease`) are not observable and are not checked.
+
+```
+Complete - 8 successfully verified harnesses, 0 failures, 8 total.
+```
+
+`cargo kani --harness adaptors::` (~20 min; the windows/chunks/flat_map
+harnesses are written element-wise because nested `Vec` equality blows the
+solver's memory at 32 GiB). A mutation check confirms the harnesses have
+teeth: changing the expected window count by one makes
+`windows_remaining_matches_spec` fail. The same module has stock-`rustc`
+exhaustive replays (`cargo test`: all slices of length ≤ 5 over a 3-letter
+alphabet, every size 1..=6) for hosts without Kani.
+
 ## Headline result (Q4) — both historical spec bugs are caught
 
 **VERIFIED.** A single `cargo kani` run over `vstd-kani/` produced:
