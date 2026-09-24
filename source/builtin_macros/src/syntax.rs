@@ -4613,11 +4613,61 @@ impl VisitMut for Visitor {
 
     fn visit_expr_while_mut(&mut self, expr_while: &mut ExprWhile) {
         visit_expr_while_mut(self, expr_while);
-        let invariant_except_breaks = self.take_ghost(&mut expr_while.invariant_except_break);
+        let mut invariant_except_breaks = self.take_ghost(&mut expr_while.invariant_except_break);
         let invariants = self.take_ghost(&mut expr_while.invariant);
         let invariant_ensures = self.take_ghost(&mut expr_while.invariant_ensures);
-        let ensures = self.take_ghost(&mut expr_while.ensures);
-        let decreases = self.take_ghost(&mut expr_while.decreases);
+        let mut ensures = self.take_ghost(&mut expr_while.ensures);
+        let mut decreases = self.take_ghost(&mut expr_while.decreases);
+        // `while let Some(x) = it.next() { .. }` with no decreases clause: like a for loop,
+        // use the iterator's own metric, `it.decrease()`, which `next` decreases while it
+        // returns `Some` (IteratorSpec::next). The receiver is repeated in spec position, so it
+        // must be a place (a variable or a field path).
+        if decreases.is_none() && self.inside_ghost == 0 {
+            if let Some(receiver) = while_let_next_receiver(&expr_while.cond) {
+                let span = expr_while.while_token.span;
+                let decrease_is_some_msg = "Failed to prove that the iterator always returns a decreases metric \
+                    (added automatically for `while let Some(..) = it.next()`). \
+                    Add an explicit `decreases` clause, or #[verifier::exec_allows_no_decreases_clause].";
+                let some_inv: Expr = Expr::Verbatim(quote_spanned_vstd!(vstd, span =>
+                    #[verifier::custom_err(#decrease_is_some_msg)]
+                    #[verus::internal(auto_decreases)]
+                    #vstd::prelude::is_variant(#vstd::std_specs::iter::IteratorSpec::decrease(&#receiver), "Some")
+                ));
+                if let Some(ieb) = &mut invariant_except_breaks {
+                    ieb.exprs.exprs.insert(0, some_inv);
+                } else {
+                    invariant_except_breaks =
+                        Some(parse_quote_spanned!(span => invariant_except_break #some_inv,));
+                }
+                expr_while.attrs.push(mk_verus_attr(span, quote! { auto_decreases }));
+                decreases = Some(parse_quote_spanned_vstd!(vstd, span =>
+                    decreases
+                        #vstd::std_specs::iter::IteratorSpec::decrease(&#receiver)
+                        .unwrap_or(#vstd::pervasive::arbitrary()),
+                ));
+                // The loop ends when `next` returns None: the iterator is exhausted. Marked
+                // like the for loop's automatic ensures, so a user `break` drops them.
+                expr_while.attrs.push(mk_verus_attr(span, quote! { for_loop }));
+                let mut auto_ensures: Ensures = parse_quote_spanned_vstd!(vstd, span =>
+                    ensures
+                        #[verus::internal(auto_loop_ensures)]
+                        #vstd::prelude::imply(
+                            #vstd::std_specs::iter::IteratorSpec::obeys_prophetic_iter_laws(&#receiver),
+                            #vstd::std_specs::iter::IteratorSpec::will_return_none(&#receiver)
+                                && #vstd::prelude::spec_eq(#vstd::std_specs::iter::IteratorSpec::remaining(&#receiver).len(), 0)),
+                        true,
+                );
+                if let Some(user_ensures) = ensures.take() {
+                    for attr in user_ensures.attrs {
+                        auto_ensures.attrs.push(attr);
+                    }
+                    for expr in user_ensures.exprs.exprs {
+                        auto_ensures.exprs.exprs.insert(0, expr);
+                    }
+                }
+                ensures = Some(auto_ensures);
+            }
+        }
         let mut stmts: Vec<Stmt> = Vec::new();
         self.add_loop_specs(
             &mut stmts,
@@ -6366,4 +6416,40 @@ fn check_verus_return_idents(
     }
 
     None
+}
+
+/// For a `while let Some(pat) = <receiver>.next()` condition, the receiver expression if it is a
+/// place (variable or field path, possibly behind `*`/`&`/`&mut`), else None.
+fn while_let_next_receiver(cond: &Expr) -> Option<Expr> {
+    let Expr::Let(let_expr) = cond else {
+        return None;
+    };
+    // pattern must be `Some(..)` (a path-less tuple-struct pattern named Some)
+    match &*let_expr.pat {
+        verus_syn::Pat::TupleStruct(ts)
+            if ts.path.segments.len() == 1 && ts.path.segments[0].ident == "Some" => {}
+        _ => return None,
+    }
+    let Expr::MethodCall(mc) = &*let_expr.expr else {
+        return None;
+    };
+    if mc.method != "next" || !mc.args.is_empty() || mc.turbofish.is_some() {
+        return None;
+    }
+    fn is_place(e: &Expr) -> bool {
+        match e {
+            Expr::Path(p) => p.qself.is_none(),
+            Expr::Field(f) => is_place(&f.base),
+            Expr::Paren(p) => is_place(&p.expr),
+            Expr::Unary(u) if matches!(u.op, verus_syn::UnOp::Deref(_)) => is_place(&u.expr),
+            Expr::Reference(r) => is_place(&r.expr),
+            _ => false,
+        }
+    }
+    // Strip a leading `&mut`/`&` so the spec reads the iterator, not a reference to it.
+    let mut recv: &Expr = &mc.receiver;
+    while let Expr::Reference(r) = recv {
+        recv = &r.expr;
+    }
+    if is_place(recv) { Some(recv.clone()) } else { None }
 }
