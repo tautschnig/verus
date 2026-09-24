@@ -4,7 +4,9 @@ use rustc_hir::HirId;
 use rustc_span::Span;
 use std::sync::Arc;
 use vir::ast::{
-    BinaryOp, Expr, ExprX, FunctionX, Mode, Place, PlaceX, SpannedTyped, VirErr, VirErrAs,
+    BinaryOp, CallTarget, Expr, ExprX, FieldOpr, FunctionX, Mode, Place, PlaceX, ReadKind,
+    SpannedTyped, TypDecoration, TypX, UnaryOpr, UnfinalizedReadKind, VariantCheck, VirErr,
+    VirErrAs,
 };
 use vir::messages::WarningAllow;
 
@@ -91,12 +93,14 @@ fn clone_add_post_condition<'tcx>(
     hir_id: HirId,
     functionx: &mut FunctionX,
 ) -> Result<(), VirErr> {
+    let mut adt_did: Option<rustc_span::def_id::DefId> = None;
     if inputs.len() >= 1 {
         use rustc_middle::ty::{AdtDef, TyKind};
         if let TyKind::Ref(_, t, _) = inputs[0].kind() {
             if let TyKind::Adt(AdtDef(adt_def_data), _) = t.kind() {
                 // It's more convenient to put verifier::allow on the datatype than on the function
                 id = adt_def_data.did;
+                adt_did = Some(adt_def_data.did);
             }
         }
     }
@@ -117,7 +121,7 @@ fn clone_add_post_condition<'tcx>(
     };
     let warn_unsupported = || {
         warn(
-            "Verus does not (yet) support autoderive Clone impl when the clone is not a copy; continuing, but without adding a specification for the derived Clone impl",
+            "Verus does not (yet) support this autoderive Clone impl; continuing, but without adding a specification for the derived Clone impl",
         )
     };
 
@@ -125,62 +129,217 @@ fn clone_add_post_condition<'tcx>(
         return Ok(());
     };
 
-    let uses_copy;
-    let self_var;
-
-    match &body.x {
-        ExprX::Block(_stmts, Some(last_expr)) => match &last_expr.x {
-            ExprX::ReadPlace(pl, _) => match &pl.x {
-                PlaceX::Local(id) if &*id.0 == "self" => {
-                    uses_copy = true;
-                    self_var = Some(last_expr.clone());
-                }
-                _ => {
-                    warn_unexpected();
-                    return Ok(());
-                }
-            },
-            ExprX::Ctor { .. } => {
-                uses_copy = false;
-                self_var = None;
-            }
-            _ => {
-                warn_unexpected();
-                return Ok(());
-            }
-        },
-        _ => {
-            warn_unexpected();
-            return Ok(());
-        }
-    }
-
     if functionx.ensure.0.len() != 0 {
         warn_unexpected();
         return Ok(());
     }
 
-    if uses_copy {
-        // Add `ensures ret == self`
-        let self_var = self_var.unwrap();
-        let ret_var = SpannedTyped::new(
-            &self_var.span,
-            &self_var.typ,
-            ExprX::Var(functionx.ret.x.name.clone()),
-        );
-        let eq_expr = SpannedTyped::new(
-            &self_var.span,
-            &vir::ast_util::bool_typ(),
-            ExprX::Binary(BinaryOp::Eq(Mode::Spec), ret_var.clone(), self_var.clone()),
-        );
+    let ExprX::Block(_stmts, Some(last_expr)) = &body.x else {
+        warn_unexpected();
+        return Ok(());
+    };
 
-        let eq_expr = cleanup_span_ids(ctxt, span, hir_id, &eq_expr);
-        functionx.ensure.0 = Arc::new(vec![eq_expr]);
-    } else {
-        warn_unsupported();
+    // `self` as a spec value (the referent of the &self parameter) and the return value.
+    let self_param = &functionx.params[0];
+    let self_typ = match &*self_param.x.typ {
+        TypX::Decorate(TypDecoration::Ref, _, t) => t.clone(),
+        _ => {
+            warn_unexpected();
+            return Ok(());
+        }
+    };
+    let self_place = SpannedTyped::new(
+        &last_expr.span,
+        &self_param.x.typ,
+        PlaceX::Local(self_param.x.name.clone()),
+    );
+    // Immutable dereference is implicit in VIR: reading the `&Self` parameter yields the value,
+    // and the expression carries the referent type.
+    let self_val = SpannedTyped::new(
+        &last_expr.span,
+        &self_typ,
+        ExprX::ReadPlace(
+            self_place,
+            UnfinalizedReadKind { preliminary_kind: ReadKind::Copy, id: 0 },
+        ),
+    );
+    let ret_var =
+        SpannedTyped::new(&last_expr.span, &self_typ, ExprX::Var(functionx.ret.x.name.clone()));
+
+    let ensure = match &last_expr.x {
+        ExprX::ReadPlace(pl, _) => match &pl.x {
+            // `*self` (a Copy type): ensures ret == self
+            PlaceX::Local(id) if &*id.0 == "self" => SpannedTyped::new(
+                &last_expr.span,
+                &vir::ast_util::bool_typ(),
+                ExprX::Binary(BinaryOp::Eq(Mode::Spec), ret_var.clone(), self_val.clone()),
+            ),
+            _ => {
+                warn_unexpected();
+                return Ok(());
+            }
+        },
+        // struct: `S { f: Clone::clone(&self.f), .. }`
+        // ensures forall fields f: cloned(self.f, ret.f)
+        ExprX::Ctor(dt, variant, binders, None) => {
+            let Some(conjuncts) =
+                fieldwise_cloned(ctxt, &last_expr.span, dt, variant, binders, &self_val, &ret_var)
+            else {
+                warn_unsupported();
+                return Ok(());
+            };
+            vir::ast_util::conjoin(&last_expr.span, &conjuncts)
+        }
+        // enum: `match self { V(a, ..) => V(Clone::clone(a), ..), .. }`
+        // ensures for each variant V: self is V ==> ret is V && fieldwise cloned
+        ExprX::Match(_, arms, _) => {
+            let mut conjuncts: Vec<Expr> = Vec::new();
+            for arm in arms.iter() {
+                let ExprX::Ctor(dt, variant, binders, None) = &arm.x.body.x else {
+                    warn_unsupported();
+                    return Ok(());
+                };
+                let Some(fields) = fieldwise_cloned(
+                    ctxt,
+                    &last_expr.span,
+                    dt,
+                    variant,
+                    binders,
+                    &self_val,
+                    &ret_var,
+                ) else {
+                    warn_unsupported();
+                    return Ok(());
+                };
+                let is_variant = |e: &Expr| {
+                    SpannedTyped::new(
+                        &last_expr.span,
+                        &vir::ast_util::bool_typ(),
+                        ExprX::UnaryOpr(
+                            UnaryOpr::IsVariant { datatype: dt.clone(), variant: variant.clone() },
+                            e.clone(),
+                        ),
+                    )
+                };
+                let mut rhs = vec![is_variant(&ret_var)];
+                rhs.extend(fields);
+                let rhs = vir::ast_util::conjoin(&last_expr.span, &rhs);
+                conjuncts.push(SpannedTyped::new(
+                    &last_expr.span,
+                    &vir::ast_util::bool_typ(),
+                    ExprX::Logical(vir::ast::LogicalOp::Implies, is_variant(&self_val), rhs),
+                ));
+            }
+            vir::ast_util::conjoin(&last_expr.span, &conjuncts)
+        }
+        _ => {
+            warn_unexpected();
+            return Ok(());
+        }
+    };
+
+    let ensure = cleanup_span_ids(ctxt, span, hir_id, &ensure);
+    functionx.ensure.0 = Arc::new(vec![ensure]);
+    // The postcondition names the datatype's fields, which a public function's `ensures` may not
+    // do for a datatype that is not itself public. rustc marks the derived impl method public,
+    // but nothing outside the datatype's visibility can name the type, let alone call its
+    // clone, so restricting the function to the datatype's visibility loses nothing.
+    if let Some(adt_did) = adt_did {
+        let dt_vis = crate::rust_to_vir_base::mk_visibility(ctxt, adt_did);
+        if dt_vis.at_least_as_restrictive_as(&functionx.visibility) {
+            functionx.visibility = dt_vis;
+        }
     }
-
     Ok(())
+}
+
+/// For a derived clone body `V { f: Clone::clone(&self.f) | *self.f, .. }`, the conjuncts
+/// `cloned::<T_f>(self.f, ret.f)` for each field (or `ret.f == self.f` for a copied field).
+/// `cloned` (vstd::pervasive) is `strictly_cloned || equal`, so it also covers a `clone`
+/// specification that returns the value itself. None if a field initializer has another shape.
+fn fieldwise_cloned<'tcx>(
+    ctxt: &Context<'tcx>,
+    span: &vir::messages::Span,
+    dt: &vir::ast::Dt,
+    variant: &vir::ast::Ident,
+    binders: &vir::ast::Binders<Expr>,
+    self_val: &Expr,
+    ret_var: &Expr,
+) -> Option<Vec<Expr>> {
+    if ctxt.no_vstd {
+        return None;
+    }
+    let mut conjuncts: Vec<Expr> = Vec::new();
+    for binder in binders.iter() {
+        let field_typ = binder.a.typ.clone();
+        // spec-mode field read: ReadPlace(Field(.., Temporary(e)))
+        let field = |e: &Expr| {
+            let base = SpannedTyped::new(span, &e.typ, PlaceX::Temporary(e.clone()));
+            let place = SpannedTyped::new(
+                span,
+                &field_typ,
+                PlaceX::Field(
+                    FieldOpr {
+                        datatype: dt.clone(),
+                        variant: variant.clone(),
+                        field: binder.name.clone(),
+                        get_variant: false,
+                        check: VariantCheck::None,
+                    },
+                    base,
+                ),
+            );
+            SpannedTyped::new(
+                span,
+                &field_typ,
+                ExprX::ReadPlace(
+                    place,
+                    UnfinalizedReadKind { preliminary_kind: ReadKind::Copy, id: 0 },
+                ),
+            )
+        };
+        let (self_f, ret_f) = (field(self_val), field(ret_var));
+        let is_clone_call = match &binder.a.x {
+            ExprX::Call { target: CallTarget::Fun(_, fun, _, _, _), .. } => {
+                &*fun.path.last_segment() == "clone"
+            }
+            _ => false,
+        };
+        if is_clone_call {
+            let fun = vir::fun!(vir::ast::CrateId::Vstd => "pervasive", "cloned");
+            let target = CallTarget::Fun(
+                vir::ast::CallTargetKind::Static,
+                fun,
+                Arc::new(vec![field_typ.clone()]),
+                Arc::new(vec![]),
+                vir::ast::CallTargetAttrs {
+                    autospec: vir::ast::AutospecUsage::IfMarked,
+                    const_var: false,
+                    assume_external_allowed: false,
+                },
+            );
+            conjuncts.push(SpannedTyped::new(
+                span,
+                &vir::ast_util::bool_typ(),
+                ExprX::Call {
+                    target,
+                    args: Arc::new(vec![self_f, ret_f]),
+                    post_args: None,
+                    body: None,
+                },
+            ));
+        } else if matches!(&binder.a.x, ExprX::ReadPlace(..)) {
+            // a Copy field read directly
+            conjuncts.push(SpannedTyped::new(
+                span,
+                &vir::ast_util::bool_typ(),
+                ExprX::Binary(BinaryOp::Eq(Mode::Spec), ret_f, self_f),
+            ));
+        } else {
+            return None;
+        }
+    }
+    Some(conjuncts)
 }
 
 // TODO better place for this

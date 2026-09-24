@@ -1921,3 +1921,78 @@ test_verify_one_file! {
         assert!(err.errors.iter().all(|e| e.rendered.contains("precondition not satisfied")));
     }
 }
+
+test_verify_one_file! {
+    // A derived Clone on a non-Copy type gets a fieldwise specification:
+    // every field of the result is `cloned` from the corresponding field of the source.
+    #[test] derive_clone_fieldwise verus_code! {
+        use vstd::prelude::*;
+        #[derive(Clone)]
+        struct M { level: u8, target: u64, name: Vec<u8> }
+        fn f_struct(m: &M) -> (r: M)
+            ensures r.level == m.level, r.target == m.target, r.name@ == m.name@,
+        {
+            m.clone()
+        }
+        #[derive(Clone)]
+        enum E { A(u64), B { x: Vec<u8>, y: bool }, C }
+        fn f_enum(e: &E) -> (r: E)
+            ensures match (e, &r) {
+                (E::A(a), E::A(b)) => a == b,
+                (E::B { x: x1, y: y1 }, E::B { x: x2, y: y2 }) => x1@ == x2@ && y1 == y2,
+                (E::C, E::C) => true,
+                _ => false,
+            }
+        {
+            e.clone()
+        }
+        #[derive(Clone)]
+        struct W<T> { v: Vec<T>, n: usize }
+        fn f_generic<T: Clone>(w: &W<T>) -> (r: W<T>)
+            ensures r.n == w.n, r.v@.len() == w.v@.len(),
+        {
+            w.clone()
+        }
+        #[derive(Clone)]
+        struct N { inner: M, k: u8 }
+        fn f_nested(n: &N) -> (r: N)
+            ensures r.inner.name@ == n.inner.name@, r.k == n.k,
+        {
+            n.clone()
+        }
+        pub struct Odd(pub u64);
+        impl Clone for Odd {
+            fn clone(&self) -> (r: Self)
+                ensures r.0 == if self.0 < 1000 { self.0 + 1 } else { 0 },
+            {
+                if self.0 < 1000 { Odd(self.0 + 1) } else { Odd(0) }
+            }
+        }
+        #[derive(Clone)]
+        struct HasOdd { o: Odd, k: u8 }
+        // `cloned` is the field's own clone specification or equality
+        fn f_user_field_spec(h: &HasOdd) -> (r: HasOdd)
+            requires h.o.0 < 1000,
+            ensures r.k == h.k, r.o.0 == h.o.0 + 1 || r.o.0 == h.o.0,
+        {
+            h.clone()
+        }
+        mod inner {
+            use vstd::prelude::*;
+            #[derive(Clone)]
+            pub struct Pub { pub a: u8, pub b: Vec<u8> }
+        }
+        fn f_pub(p: &inner::Pub) -> (r: inner::Pub) ensures r.a == p.a, r.b@ == p.b@ { p.clone() }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] derive_clone_fieldwise_wrong verus_code! {
+        use vstd::prelude::*;
+        #[derive(Clone)]
+        struct M { level: u8, name: Vec<u8> }
+        fn f(m: &M) -> (r: M) ensures r.level == m.level + 1 { // FAILS
+            m.clone()
+        }
+    } => Err(err) => assert_one_fails(err)
+}
