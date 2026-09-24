@@ -102,9 +102,13 @@ fn gen_typ(state: &mut State, typ: &vir::ast::Typ) -> Typ {
         vir::ast::TypX::Datatype(Dt::Path(path), typs, _) => {
             Box::new(TypX::Datatype(state.datatype_name(path), vec![], gen_typs(state, typs)))
         }
-        vir::ast::TypX::Dyn(path, typs, _) => {
+        vir::ast::TypX::Dyn(path, typs, _, bindings) => {
             let id = state.trait_name(path);
-            Box::new(TypX::Dyn(id, gen_typs(state, typs)))
+            let bindings = bindings
+                .iter()
+                .map(|(name, t)| (state.typ_param(name.to_string(), None), gen_typ(state, t)))
+                .collect();
+            Box::new(TypX::Dyn(id, gen_typs(state, typs), bindings))
         }
         vir::ast::TypX::Primitive(Primitive::Array, ts) => {
             assert!(ts.len() == 2);
@@ -464,9 +468,15 @@ pub(crate) fn gen_check_trait_impl_conflicts(
             gen_generics(state, &t.x.assoc_typs, &t.x.assoc_typs_bounds, None);
         let mut assoc_typs: Vec<(Id, Vec<GenericParam>, Typ)> = Vec::new();
         for x in &a_params {
-            // TODO: test associated types once we support "dyn with more than one trait"
             generic_params.push(x.clone());
             assoc_typs.push((x.name.clone(), vec![], Box::new(TypX::TypParam(x.name.clone()))));
+            // An associated type is implicitly Sized, so the parameter standing for it in
+            // this blanket impl must be too (the emitter marks unbounded params `?Sized`).
+            generic_bounds.push(GenericBound {
+                typ: Box::new(TypX::TypParam(x.name.clone())),
+                bound_vars: vec![],
+                bound: Bound::Sized,
+            });
         }
         generic_bounds.extend(a_bounds);
 

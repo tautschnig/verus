@@ -1423,46 +1423,83 @@ pub(crate) fn mid_ty_to_vir_ghost<'tcx>(
             // Auto-trait bounds (`dyn Trait + Send + Sync`) carry no verification content:
             // a value of `dyn Trait + Send` is a value of `dyn Trait`, so encoding the former
             // as the latter over-approximates the type, exactly as the auto-trait bounds on
-            // generics are dropped in `check_generic_bound` above. Keep the remaining
-            // predicates and require exactly one principal trait among them.
-            let non_auto: Vec<_> = preds
-                .iter()
-                .filter(|p| !matches!(p.skip_binder(), ExistentialPredicate::AutoTrait(_)))
-                .collect();
-            if non_auto.len() != 1 {
-                unsupported_err!(span, "dyn with more that one trait");
+            // generics are dropped in `check_generic_bound` above.
+            // What remains must be exactly one principal trait, plus the bindings of that
+            // trait's associated types (`dyn Trait<Assoc = T>`), which Rust requires for every
+            // associated type not gated behind `where Self: Sized`. The bindings become part
+            // of the VIR dyn type (see `TypX::Dyn`), sorted by associated-type name.
+            let mut principal: Option<rustc_middle::ty::ExistentialTraitRef<'tcx>> = None;
+            let mut bindings: Vec<(vir::ast::Ident, Typ)> = Vec::new();
+            let mut projection_traits: Vec<rustc_span::def_id::DefId> = Vec::new();
+            for pred in preds.iter() {
+                match pred.skip_binder() {
+                    ExistentialPredicate::AutoTrait(_) => {}
+                    ExistentialPredicate::Trait(trait_ref) => {
+                        if principal.is_some() {
+                            unsupported_err!(span, "dyn with more that one trait");
+                        }
+                        principal = Some(trait_ref);
+                    }
+                    ExistentialPredicate::Projection(proj) => {
+                        let assoc_item = tcx.associated_item(proj.def_id);
+                        let name = Arc::new(assoc_item.name().to_string());
+                        // `dyn Fn(A) -> B` binds `FnOnce::Output`, an associated type of a
+                        // supertrait of the principal trait. The VIR dyn type only carries
+                        // the principal trait's own associated types for now.
+                        if let Some(trait_ref) = &principal {
+                            if tcx.parent(proj.def_id) != trait_ref.def_id {
+                                unsupported_err!(
+                                    span,
+                                    "dyn with a binding of a supertrait's associated type"
+                                );
+                            }
+                        }
+                        projection_traits.push(tcx.parent(proj.def_id));
+                        let bound_ty = match proj.term.kind() {
+                            rustc_middle::ty::TermKind::Ty(t) => t,
+                            rustc_middle::ty::TermKind::Const(_) => {
+                                unsupported_err!(span, "dyn with associated const binding");
+                            }
+                        };
+                        let (bound_typ, _) = t_rec(&bound_ty)?;
+                        bindings.push((name, bound_typ));
+                    }
+                }
             }
-            match non_auto[0].skip_binder() {
-                ExistentialPredicate::Trait(trait_ref) => {
-                    let trait_did = trait_ref.def_id;
-                    let args = trait_ref.args;
-                    let trait_path =
-                        def_id_to_vir_path(tcx, verus_items, trait_did, None::<&mut HashMap<_, _>>);
-                    let self_arg = GenericArg::from(*ty);
-                    let mut ty_args_with_self = vec![self_arg];
-                    ty_args_with_self.extend(args.into_iter());
-                    let args_with_self = tcx.mk_args(&ty_args_with_self);
-                    let typ_args = mk_typ_args(&args)?;
-                    let typ_args = typ_args.into_iter().map(|(t, _)| t).collect();
-                    let impl_paths = get_impl_paths(
-                        tcx,
-                        verus_items,
-                        param_env_src,
-                        trait_did,
-                        args_with_self,
-                        None,
-                        span,
-                    )?;
-                    let typx = TypX::Dyn(trait_path, Arc::new(typ_args), impl_paths);
-                    (Arc::new(typx), false)
-                }
-                ExistentialPredicate::Projection(_) => {
-                    unsupported_err!(span, "dyn with projections");
-                }
-                ExistentialPredicate::AutoTrait(_def_id) => {
-                    unsupported_err!(span, "dyn with auto-traits");
+            let Some(trait_ref) = principal else {
+                unsupported_err!(span, "dyn without a principal trait");
+            };
+            // Projections listed before the principal trait were not checked above.
+            if projection_traits.iter().any(|t| *t != trait_ref.def_id) {
+                unsupported_err!(span, "dyn with a binding of a supertrait's associated type");
+            }
+            bindings.sort_by(|(x, _), (y, _)| x.cmp(y));
+            for w in bindings.windows(2) {
+                if w[0].0 == w[1].0 {
+                    unsupported_err!(span, "dyn with a repeated associated type binding");
                 }
             }
+            let trait_did = trait_ref.def_id;
+            let args = trait_ref.args;
+            let trait_path =
+                def_id_to_vir_path(tcx, verus_items, trait_did, None::<&mut HashMap<_, _>>);
+            let self_arg = GenericArg::from(*ty);
+            let mut ty_args_with_self = vec![self_arg];
+            ty_args_with_self.extend(args.into_iter());
+            let args_with_self = tcx.mk_args(&ty_args_with_self);
+            let typ_args = mk_typ_args(&args)?;
+            let typ_args = typ_args.into_iter().map(|(t, _)| t).collect();
+            let impl_paths = get_impl_paths(
+                tcx,
+                verus_items,
+                param_env_src,
+                trait_did,
+                args_with_self,
+                None,
+                span,
+            )?;
+            let typx = TypX::Dyn(trait_path, Arc::new(typ_args), impl_paths, Arc::new(bindings));
+            (Arc::new(typx), false)
         }
         TyKind::Foreign(..) => unsupported_err!(span, "foreign types"),
         TyKind::FnPtr(..) => unsupported_err!(span, "function pointer types"),

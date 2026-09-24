@@ -85,8 +85,16 @@ impl ToString for TypX {
             TypX::Datatype(path, lifetimes, args) => {
                 typ_args_to_string(Some(path), lifetimes, args, &None)
             }
-            TypX::Dyn(path, args) => {
-                format!("dyn {}", typ_args_to_string(Some(path), &vec![], args, &None))
+            TypX::Dyn(path, args, bindings) => {
+                let mut buf = format!("dyn {}", path.to_string());
+                if args.len() + bindings.len() > 0 {
+                    let mut parts: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+                    for (name, t) in bindings {
+                        parts.push(format!("{} = {}", name.to_string(), t.to_string()));
+                    }
+                    buf += &format!("<{}>", parts.join(", "));
+                }
+                buf
             }
             TypX::Slice(elem) => {
                 format!("[{}]", elem.to_string())

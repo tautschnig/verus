@@ -98,7 +98,7 @@ fn check_one_typ<Emit: EmitError>(
             let _ = check_path_and_get_datatype(ctxt, path, span, emit)?;
             Ok(())
         }
-        TypX::Dyn(path, _, _) => {
+        TypX::Dyn(path, _, _, _) => {
             if let Some(tr) = ctxt.traits.get(path) {
                 use crate::ast::DynCompatible;
                 match &**tr.x.dyn_compatible.as_ref().expect("dyn_compatible should be Some") {
