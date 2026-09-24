@@ -315,6 +315,39 @@ fn drain_matches_spec() {
 }
 
 // ---------------------------------------------------------------------------
+// char / u8 ASCII predicates (char.rs) and core::cmp::{max,min} (cmp.rs)
+// ---------------------------------------------------------------------------
+
+#[cfg(kani)]
+#[kani::proof]
+fn ascii_predicates_match_spec() {
+    let c: char = kani::any();
+    assert!(c.is_ascii() == ((c as u32) < 128), "char::is_ascii");
+    assert!(c.is_ascii_digit() == ('0' <= c && c <= '9'), "char::is_ascii_digit");
+    assert!(c.is_ascii_alphabetic() == (('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')), "char::is_ascii_alphabetic");
+    assert!(c.is_ascii_alphanumeric() == (('0' <= c && c <= '9') || ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')), "char::is_ascii_alphanumeric");
+    assert!(c.is_ascii_uppercase() == ('A' <= c && c <= 'Z'), "char::is_ascii_uppercase");
+    assert!(c.is_ascii_lowercase() == ('a' <= c && c <= 'z'), "char::is_ascii_lowercase");
+    assert!(c.is_ascii_whitespace() == (c == ' ' || c == '\t' || c == '\n' || c == '\u{C}' || c == '\r'), "char::is_ascii_whitespace");
+    assert!(c.is_ascii_hexdigit() == (('0' <= c && c <= '9') || ('a' <= c && c <= 'f') || ('A' <= c && c <= 'F')), "char::is_ascii_hexdigit");
+    let b: u8 = kani::any();
+    assert!(b.is_ascii() == (b < 128), "u8::is_ascii");
+    assert!(b.is_ascii_digit() == (b'0' <= b && b <= b'9'), "u8::is_ascii_digit");
+    assert!(b.is_ascii_alphabetic() == ((b'a' <= b && b <= b'z') || (b'A' <= b && b <= b'Z')), "u8::is_ascii_alphabetic");
+    assert!(b.is_ascii_alphanumeric() == ((b'0' <= b && b <= b'9') || (b'a' <= b && b <= b'z') || (b'A' <= b && b <= b'Z')), "u8::is_ascii_alphanumeric");
+    assert!(b.is_ascii_whitespace() == (b == b' ' || b == b'\t' || b == b'\n' || b == 0x0C || b == b'\r'), "u8::is_ascii_whitespace");
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn cmp_max_min_match_ord() {
+    let a: u64 = kani::any();
+    let b: u64 = kani::any();
+    assert!(core::cmp::max(a, b) == a.max(b), "core::cmp::max is Ord::max");
+    assert!(core::cmp::min(a, b) == a.min(b), "core::cmp::min is Ord::min");
+}
+
+// ---------------------------------------------------------------------------
 // std::io::_print / _eprint   (io.rs): no postcondition; the spec only claims
 // the call returns (it may panic on a failed write, which the spec does not
 // exclude: assume_specification without `no_unwind`). Nothing to falsify; a
@@ -398,6 +431,23 @@ mod tests {
                     assert_eq!(v, rest);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn ascii_exhaustive_u8_and_char_bmp() {
+        for b in 0u8..=255 {
+            assert_eq!(b.is_ascii(), b < 128);
+            assert_eq!(b.is_ascii_digit(), b'0' <= b && b <= b'9');
+            assert_eq!(b.is_ascii_alphanumeric(), (b'0' <= b && b <= b'9') || (b'a' <= b && b <= b'z') || (b'A' <= b && b <= b'Z'));
+            assert_eq!(b.is_ascii_whitespace(), b == b' ' || b == b'\t' || b == b'\n' || b == 0x0C || b == b'\r');
+        }
+        for u in 0u32..0x1_0000 {
+            let Some(c) = char::from_u32(u) else { continue };
+            assert_eq!(c.is_ascii(), u < 128);
+            assert_eq!(c.is_ascii_digit(), '0' <= c && c <= '9');
+            assert_eq!(c.is_ascii_hexdigit(), ('0' <= c && c <= '9') || ('a' <= c && c <= 'f') || ('A' <= c && c <= 'F'));
+            assert_eq!(c.is_ascii_whitespace(), c == ' ' || c == '\t' || c == '\n' || c == '\u{C}' || c == '\r');
         }
     }
 
