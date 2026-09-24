@@ -464,3 +464,25 @@ test_verify_one_file! {
         }
     } => Ok(())
 }
+
+test_verify_one_file! {
+    // A for loop over a Chain gets the wrapper's index and element facts
+    #[test] chain_for_loop verus_code! {
+        use vstd::prelude::*;
+        fn concat(a: &Vec<u8>, b: &Vec<u8>) -> (r: Vec<u8>)
+            ensures r@ == a@ + b@,
+        {
+            let mut out: Vec<u8> = Vec::new();
+            for x in it: a.iter().chain(b.iter())
+                invariant
+                    it.seq().len() == a@.len() + b@.len(),
+                    forall|i| 0 <= i < it.seq().len() ==> #[trigger] it.seq()[i] == (a@ + b@)[i],
+                    out@ == it.seq().subrange(0, it.index()).map_values(|p: &u8| *p),
+            {
+                out.push(*x);
+            }
+            assert(out@ =~= a@ + b@);
+            out
+        }
+    } => Ok(())
+}

@@ -242,6 +242,79 @@ fn pin_new_get_mut_writes_through() {
 }
 
 // ---------------------------------------------------------------------------
+// Vec::retain   (vec.rs: final(vec)@ == old(vec)@.filter_index(|j| keep[j]),
+//                keep[j] == f(&old(vec)@[j]))
+// ---------------------------------------------------------------------------
+
+fn spec_retain(s: &[u8], f: fn(&u8) -> bool) -> Vec<u8> {
+    let mut out = Vec::new();
+    for x in s {
+        if f(x) {
+            out.push(*x);
+        }
+    }
+    out
+}
+
+fn is_even(x: &u8) -> bool {
+    *x % 2 == 0
+}
+
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(6)]
+fn retain_matches_spec() {
+    let (arr, len) = any_slice::<4>();
+    let mut v: Vec<u8> = arr[..len].to_vec();
+    v.retain(is_even);
+    let expected = spec_retain(&arr[..len], is_even);
+    assert!(v.len() == expected.len(), "retain: length differs from filter_index");
+    let mut i = 0usize;
+    while i < v.len() {
+        assert!(v[i] == expected[i], "retain: element differs from filter_index");
+        i += 1;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Vec::drain   (vec.rs: requires slice_range_valid; drained items == old[start..end];
+//               final(vec)@ == old[..start] + old[end..])
+// ---------------------------------------------------------------------------
+
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(6)]
+fn drain_matches_spec() {
+    // Symbolic contents and range over a fixed-length vector (a symbolic length
+    // makes CBMC's model of Drain's tail move too large for the available memory).
+    let arr: [u8; 3] = kani::any();
+    let len = 3usize;
+    let start: usize = kani::any();
+    let end: usize = kani::any();
+    kani::assume(start <= end && end <= len);
+    let mut v: Vec<u8> = vec![arr[0], arr[1], arr[2]];
+    // drained items == old[start..end], read one by one (no collect: keeps CBMC small)
+    let mut i = 0usize;
+    {
+        let mut d = v.drain(start..end);
+        while let Some(x) = d.next() {
+            assert!(i < end - start, "drain: more items than the range");
+            assert!(x == arr[start + i], "drain: drained item");
+            i += 1;
+        }
+    }
+    assert!(i == end - start, "drain: fewer items than the range");
+    // remaining == old[..start] + old[end..]
+    assert!(v.len() == len - (end - start), "drain: remaining length");
+    let mut j = 0usize;
+    while j < v.len() {
+        let src = if j < start { j } else { j + (end - start) };
+        assert!(v[j] == arr[src], "drain: remaining item");
+        j += 1;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // std::io::_print / _eprint   (io.rs): no postcondition; the spec only claims
 // the call returns (it may panic on a failed write, which the spec does not
 // exclude: assume_specification without `no_unwind`). Nothing to falsify; a
@@ -306,6 +379,25 @@ mod tests {
             }
             let got: Vec<u8> = a.iter().copied().flat_map(inner).collect();
             assert_eq!(got, spec_flat_map_parts(&a, inner));
+        }
+    }
+
+    #[test]
+    fn retain_drain_exhaustive() {
+        for s in all_slices(4) {
+            let mut v = s.clone();
+            v.retain(is_even);
+            assert_eq!(v, spec_retain(&s, is_even));
+            for start in 0..=s.len() {
+                for end in start..=s.len() {
+                    let mut v = s.clone();
+                    let d: Vec<u8> = v.drain(start..end).collect();
+                    assert_eq!(d, s[start..end].to_vec());
+                    let mut rest = s[..start].to_vec();
+                    rest.extend_from_slice(&s[end..]);
+                    assert_eq!(v, rest);
+                }
+            }
         }
     }
 

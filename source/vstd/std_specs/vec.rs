@@ -3,9 +3,10 @@ use super::iter::{FromIteratorSpecImpl, IteratorSpec};
 use verus_builtin::*;
 
 use super::super::slice::SliceIndexSpec;
+use super::range::{RangeBoundsSpec, slice_range_end, slice_range_start, slice_range_valid};
 use super::core::IndexSpec;
 use alloc::collections::TryReserveError;
-use alloc::vec::{IntoIter, Vec};
+use alloc::vec::{Drain, IntoIter, Vec};
 use core::alloc::Allocator;
 use core::clone::Clone;
 use core::marker::PhantomData;
@@ -296,6 +297,77 @@ pub broadcast proof fn vec_clone_deep_view_proof<T: DeepView, A: Allocator>(
         v1.deep_view() == v2.deep_view(),
 {
 }
+
+/// `retain` keeps exactly the elements the predicate accepts, in order. The predicate's
+/// decisions are recorded in a ghost sequence `keep` (as for `Iterator::filter`), each
+/// justified by the closure's postcondition on the element.
+pub assume_specification<T, A: Allocator, F: FnMut(&T) -> bool>[ Vec::<T, A>::retain ](
+    vec: &mut Vec<T, A>,
+    f: F,
+)
+    requires
+        forall|k| #![auto] 0 <= k < old(vec)@.len() ==> call_requires(f, (&old(vec)@[k],)),
+    ensures
+        exists|keep: Seq<bool>|
+            {
+                &&& #[trigger] keep.len() == old(vec)@.len()
+                &&& forall|j| 0 <= j < keep.len() ==> call_ensures(f, (&old(vec)@[j],), #[trigger] keep[j])
+                &&& final(vec)@ == old(vec)@.filter_index(|j: int| keep[j])
+            },
+;
+
+// The `drain` method of a `Vec` returns an iterator of type `Drain`, so we specify that type
+// here. The drained range is removed from the vector (`final(vec)`) and its elements are
+// what the iterator yields (`drain_elts`). Std performs the removal when the `Drain` is
+// dropped; the `&mut` borrow lasts until then, so the caller cannot observe the vector
+// in between, and `final(vec)` states its value after the borrow ends. Leaking the `Drain`
+// (`mem::forget`) would leave the vector truncated at the range start instead; `forget` is
+// not available to verified code.
+#[verifier::external_type_specification]
+#[verifier::external_body]
+#[verifier::accept_recursive_types(T)]
+#[verifier::reject_recursive_types(A)]
+pub struct ExDrain<'a, T: 'a, A: Allocator>(Drain<'a, T, A>);
+
+/// The elements a `Drain` was created over (the drained range of the vector).
+pub uninterp spec fn drain_elts<'a, T, A: Allocator>(d: Drain<'a, T, A>) -> Seq<T>;
+
+impl<'a, T, A: Allocator> super::iter::IteratorSpecImpl for Drain<'a, T, A> {
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool {
+        true
+    }
+
+    uninterp spec fn remaining(&self) -> Seq<Self::Item>;
+
+    uninterp spec fn will_return_none(&self) -> bool;
+
+    uninterp spec fn decrease(&self) -> Option<nat>;
+
+    open spec fn peek(&self, index: int) -> Option<Self::Item> {
+        if 0 <= index < drain_elts(*self).len() {
+            Some(drain_elts(*self)[index])
+        } else {
+            None
+        }
+    }
+}
+
+pub assume_specification<'a, T, A: Allocator, R: core::ops::RangeBounds<usize>>[ Vec::<T, A>::drain ](
+    vec: &'a mut Vec<T, A>,
+    range: R,
+) -> (iter: Drain<'a, T, A>)
+    requires
+        slice_range_valid(&range, old(vec)@.len()),
+    ensures
+        ({
+            let start = slice_range_start(&range);
+            let end = slice_range_end(&range, old(vec)@.len());
+            &&& drain_elts(iter) == old(vec)@.subrange(start, end)
+            &&& IteratorSpec::remaining(&iter) == drain_elts(iter)
+            &&& IteratorSpec::decrease(&iter) is Some
+            &&& final(vec)@ == old(vec)@.subrange(0, start) + old(vec)@.subrange(end, old(vec)@.len() as int)
+        }),
+;
 
 pub assume_specification<T, A: Allocator>[ Vec::<T, A>::truncate ](vec: &mut Vec<T, A>, len: usize)
     ensures

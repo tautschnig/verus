@@ -86,7 +86,8 @@ python3 generate.py                                   # -> src/generated.rs, GEN
 **VERIFIED (2026-09-24, Kani 0.68.0).** The specifications added on the
 internal branch — `<[T]>::windows`, `<[T]>::chunks`, `Iterator::step_by`,
 `Iterator::chain`, `Iterator::flat_map`, `Pin<P>` for `P::Target: Unpin`
-(`new`/`get_ref`/`get_mut`/`into_inner`), and `std::io::_print`/`_eprint` — each
+(`new`/`get_ref`/`get_mut`/`into_inner`), `std::io::_print`/`_eprint`,
+`Vec::retain` and `Vec::drain` — each
 get a harness that re-implements the spec's observable content (the item
 sequence the adaptor yields; the pinned pointer) in plain Rust and checks it
 against real std on symbolic inputs (slices of length ≤ 4–5 over symbolic
@@ -94,12 +95,14 @@ bytes, sizes/steps 1..=5). The prophetic parts of the iterator specs
 (`will_return_none`, `decrease`) are not observable and are not checked.
 
 ```
-Complete - 8 successfully verified harnesses, 0 failures, 8 total.
+Complete - 10 successfully verified harnesses, 0 failures, 10 total.
 ```
 
 `cargo kani --harness adaptors::` (~20 min; the windows/chunks/flat_map
 harnesses are written element-wise because nested `Vec` equality blows the
-solver's memory at 32 GiB). A mutation check confirms the harnesses have
+solver's memory at 32 GiB; the drain harness uses a fixed-length vector with
+symbolic contents and range, since a symbolic length makes CBMC's model of
+`Drain`'s tail move exceed the host's 61 GiB). A mutation check confirms the harnesses have
 teeth: changing the expected window count by one makes
 `windows_remaining_matches_spec` fail. The same module has stock-`rustc`
 exhaustive replays (`cargo test`: all slices of length ≤ 5 over a 3-letter
