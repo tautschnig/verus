@@ -1430,7 +1430,6 @@ pub(crate) fn mid_ty_to_vir_ghost<'tcx>(
             // of the VIR dyn type (see `TypX::Dyn`), sorted by associated-type name.
             let mut principal: Option<rustc_middle::ty::ExistentialTraitRef<'tcx>> = None;
             let mut bindings: Vec<(vir::ast::Ident, Typ)> = Vec::new();
-            let mut projection_traits: Vec<rustc_span::def_id::DefId> = Vec::new();
             for pred in preds.iter() {
                 match pred.skip_binder() {
                     ExistentialPredicate::AutoTrait(_) => {}
@@ -1443,18 +1442,9 @@ pub(crate) fn mid_ty_to_vir_ghost<'tcx>(
                     ExistentialPredicate::Projection(proj) => {
                         let assoc_item = tcx.associated_item(proj.def_id);
                         let name = Arc::new(assoc_item.name().to_string());
-                        // `dyn Fn(A) -> B` binds `FnOnce::Output`, an associated type of a
-                        // supertrait of the principal trait. The VIR dyn type only carries
-                        // the principal trait's own associated types for now.
-                        if let Some(trait_ref) = &principal {
-                            if tcx.parent(proj.def_id) != trait_ref.def_id {
-                                unsupported_err!(
-                                    span,
-                                    "dyn with a binding of a supertrait's associated type"
-                                );
-                            }
-                        }
-                        projection_traits.push(tcx.parent(proj.def_id));
+                        // The associated type may be declared by a supertrait of the
+                        // principal trait (`dyn Fn(A) -> B` binds `FnOnce::Output`); VIR
+                        // resolves the declaring trait by name (vir::traits::find_assoc_typ_owner).
                         let bound_ty = match proj.term.kind() {
                             rustc_middle::ty::TermKind::Ty(t) => t,
                             rustc_middle::ty::TermKind::Const(_) => {
@@ -1469,10 +1459,6 @@ pub(crate) fn mid_ty_to_vir_ghost<'tcx>(
             let Some(trait_ref) = principal else {
                 unsupported_err!(span, "dyn without a principal trait");
             };
-            // Projections listed before the principal trait were not checked above.
-            if projection_traits.iter().any(|t| *t != trait_ref.def_id) {
-                unsupported_err!(span, "dyn with a binding of a supertrait's associated type");
-            }
             bindings.sort_by(|(x, _), (y, _)| x.cmp(y));
             for w in bindings.windows(2) {
                 if w[0].0 == w[1].0 {
@@ -1502,7 +1488,36 @@ pub(crate) fn mid_ty_to_vir_ghost<'tcx>(
             (Arc::new(typx), false)
         }
         TyKind::Foreign(..) => unsupported_err!(span, "foreign types"),
-        TyKind::FnPtr(..) => unsupported_err!(span, "function pointer types"),
+        TyKind::FnPtr(sig_tys, hdr) => {
+            // A function pointer `fn(A..) -> R` is modelled as `&dyn Fn(A..) -> R`: a sized,
+            // Copy handle to a callable whose only operation is the call. Values of this type
+            // arise from the fn-item and closure coercions (ReifyFnPointer, ClosureFnPointer),
+            // which are lowered to `ToDyn` of the function or closure type, so `call_requires`
+            // and `call_ensures` of the pointer are those of the pointed-to function (see
+            // vir::traits::dyn_fn_closure_axioms).
+            if hdr.safety().is_unsafe() {
+                unsupported_err!(span, "unsafe function pointer types");
+            }
+            if !matches!(hdr.abi(), rustc_abi::ExternAbi::Rust) {
+                unsupported_err!(span, "function pointer types with a non-Rust ABI");
+            }
+            let sig = sig_tys.skip_binder();
+            let mut arg_typs: Vec<Typ> = Vec::new();
+            for t in sig.inputs().iter() {
+                arg_typs.push(t_rec(t)?.0);
+            }
+            let (ret_typ, _) = t_rec(&sig.output())?;
+            let args_tuple = vir::ast_util::mk_tuple_typ(&Arc::new(arg_typs));
+            let fn_trait = vir::ast::ClosureKind::Fn.trait_path();
+            let bindings = vec![(Arc::new("Output".to_string()), ret_typ)];
+            let dyn_typ = Arc::new(TypX::Dyn(
+                fn_trait,
+                Arc::new(vec![args_tuple]),
+                Arc::new(vec![]),
+                Arc::new(bindings),
+            ));
+            (Arc::new(TypX::Decorate(TypDecoration::Ref, None, dyn_typ)), false)
+        }
         TyKind::Coroutine(..) => unsupported_err!(span, "generator types"),
         TyKind::CoroutineWitness(..) => unsupported_err!(span, "generator witness types"),
         TyKind::Bound(..) => unsupported_err!(span, "for<'a> types"),

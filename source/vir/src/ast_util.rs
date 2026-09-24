@@ -1522,7 +1522,7 @@ impl fmt::Display for ClosureKind {
 }
 
 impl ClosureKind {
-    pub(crate) fn trait_path(&self) -> Path {
+    pub fn trait_path(&self) -> Path {
         match self {
             ClosureKind::Fn => crate::path![CrateId::Core => "ops", "function", "Fn"],
             ClosureKind::FnMut => crate::path![CrateId::Core => "ops", "function", "FnMut"],

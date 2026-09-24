@@ -216,6 +216,7 @@ test_verify_one_file_with_options! {
 
 test_verify_one_file_with_options! {
     #[test] fnsig_type_returned ["-V check-api-safety"] => verus_code! {
+        use vstd::prelude::*;
         fn test2(y: u32)
             requires y > 0
         {
@@ -224,21 +225,21 @@ test_verify_one_file_with_options! {
         pub fn test() -> fn(u32) {
             test2
         }
-    //} => Err(err) => assert_vir_error_msg(err, "Safe API violation: 'requires' clause is nontrivial")
-    } => Err(err) => assert_vir_error_msg(err, "The verifier does not yet support the following Rust feature: function pointer types")
+    } => Err(err) => assert_vir_error_msg(err, "The verifier does not support function pointer or dyn Fn types in public signatures together with the check-api-safety flag")
 }
 
 test_verify_one_file_with_options! {
     #[test] dyn_returned ["-V check-api-safety"] => verus_code! {
+        use vstd::prelude::*;
         fn foo(y: u32)
             requires y > 0
         {
         }
 
-        fn test() -> Box<dyn Fn(u32) -> ()> {
+        pub fn test() -> Box<dyn Fn(u32) -> ()> {
             Box::new(foo)
         }
-    } => Err(err) => assert_vir_error_msg(err, "The verifier does not yet support the following Rust feature: dyn")
+    } => Err(err) => assert_vir_error_msg(err, "The verifier does not support function pointer or dyn Fn types in public signatures together with the check-api-safety flag")
 }
 
 test_verify_one_file_with_options! {
