@@ -11,7 +11,9 @@ use crate::def::Spanned;
 use crate::messages::{Span, ToAny, error};
 use crate::sst_to_air::typ_to_ids;
 use air::ast::{Command, CommandX, Commands, DeclX};
-use air::ast_util::{ident_apply, ident_var, mk_bind_expr, mk_implies, mk_unnamed_axiom, str_typ};
+use air::ast_util::{
+    ident_apply, ident_var, mk_bind_expr, mk_implies, mk_unnamed_axiom, str_ident, str_typ,
+};
 use air::scope_map::ScopeMap;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -1056,7 +1058,7 @@ fn to_dyn_typing_axiom(
     trait_path: &Path,
     typ_params: &Vec<Ident>,
     binding_names: &Vec<Ident>,
-) -> air::ast::Decl {
+) -> Option<air::ast::Decl> {
     use crate::ast_util::LowerUniqueVar;
     let self_param = crate::def::trait_self_type_param();
     let mut all_typ_params: Vec<Ident> = vec![self_param.clone()];
@@ -1066,17 +1068,23 @@ fn to_dyn_typing_axiom(
         typ_params.iter().map(|x| Arc::new(TypX::TypParam(x.clone()))).collect();
     let mut trait_typ_args: Vec<Typ> = vec![self_typ.clone()];
     trait_typ_args.extend(typ_args.iter().cloned());
-    let bindings: Vec<(Ident, Typ)> = binding_names
-        .iter()
-        .map(|name| {
-            let proj = Arc::new(TypX::Projection {
-                trait_typ_args: Arc::new(trait_typ_args.clone()),
-                trait_path: trait_path.clone(),
-                name: name.clone(),
-            });
-            (name.clone(), proj)
-        })
-        .collect();
+    let mut bindings: Vec<(Ident, Typ)> = Vec::new();
+    for name in binding_names.iter() {
+        // The binding of the dyn type a Self value is boxed into is Self's associated type,
+        // i.e. the projection through the trait that declares it.
+        let Some((owner, owner_args)) = find_assoc_typ_owner(&ctx.trait_map, trait_path, name)
+        else {
+            // VIR has no projection for this associated type (the Fn traits' Output), so
+            // the dyn type a Self value belongs to cannot be stated: no typing axiom.
+            return None;
+        };
+        let proj = Arc::new(TypX::Projection {
+            trait_typ_args: owner_args.clone(),
+            trait_path: owner,
+            name: name.clone(),
+        });
+        bindings.push((name.clone(), proj));
+    }
     let dyn_typ = Arc::new(TypX::Dyn(
         trait_path.clone(),
         Arc::new(typ_args.clone()),
@@ -1110,7 +1118,102 @@ fn to_dyn_typing_axiom(
         None,
     );
     let forall = mk_bind_expr(&bind, &mk_implies(&pre, &post));
-    mk_unnamed_axiom(forall)
+    Some(mk_unnamed_axiom(forall))
+}
+
+/// For the Fn traits used as `dyn`, the closure specification functions see through the dyn
+/// coercion: for closure_req (and likewise closure_ens with a return value),
+///   forall Self Args bs (f Poly) (args Poly).
+///     closure_req(DYN%Fn(Args, bs), Args, to_dyn%Fn(Self, Args, f), args)
+///       == closure_req(Self, Args, f, args)
+/// `to_dyn%Fn(..)` is the only way a value of a `dyn Fn` type arises, so this defines
+/// `call_requires`/`call_ensures` on dyn values as those of the boxed closure or function.
+/// (closure_req/closure_ens take the callable's type without its decoration.)
+fn dyn_fn_closure_axioms(
+    ctx: &Ctx,
+    commands: &mut Vec<Command>,
+    tr: &Trait,
+    typ_params: &Vec<Ident>,
+    dyn_typ: &Typ,
+) {
+    use crate::ast_util::LowerUniqueVar;
+    let self_param = crate::def::trait_self_type_param();
+    let self_typ: Typ = Arc::new(TypX::TypParam(self_param.clone()));
+    let mut all_typ_params: Vec<Ident> = vec![self_param];
+    all_typ_params.extend(typ_params.iter().cloned());
+    // The trait's type arguments (Args for the Fn traits); the dyn type's bindings are part
+    // of dyn_typ already.
+    let trait_args: Vec<Typ> =
+        tr.x.typ_params.iter().map(|(x, _)| Arc::new(TypX::TypParam(x.clone()))).collect();
+    let mk_var =
+        |s: &str| crate::ast_util::str_unique_var(s, crate::ast::VarIdentDisambiguate::AirLocal);
+    let mk_par = |name: &crate::ast::VarIdent, typ: &Typ| {
+        crate::def::Spanned::new(
+            ctx.global.no_span.clone(),
+            crate::sst::ParX { name: name.clone(), typ: typ.clone(), mode: crate::ast::Mode::Exec },
+        )
+    };
+    let f_name = mk_var("dyn_fn_callable");
+    let args_name = mk_var("dyn_fn_args");
+    let ret_name = mk_var("dyn_fn_ret");
+    let poly_self: Typ = Arc::new(TypX::Boxed(self_typ.clone()));
+    let poly_args: Typ =
+        Arc::new(TypX::Boxed(trait_args.get(0).cloned().unwrap_or_else(|| Arc::new(TypX::Bool))));
+    let f = ident_var(&f_name.lower());
+    let args = ident_var(&args_name.lower());
+    let ret = ident_var(&ret_name.lower());
+    // to_dyn%Fn(Self, Args, f)
+    let mut to_dyn_args: Vec<air::ast::Expr> = typ_to_ids(ctx, &self_typ);
+    for t in trait_args.iter() {
+        to_dyn_args.extend(typ_to_ids(ctx, t));
+    }
+    to_dyn_args.push(f.clone());
+    let to_dyn = ident_apply(&ctx.name_ctxt.to_dyn(&tr.x.name), &to_dyn_args);
+    // closure_req/ens argument lists: callable type without decoration, Args type ids, values
+    let mut lhs_typ_args: Vec<air::ast::Expr> = typ_to_ids(ctx, dyn_typ);
+    let mut rhs_typ_args: Vec<air::ast::Expr> = typ_to_ids(ctx, &self_typ);
+    if crate::context::DECORATE {
+        lhs_typ_args.remove(0);
+        rhs_typ_args.remove(0);
+    }
+    for t in trait_args.iter() {
+        lhs_typ_args.extend(typ_to_ids(ctx, t));
+        rhs_typ_args.extend(typ_to_ids(ctx, t));
+    }
+    for (fun, with_ret) in
+        [(crate::def::CLOSURE_REQ, false), (crate::def::CLOSURE_ENS, true)].into_iter()
+    {
+        let mut lhs_args = lhs_typ_args.clone();
+        let mut rhs_args = rhs_typ_args.clone();
+        lhs_args.push(to_dyn.clone());
+        rhs_args.push(f.clone());
+        lhs_args.push(args.clone());
+        rhs_args.push(args.clone());
+        let mut pars = vec![mk_par(&f_name, &poly_self), mk_par(&args_name, &poly_args)];
+        if with_ret {
+            lhs_args.push(ret.clone());
+            rhs_args.push(ret.clone());
+            pars.push(mk_par(&ret_name, &Arc::new(TypX::Boxed(Arc::new(TypX::Bool)))));
+        }
+        let lhs = Arc::new(air::ast::ExprX::Apply(str_ident(fun), Arc::new(lhs_args)));
+        let rhs = Arc::new(air::ast::ExprX::Apply(str_ident(fun), Arc::new(rhs_args)));
+        let eq = Arc::new(air::ast::ExprX::Binary(air::ast::BinaryOp::Eq, lhs.clone(), rhs));
+        let qname = format!(
+            "{}_{}_{}",
+            fun,
+            path_as_friendly_rust_name(&tr.x.name),
+            crate::def::QID_DYN_FN_CLOSURE
+        );
+        let bind = crate::sst_to_air_func::func_bind_trig(
+            ctx,
+            qname,
+            &Arc::new(all_typ_params.clone()),
+            &Arc::new(pars),
+            &vec![lhs],
+            None,
+        );
+        commands.push(Arc::new(CommandX::Global(mk_unnamed_axiom(mk_bind_expr(&bind, &eq)))));
+    }
 }
 
 pub fn trait_bound_axioms(ctx: &Ctx, traits: &Vec<Trait>) -> Commands {
@@ -1153,6 +1256,68 @@ pub fn trait_bound_axioms(ctx: &Ctx, traits: &Vec<Trait>) -> Commands {
     Arc::new(commands)
 }
 
+/// For `dyn T<.., A = t>`, find the trait that declares associated type `A`: `T` itself or a
+/// supertrait (`dyn Fn(X) -> Y` binds `FnOnce::Output`). Returns that trait's path and its
+/// type arguments (including Self first) expressed over T's `Self` and type parameters, so the
+/// caller can substitute `Self := dyn T<..>` to build the projection's arguments.
+/// Returns None if no trait in VIR declares the associated type (the Fn traits' `Output` is not
+/// represented in VIR).
+pub(crate) fn find_assoc_typ_owner(
+    trait_map: &HashMap<Path, Trait>,
+    trait_path: &Path,
+    name: &Ident,
+) -> Option<(Path, Typs)> {
+    fn go(
+        trait_map: &HashMap<Path, Trait>,
+        trait_path: &Path,
+        typ_args: &Typs,
+        name: &Ident,
+        depth: usize,
+    ) -> Option<(Path, Typs)> {
+        let tr = trait_map.get(trait_path)?;
+        if depth > 32 {
+            return None;
+        }
+        if tr.x.assoc_typs.contains(name) {
+            return Some((trait_path.clone(), typ_args.clone()));
+        }
+        // Substitution from the trait's own parameter names to the given arguments.
+        let mut substs: HashMap<Ident, Typ> = HashMap::new();
+        substs.insert(crate::def::trait_self_type_param(), typ_args[0].clone());
+        for ((x, _), t) in tr.x.typ_params.iter().zip(typ_args.iter().skip(1)) {
+            substs.insert(x.clone(), t.clone());
+        }
+        for bound in tr.x.typ_bounds.iter() {
+            if let GenericBoundX::Trait(TraitId::Path(sup), sup_args) = &**bound {
+                let is_self_bound = matches!(&*sup_args[0], TypX::TypParam(x)
+                    if *x == crate::def::trait_self_type_param());
+                if !is_self_bound {
+                    continue;
+                }
+                let sup_args: Typs = Arc::new(
+                    sup_args.iter().map(|t| crate::sst_util::subst_typ(&substs, t)).collect(),
+                );
+                if let Some(found) = go(trait_map, sup, &sup_args, name, depth + 1) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+    let tr = trait_map.get(trait_path)?;
+    let mut typ_args: Vec<Typ> =
+        vec![Arc::new(TypX::TypParam(crate::def::trait_self_type_param()))];
+    typ_args.extend(tr.x.typ_params.iter().map(|(x, _)| Arc::new(TypX::TypParam(x.clone()))));
+    go(trait_map, trait_path, &Arc::new(typ_args), name, 0)
+}
+
+fn is_fn_trait(path: &Path) -> bool {
+    use crate::ast::ClosureKind;
+    [ClosureKind::Fn, ClosureKind::FnMut, ClosureKind::FnOnce]
+        .iter()
+        .any(|k| k.trait_path() == *path)
+}
+
 /// For each trait T used as `dyn`: the typing axiom of `to_dyn%T` (see `to_dyn_typing_axiom`),
 /// and, when T has bound associated types A1..An, the projections of the dyn type are the
 /// bindings:
@@ -1166,12 +1331,14 @@ pub fn dyn_projection_axioms(ctx: &Ctx, traits: &Vec<Trait>) -> Commands {
         let Some(binding_names) = ctx.reached_dyn_traits.get(&tr.x.name) else {
             continue;
         };
-        commands.push(Arc::new(CommandX::Global(to_dyn_typing_axiom(
+        if let Some(axiom) = to_dyn_typing_axiom(
             ctx,
             &tr.x.name,
             &tr.x.typ_params.iter().map(|(x, _)| x.clone()).collect(),
             binding_names,
-        ))));
+        ) {
+            commands.push(Arc::new(CommandX::Global(axiom)));
+        }
         if binding_names.len() == 0 {
             continue;
         }
@@ -1191,11 +1358,24 @@ pub fn dyn_projection_axioms(ctx: &Ctx, traits: &Vec<Trait>) -> Commands {
             Arc::new(vec![]),
             Arc::new(bindings.clone()),
         ));
+        if is_fn_trait(&tr.x.name) {
+            dyn_fn_closure_axioms(ctx, &mut commands, tr, &typ_params, &dyn_typ);
+        }
         for (name, bound_typ) in bindings.iter() {
+            // The trait declaring the associated type, and its type arguments with
+            // Self := the dyn type.
+            let Some((owner, owner_args)) = find_assoc_typ_owner(&ctx.trait_map, &tr.x.name, name)
+            else {
+                continue;
+            };
+            let mut substs: HashMap<Ident, Typ> = HashMap::new();
+            substs.insert(crate::def::trait_self_type_param(), dyn_typ.clone());
+            let owner_args: Vec<Typ> =
+                owner_args.iter().map(|t| crate::sst_util::subst_typ(&substs, t)).collect();
             let mut push_command = |decoration: bool, index: usize| {
-                let projector = ctx.name_ctxt.projection(decoration, &tr.x.name, name);
-                let mut args: Vec<air::ast::Expr> = typ_to_ids(ctx, &dyn_typ);
-                for arg in typ_args.iter() {
+                let projector = ctx.name_ctxt.projection(decoration, &owner, name);
+                let mut args: Vec<air::ast::Expr> = Vec::new();
+                for arg in owner_args.iter() {
                     args.extend(typ_to_ids(ctx, arg));
                 }
                 let projection = ident_apply(&projector, &args);

@@ -1532,6 +1532,25 @@ fn open_au_block_to_vir<'tcx>(
     )))
 }
 
+/// Lower a coercion of a fn item or closure (`callable_ty`) to a function pointer type
+/// (`fn_ptr_ty`, modelled as `&dyn Fn(..)`, see `mid_ty_to_vir`) to `ToDyn` of the callable.
+fn fn_pointer_coercion_to_vir<'tcx>(
+    bctx: &BodyCtxt<'tcx>,
+    expr: &Expr<'tcx>,
+    arg: ExprOrPlace,
+    callable_ty: rustc_middle::ty::Ty<'tcx>,
+    fn_ptr_ty: rustc_middle::ty::Ty<'tcx>,
+) -> Result<ExprOrPlace, VirErr> {
+    if !matches!(callable_ty.kind(), TyKind::FnDef(..) | TyKind::Closure(..)) {
+        unsupported_err!(expr.span, format!("function pointer coercion from `{callable_ty:}`"));
+    }
+    let callable_vir_ty = bctx.mid_ty_to_vir(expr.span, &callable_ty)?;
+    let arg = arg.consume(bctx, callable_ty);
+    let x = ExprX::UnaryOpr(UnaryOpr::ToDyn(callable_vir_ty), arg);
+    let expr_typ = bctx.mid_ty_to_vir(expr.span, &fn_ptr_ty)?;
+    Ok(ExprOrPlace::Expr(bctx.spanned_typed_new(expr.span, &expr_typ, x)))
+}
+
 pub(crate) fn expr_to_vir_with_adjustments<'tcx>(
     bctx: &BodyCtxt<'tcx>,
     expr: &Expr<'tcx>,
@@ -1893,6 +1912,15 @@ pub(crate) fn expr_to_vir_with_adjustments<'tcx>(
             ));
             Arc::make_mut(&mut new_expr).typ = typ;
             Ok(ExprOrPlace::Expr(new_expr))
+        }
+        Adjust::Pointer(
+            PointerCoercion::ReifyFnPointer(_) | PointerCoercion::ClosureFnPointer(_),
+        ) => {
+            // fn item or non-capturing closure to function pointer: the pointer is modelled
+            // as `&dyn Fn(..)`, so this is the dyn coercion of the function/closure value.
+            let ty1 = get_inner_ty();
+            let arg = expr_to_vir_with_adjustments(bctx, expr, adjustments, adjustment_idx - 1)?;
+            fn_pointer_coercion_to_vir(bctx, expr, arg, ty1, adjustment.target)
         }
         Adjust::Pointer(_cast) => {
             unsupported_err!(expr.span, "casting a pointer (here the cast is implicit)")
@@ -2601,6 +2629,15 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
 
             if let Some(expr) = maybe_do_ptr_cast(bctx, expr, source, &source_vir_expr)? {
                 return Ok(ExprOrPlace::Expr(expr));
+            }
+
+            // `foo as fn(A) -> R` / `|x| .. as fn(A) -> R`: the dyn coercion of the callable
+            // (see fn_pointer_coercion_to_vir).
+            let to_ty = bctx.types.expr_ty(expr);
+            if matches!(to_ty.kind(), TyKind::FnPtr(..))
+                && matches!(source_ty.kind(), TyKind::FnDef(..) | TyKind::Closure(..))
+            {
+                return fn_pointer_coercion_to_vir(bctx, expr, source_vir, source_ty, to_ty);
             }
 
             match (&*undecorate_typ(source_vir_ty), &*undecorate_typ(&to_vir_ty)) {

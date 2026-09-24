@@ -495,11 +495,77 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
-    #[test] dyn_unsupported2 verus_code! {
-        trait T {}
-        fn test(d: &dyn Fn() -> ()) {
+    // dyn Fn(A) -> B binds FnOnce::Output, an associated type of a supertrait
+    #[test] dyn_fn_call verus_code! {
+        use vstd::prelude::*;
+        fn apply(f: &dyn Fn(u64) -> u64, x: u64) -> (r: u64)
+            requires f.requires((x,)),
+            ensures f.ensures((x,), r),
+        {
+            f(x)
         }
-    } => Err(err) => assert_vir_error_msg(err, "The verifier does not yet support the following Rust feature: dyn with a binding of a supertrait's associated type")
+        fn boxed(b: Box<dyn Fn(u64) -> u64>, x: u64) -> (r: u64)
+            requires b.requires((x,)),
+            ensures b.ensures((x,), r),
+        {
+            b(x)
+        }
+        fn call_once(f: Box<dyn FnOnce(u64) -> u64>, x: u64) -> (r: u64)
+            requires f.requires((x,)),
+            ensures f.ensures((x,), r),
+        {
+            f(x)
+        }
+        fn test() {
+            let g = |y: u64| -> (r: u64) requires y < 100 ensures r == y + 1 { y + 1 };
+            let r = apply(&g, 3);
+            assert(r == 4);
+            let c = |y: u64| -> (r: u64) requires y < 10 ensures r == 3 * y { 3 * y };
+            let bx: Box<dyn Fn(u64) -> u64> = Box::new(c);
+            let t = boxed(bx, 2);
+            assert(t == 6);
+            let d = |y: u64| -> (r: u64) requires y < 10 ensures r == y + 2 { y + 2 };
+            let b: Box<dyn FnOnce(u64) -> u64> = Box::new(d);
+            let u = call_once(b, 1);
+            assert(u == 3);
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] dyn_fn_wrong_result verus_code! {
+        use vstd::prelude::*;
+        fn apply(f: &dyn Fn(u64) -> u64, x: u64) -> (r: u64)
+            requires f.requires((x,)),
+            ensures f.ensures((x,), r),
+        {
+            f(x)
+        }
+        fn test() {
+            let g = |y: u64| -> (r: u64) requires y < 100 ensures r == y + 1 { y + 1 };
+            let r = apply(&g, 3);
+            assert(r == 5); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    #[test] dyn_fn_precondition verus_code! {
+        use vstd::prelude::*;
+        fn test(f: &dyn Fn(u64) -> u64) {
+            f(3); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    // dyn Fn types with different Output bindings are distinct types
+    #[test] dyn_fn_distinct_outputs_sound verus_code! {
+        use vstd::prelude::*;
+        proof fn no_false(a: &dyn Fn(u64) -> u64, b: &dyn Fn(u64) -> bool) {
+            assert(false); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
 }
 
 test_verify_one_file! {

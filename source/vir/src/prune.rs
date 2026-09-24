@@ -328,7 +328,11 @@ fn reach_typ(ctxt: &Ctxt, state: &mut State, typ: &Typ) {
             // Every associated type bound in a dyn type needs its declaration (the projection
             // function) and the impls' definitions (for the dyn/impl spec-function axioms).
             for name in names.iter() {
-                reach_assoc_type_decl(ctxt, state, &(trait_path.clone(), name.clone()));
+                if let Some((owner, _)) =
+                    crate::traits::find_assoc_typ_owner(&ctxt.trait_map, trait_path, name)
+                {
+                    reach_assoc_type_decl(ctxt, state, &(owner, name.clone()));
+                }
             }
             match state.dyn_traits.insert(trait_path.clone(), names.clone()) {
                 Some(prev) if prev != names => {

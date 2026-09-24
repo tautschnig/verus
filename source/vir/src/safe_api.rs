@@ -21,7 +21,28 @@ pub fn check_safe_api(krate: &Krate) -> Result<(), VirErr> {
         function_map.insert(f.x.name.clone(), f.clone());
     }
 
+    // A function pointer or `dyn Fn..` value carries its function's precondition as
+    // `call_requires`, which unverified client code does not check. A public function that
+    // takes or returns such a value, or a public datatype with such a field, could hand a
+    // function with a nontrivial precondition to safe client code; reject these
+    // conservatively rather than tracking which functions flow into the callable.
+    let callable_msg = |what: &str, name: String| {
+        format!(
+            "The verifier does not support function pointer or dyn Fn types in public {what} together with the check-api-safety flag: `{name}`. Unverified, safe client code may be able to call a function without satisfying its precondition.",
+        )
+    };
     for function in krate.functions.iter() {
+        if function.x.mode == Mode::Exec && function.x.visibility.is_public() {
+            let typs = function.x.params.iter().map(|p| &p.x.typ).chain([&function.x.ret.x.typ]);
+            for typ in typs {
+                if typ_mentions_dyn_fn(typ) {
+                    return Err(error(
+                        &function.span,
+                        &callable_msg("signatures", fun_as_friendly_rust_name(&function.x.name)),
+                    ));
+                }
+            }
+        }
         if matches!(*function.x.ret.x.typ, TypX::Opaque { .. }) {
             return Err(error(
                 &function.span,
@@ -95,7 +116,48 @@ pub fn check_safe_api(krate: &Krate) -> Result<(), VirErr> {
         }
     }
 
+    for datatype in krate.datatypes.iter() {
+        if datatype.x.visibility.is_public() {
+            for variant in datatype.x.variants.iter() {
+                for field in variant.fields.iter() {
+                    if typ_mentions_dyn_fn(&field.a.0) {
+                        return Err(error(
+                            &datatype.span,
+                            &callable_msg(
+                                "datatypes",
+                                crate::ast_util::path_as_friendly_rust_name(
+                                    &crate::def::encode_dt_as_path(&datatype.x.name),
+                                ),
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
     Ok(())
+}
+
+/// Does the type contain a `dyn Fn/FnMut/FnOnce` (which also represents function pointers)?
+fn typ_mentions_dyn_fn(typ: &crate::ast::Typ) -> bool {
+    use crate::ast::ClosureKind;
+    use crate::ast_visitor::{AstVisitor, WalkTypVisitorEnv};
+    let mut found = false;
+    let ft = &|found: &mut bool, t: &crate::ast::Typ| -> Result<(), VirErr> {
+        if let TypX::Dyn(path, _, _, _) = &**t {
+            if [ClosureKind::Fn, ClosureKind::FnMut, ClosureKind::FnOnce]
+                .iter()
+                .any(|k| k.trait_path() == *path)
+            {
+                *found = true;
+            }
+        }
+        Ok(())
+    };
+    let mut visitor = WalkTypVisitorEnv { env: &mut found, ft };
+    visitor.visit_typ(typ).unwrap();
+    found
 }
 
 /// Error used when the SMT obligation fails
