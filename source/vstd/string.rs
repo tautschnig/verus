@@ -384,6 +384,12 @@ pub assume_specification[ <String as Clone>::clone ](s: &String) -> (res: String
 ;
 
 #[cfg(all(feature = "alloc", not(verus_verify_core)))]
+pub assume_specification[ String::reserve ](s: &mut String, additional: usize)
+    ensures
+        final(s)@ == old(s)@,
+;
+
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
 pub assume_specification[ <String as PartialEq>::eq ](s: &String, other: &String) -> (res: bool)
     ensures
         res == (s@ == other@),

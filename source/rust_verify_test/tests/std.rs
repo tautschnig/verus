@@ -1996,3 +1996,27 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] ascii_predicates_and_cmp_free_fns verus_code! {
+        use vstd::prelude::*;
+        fn a1(c: char) -> (b: bool) ensures b == ((c as u32) < 128) { c.is_ascii() }
+        fn a2(b: u8) -> (r: bool) ensures r == (b < 128) { b.is_ascii() }
+        fn a3(c: char) -> (r: bool) ensures r == ('0' <= c && c <= '9') { c.is_ascii_digit() }
+        fn a4(a: u64, b: u64) -> (r: u64) ensures r == (if a >= b { a } else { b }) { core::cmp::max(a, b) }
+        fn a5(a: u64, b: u64) -> (r: u64) ensures r == (if a <= b { a } else { b }) { core::cmp::min(a, b) }
+        fn a6(mut s: String) -> (r: String) ensures r@ == s@ { s.reserve(4); s }
+        fn in_spec(c: char) -> (r: bool) ensures r == c.is_ascii() { c.is_ascii() }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] ascii_predicate_wrong verus_code! {
+        use vstd::prelude::*;
+        fn wrong(c: char) -> (r: bool)
+            ensures r == ((c as u32) < 127), // FAILS
+        {
+            c.is_ascii()
+        }
+    } => Err(err) => assert_one_fails(err)
+}

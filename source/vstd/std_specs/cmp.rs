@@ -184,6 +184,17 @@ pub trait ExOrd: Eq + PartialOrd + PointeeSized {
     ;
 }
 
+/// `core::cmp::max(a, b)` is `a.max(b)` (`Ord::max`), and likewise `min`.
+pub assume_specification<T: Ord>[ core::cmp::max::<T> ](a: T, b: T) -> (r: T)
+    ensures
+        call_ensures(T::max, (a, b), r),
+;
+
+pub assume_specification<T: Ord>[ core::cmp::min::<T> ](a: T, b: T) -> (r: T)
+    ensures
+        call_ensures(T::min, (a, b), r),
+;
+
 pub trait PartialEqIs<Rhs: PointeeSized = Self>: PartialEq<Rhs> + PointeeSized {
     spec fn is_eq(&self, other: &Rhs) -> bool;
 
