@@ -3390,7 +3390,30 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
             }
             let body_span = body.span;
             let mut body = expr_to_vir_consume(bctx, body)?;
-            let header = vir::headers::read_header(&mut body, &vir::headers::HeaderAllows::Loop)?;
+            let mut header =
+                vir::headers::read_header(&mut body, &vir::headers::HeaderAllows::Loop)?;
+            // `while let Some(..) = it.next()` gets an automatic decreases from the syntax
+            // macro (marked auto_decreases, like the for loop); drop it when termination is
+            // not being checked, exactly as the Loop arm below does.
+            let allow_no_decreases = expr_vattrs.assume_termination
+                || crate::attributes::get_allow_exec_allows_no_decreases_clause_walk_parents(
+                    bctx.ctxt.tcx,
+                    bctx.fun_id,
+                );
+            if expr_vattrs.auto_decreases && allow_no_decreases {
+                for dec in header.decrease.iter() {
+                    crate::erase::mark_tree_for_erasure(&bctx.ctxt, dec);
+                }
+                header.decrease = Arc::new(vec![]);
+                Arc::make_mut(&mut header.invariant_except_break).retain(|e| {
+                    if matches!(&e.x, ExprX::UnaryOpr(UnaryOpr::AutoDecreases, _)) {
+                        crate::erase::mark_tree_for_erasure(&bctx.ctxt, e);
+                        false
+                    } else {
+                        true
+                    }
+                });
+            }
             let (cond, body) = match &cond.peel_drop_temps().kind {
                 ExprKind::Let(_) => {
                     let body_ty = body.typ.clone();
@@ -3422,7 +3445,10 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
                 ExprX::Loop {
                     loop_isolation,
                     allow_complex_invariants: allow_complex_invariants(),
-                    is_for_loop: false,
+                    // set by the syntax macro for `while let Some(..) = it.next()`: its
+                    // automatic ensures are dropped when the body has a user break, and the
+                    // desugaring's own break is not counted as one
+                    is_for_loop: expr_vattrs.for_loop,
                     assume_termination: expr_vattrs.assume_termination,
                     label,
                     cond,

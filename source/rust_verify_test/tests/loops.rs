@@ -1955,3 +1955,73 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_vir_error_msg(err, "`for` loops produced by a macro expansion")
 }
+
+test_verify_one_file! {
+    // `while let Some(x) = it.next()` without a decreases clause uses the iterator's own
+    // metric (as a for loop does) and ends with the iterator exhausted
+    #[test] while_let_next_auto_decreases verus_code! {
+        use vstd::prelude::*;
+        use vstd::std_specs::iter::IteratorSpec;
+        fn count(v: &Vec<u64>) -> (n: usize)
+            requires v@.len() < 1000,
+            ensures n == v@.len(),
+        {
+            let mut it = v.iter();
+            let mut n: usize = 0;
+            while let Some(_x) = it.next()
+                invariant
+                    v@.len() < 1000,
+                    IteratorSpec::obeys_prophetic_iter_laws(&it),
+                    n + IteratorSpec::remaining(&it).len() == v@.len(),
+            {
+                n = n + 1;
+            }
+            n
+        }
+        fn with_break(v: &Vec<u64>) -> (n: usize)
+            requires v@.len() < 1000,
+            ensures n <= v@.len(),
+        {
+            let mut it = v.iter();
+            let mut n: usize = 0;
+            while let Some(x) = it.next()
+                invariant
+                    v@.len() < 1000,
+                    IteratorSpec::obeys_prophetic_iter_laws(&it),
+                    n + IteratorSpec::remaining(&it).len() <= v@.len(),
+            {
+                if *x == 7 { break; }
+                n = n + 1;
+            }
+            n
+        }
+        fn user_decreases_kept(v: &Vec<u64>) {
+            let mut it = v.iter();
+            let mut k: u64 = 100;
+            while let Some(_x) = it.next()
+                invariant k <= 100,
+                decreases k,
+            {
+                if k == 0 { break; }
+                k = k - 1;
+            }
+        }
+        #[verifier::exec_allows_no_decreases_clause]
+        fn no_termination_check(v: &Vec<u64>) {
+            let mut it = v.iter();
+            while let Some(_x) = it.next() { }
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    // a `while let` that is not over an iterator still needs a decreases clause
+    #[test] while_let_other_needs_decreases verus_code! {
+        use vstd::prelude::*;
+        fn test(mut o: Option<u64>) {
+            while let Some(x) = o {
+                o = if x == 0 { None } else { Some(x - 1) };
+            }
+        }
+    } => Err(err) => assert_vir_error_msg(err, "loop must have a decreases clause")
+}
