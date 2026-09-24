@@ -1,5 +1,0 @@
-induction: induction call recursion_contracts::even_p @ r.b1.b0.b0.t.b0.b1.b1: demand-refined from guard pc%10%3
-induction: induction call recursion_contracts::count_down @ r.b1.b0.b0.e.b0.b2.b1.b1: demand-refined from guard pc%14%7
-induction: induction call recursion_contracts::spin @ r.b0.b0.t.b0.b0: ungrounded — missing or ambiguous decrease guard
-induction: induction call recursion_contracts::bounded @ r.b1.b0.b0.t.b0.b1.b1: demand-refined from guard pc%2%3
-induction: induction call recursion_contracts::odd_p @ r.b1.b0.b0.t.b0.b1.b1: demand-refined from guard pc%6%3
