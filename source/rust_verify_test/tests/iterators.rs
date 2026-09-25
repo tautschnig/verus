@@ -592,3 +592,93 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] test_zip_take_over_by_ref_then_use_components verus_code! {
+        use vstd::prelude::*;
+        use vstd::std_specs::iter::{IteratorSpec, zip_iter_fst, zip_iter_snd, take_iter, take_count};
+
+        // std's Zip::next advances the first iterator first; when the second runs out the
+        // element already taken from the first is dropped. Here the first (2 elements) runs
+        // out: it is exhausted (2 Some + 1 None) and the second is advanced by exactly 2.
+        fn zip_consumed(v: &Vec<u8>, w: &Vec<u8>)
+            requires v@.len() == 2, w@.len() == 5,
+        {
+            let mut a = v.iter();
+            let mut b = w.iter();
+            for (x, y) in it: a.by_ref().zip(b.by_ref())
+                invariant
+                    IteratorSpec::remaining(&*zip_iter_fst(it.iter)).len() == 2 - it.index(),
+                    IteratorSpec::remaining(&*zip_iter_snd(it.iter)).len() == 5 - it.index(),
+                    &*final(zip_iter_fst(it.iter)) == &*final(zip_iter_fst(it.snapshot@)),
+                    &*final(zip_iter_snd(it.iter)) == &*final(zip_iter_snd(it.snapshot@)),
+            {
+            }
+            assert(IteratorSpec::remaining(&a).len() == 0);
+            assert(IteratorSpec::remaining(&b).len() == 3);
+        }
+
+        // the second runs out first: the first has consumed one extra element
+        fn zip_extra_consumption(v: &Vec<u8>, w: &Vec<u8>)
+            requires v@.len() == 5, w@.len() == 2,
+        {
+            let mut a = v.iter();
+            let mut b = w.iter();
+            for (x, y) in it: a.by_ref().zip(b.by_ref())
+                invariant_except_break
+                    // at the loop head: both advanced by the pairs yielded so far
+                    IteratorSpec::remaining(&*zip_iter_fst(it.iter)).len() == 5 - it.index(),
+                    IteratorSpec::remaining(&*zip_iter_snd(it.iter)).len() == 2 - it.index(),
+                invariant
+                    &*final(zip_iter_fst(it.iter)) == &*final(zip_iter_fst(it.snapshot@)),
+                    &*final(zip_iter_snd(it.iter)) == &*final(zip_iter_snd(it.snapshot@)),
+                ensures
+                    // at the exit: the second ran out, the first lost one more element
+                    IteratorSpec::remaining(&*zip_iter_snd(it.iter)).len() == 0,
+                    IteratorSpec::remaining(&*zip_iter_fst(it.iter)).len() == 2,
+            {
+            }
+            assert(IteratorSpec::remaining(&b).len() == 0);
+            assert(IteratorSpec::remaining(&a).len() == 2); // 5 - 2 pairs - 1 dropped element
+        }
+
+        fn take_then_rest(v: &Vec<u8>) -> (r: Option<&u8>)
+            requires v@.len() == 3,
+            ensures r matches Some(x) && *x == v@[2],
+        {
+            let mut it = v.iter();
+            let ghost r0 = IteratorSpec::remaining(&it);
+            for x in t: it.by_ref().take(2)
+                invariant
+                    r0 == v@.as_ref(),
+                    IteratorSpec::remaining(&*take_iter(t.iter)).len() == 3 - t.index(),
+                    forall|j: int| 0 <= j < 3 - t.index() ==>
+                        #[trigger] IteratorSpec::remaining(&*take_iter(t.iter))[j] == r0[t.index() + j],
+                    take_count(t.iter) == 2 - t.index(),
+                    &*final(take_iter(t.iter)) == &*final(take_iter(t.snapshot@)),
+            {
+            }
+            it.next()
+        }
+
+        fn wrong(v: &Vec<u8>, w: &Vec<u8>)
+            requires v@.len() == 5, w@.len() == 2,
+        {
+            let mut a = v.iter();
+            let mut b = w.iter();
+            for (x, y) in it: a.by_ref().zip(b.by_ref())
+                invariant_except_break
+                    IteratorSpec::remaining(&*zip_iter_fst(it.iter)).len() == 5 - it.index(),
+                    IteratorSpec::remaining(&*zip_iter_snd(it.iter)).len() == 2 - it.index(),
+                invariant
+                    &*final(zip_iter_fst(it.iter)) == &*final(zip_iter_fst(it.snapshot@)),
+                    &*final(zip_iter_snd(it.iter)) == &*final(zip_iter_snd(it.snapshot@)),
+                ensures
+                    IteratorSpec::remaining(&*zip_iter_fst(it.iter)).len() == 2,
+            {
+            }
+            assert(IteratorSpec::remaining(&a).len() == 3); // FAILS (one element was dropped)
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+

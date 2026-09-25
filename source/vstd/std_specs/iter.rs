@@ -883,6 +883,27 @@ pub broadcast axiom fn take_postcondition<I: IteratorSpec>(i: I, n: usize, r: Ta
         IteratorSpec::decrease(&r) is Some,
 ;
 
+/// `Take::next` is `if n != 0 { n -= 1; iter.next() } else { None }`: the inner iterator is
+/// advanced by its own `next` (a reborrow witness `m`) while the count is positive, and
+/// untouched afterwards. Stated on the ghost accessors so that a `Take` over `&mut I` says
+/// what happened to `I`. The trait-level `Iterator::next` contract applies as well.
+pub assume_specification<I: Iterator>[ <Take<I> as Iterator>::next ](t: &mut Take<I>) -> (r: Option<I::Item>)
+    ensures
+        take_count(*old(t)) > 0 ==> {
+            &&& take_count(*final(t)) == take_count(*old(t)) - 1
+            &&& exists|m: &mut I| #![auto]
+                call_ensures(I::next, (m,), r) && *m == take_iter(*old(t)) && *final(m) == take_iter(*final(t))
+        },
+        take_count(*old(t)) == 0 ==> r is None && take_iter(*final(t)) == take_iter(*old(t)) && take_count(*final(t)) == 0,
+;
+
+/// Dropping a `Take` drops its inner iterator: when the `Take` is resolved, so is the inner
+/// iterator (for `Take<&mut I>`, the reference's future is its current value).
+pub broadcast axiom fn axiom_take_has_resolved<I>(t: Take<I>)
+    ensures
+        #[trigger] has_resolved(t) ==> has_resolved(take_iter(t)),
+;
+
 // See examples/iterators/take.rs for a verified version of this interface.
 // Any changes here should first be verified over there.
 impl <I> IteratorSpecImpl for Take<I>
@@ -1051,6 +1072,36 @@ pub uninterp spec fn zip_iter_fst<A, B>(z: Zip<A, B>) -> A;
 
 // Ghost accessor for the second inner iterator
 pub uninterp spec fn zip_iter_snd<A, B>(z: Zip<A, B>) -> B;
+
+/// `Zip::next` is `let x = a.next()?; let y = b.next()?; Some((x, y))`: the first iterator is
+/// always advanced by one `next`; the second only if the first produced an element. When the
+/// second runs out, the element `x` already taken from the first is dropped: a `Zip` over
+/// `&mut` iterators may consume one more element of the first than it yields pairs. (For
+/// owned inner iterators std may use an index-based specialisation; it yields the same
+/// pairs, and the inner iterators are then unobservable, so this is its model as well.)
+/// The trait-level `Iterator::next` contract applies as well.
+pub assume_specification<A: Iterator, B: Iterator>[ <Zip<A, B> as Iterator>::next ](
+    z: &mut Zip<A, B>,
+) -> (r: Option<<Zip<A, B> as Iterator>::Item>)
+    ensures
+        exists|ma: &mut A, x: Option<A::Item>| #![auto]
+            call_ensures(A::next, (ma,), x) && *ma == zip_iter_fst(*old(z)) && *final(ma) == zip_iter_fst(*final(z))
+            && (match x {
+                None => r is None && zip_iter_snd(*final(z)) == zip_iter_snd(*old(z)),
+                Some(xv) => exists|mb: &mut B, y: Option<B::Item>| #![auto]
+                    call_ensures(B::next, (mb,), y) && *mb == zip_iter_snd(*old(z)) && *final(mb) == zip_iter_snd(*final(z))
+                    && (match y {
+                        None => r is None,
+                        Some(yv) => r == Some((xv, yv)),
+                    }),
+            }),
+;
+
+/// Dropping a `Zip` drops both inner iterators.
+pub broadcast axiom fn axiom_zip_has_resolved<A, B>(z: Zip<A, B>)
+    ensures
+        #[trigger] has_resolved(z) ==> has_resolved(zip_iter_fst(z)) && has_resolved(zip_iter_snd(z)),
+;
 
 impl<A, B> IteratorSpecImpl for Zip<A, B>
     where A: Iterator + IteratorSpec, B: Iterator + IteratorSpec
@@ -1260,6 +1311,8 @@ pub trait ExIterStep: Clone + PartialOrd + Sized {
  ********************************************************************************/
 
 pub broadcast group group_iter_axioms {
+    axiom_take_has_resolved,
+    axiom_zip_has_resolved,
     rev_postcondition,
     zip_postcondition,
     filter_postcondition,
