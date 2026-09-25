@@ -646,6 +646,19 @@ pub assume_specification<'a, T>[ <[T]>::chunks_exact_mut ](s: &'a mut [T], chunk
                 j - (spec_chunks_exact_count(old(s)@.len(), chunk_size as nat) * chunk_size)],
 ;
 
+/// `next` on a `ChunksExactMut` keeps the ghost accessors of the iteration (the slice length,
+/// chunk size and remainder reference are properties of the whole iteration, not of the
+/// position); the generic `Iterator::next` contract (remaining, decrease) applies as well.
+/// `next` on a `ChunksExactMut` keeps the ghost accessors of the iteration: the slice length,
+/// chunk size and remainder reference are properties of the whole iteration, not of the
+/// position. The trait-level `Iterator::next` contract (remaining, decrease) applies as well.
+pub assume_specification<'a, T>[ <ChunksExactMut<'a, T> as Iterator>::next ](c: &mut ChunksExactMut<'a, T>) -> (r: Option<&'a mut [T]>)
+    ensures
+        chunks_exact_mut_len(*final(c)) == chunks_exact_mut_len(*old(c)),
+        chunks_exact_mut_size(*final(c)) == chunks_exact_mut_size(*old(c)),
+        chunks_exact_mut_remainder(*final(c)) == chunks_exact_mut_remainder(*old(c)),
+;
+
 /// The remainder of a `chunks_exact_mut` iteration: the trailing `len % k` elements the
 /// iterator does not yield. Ghost accessors for the slice the iterator was created over and
 /// the chunk size, fixed by `chunks_exact_mut`'s postcondition.

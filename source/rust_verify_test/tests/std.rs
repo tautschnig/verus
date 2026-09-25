@@ -2121,3 +2121,31 @@ test_verify_one_file! {
     } => Ok(())
 }
 
+test_verify_one_file! {
+    #[test] test_chunks_exact_mut_by_ref_loop_then_remainder verus_code! {
+        use vstd::prelude::*;
+        use vstd::std_specs::slice::*;
+
+        // rand_core's `seed_from_u64` shape: fill the full chunks in a by-reference for-loop,
+        // then the remainder. The iteration's ghost accessors survive `next`, and the
+        // by-reference loop leaves them on `iter` for `into_remainder`.
+        fn fill(seed: &mut [u8]) {
+            let mut iter = seed.chunks_exact_mut(4);
+            let ghost n = chunks_exact_mut_len(iter);
+            for chunk in it: &mut iter
+                invariant
+                    chunks_exact_mut_len(*it.iter) == n,
+                    chunks_exact_mut_size(*it.iter) == 4,
+                    forall|i: int| 0 <= i < it.seq().len() ==> (*it.seq()[i])@.len() == 4,
+            {
+                chunk[0] = 1;
+                chunk[3] = 2;
+            }
+            let rem = iter.into_remainder();
+            assert(rem@.len() < 4);
+            if rem.len() > 0 {
+                rem[0] = 3;
+            }
+        }
+    } => Ok(())
+}
