@@ -2459,6 +2459,7 @@ pub(crate) fn finish_function<'tcx>(
         check_external_fn_specification_trait_method_decl_typs(sig.span, &functionx)?;
     }
 
+    let mut derived_spec_fn: Option<vir::ast::Function> = None;
     if let Some(action) = autoderive_action {
         if body_hir_id.is_some() {
             let inputs = match &sig.sig {
@@ -2469,7 +2470,7 @@ pub(crate) fn finish_function<'tcx>(
                 FnOrConstSigEnum::ConstVar(..) => vec![],
             };
 
-            crate::automatic_derive::modify_derived_item(
+            derived_spec_fn = crate::automatic_derive::modify_derived_item(
                 ctxt,
                 def_id,
                 &inputs,
@@ -2491,6 +2492,11 @@ pub(crate) fn finish_function<'tcx>(
 
     if let Some(f) = &function_for_autospec {
         functions.push(finish_autospec(sig.span, &function, f)?);
+    }
+
+    // (the derived predicate's warning config: see the fixups of the rebase onto upstream)
+    if let Some(f) = derived_spec_fn {
+        functions.push(f);
     }
 
     Ok(())
