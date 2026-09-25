@@ -445,6 +445,23 @@ pub(crate) fn typ_to_id(ctx: &Ctx, typ: &Typ) -> Expr {
     typ_to_ids(ctx, typ).last().unwrap().clone()
 }
 
+/// A type as an extra quantifier trigger term. Normally its type id; but for a decorated type
+/// parameter such as `&A` the type id is the bare variable `A`, which is not a usable trigger,
+/// while its decoration id `(REF dA)` is an application mentioning the parameter's decoration
+/// variable. (`&A` arises as the right-hand side of a bound `I::Item == &A`, the shape of
+/// `Iterator::copied`'s impl.) Since `A` and `dA` are always quantified together, covering
+/// `dA` covers the parameter.
+pub(crate) fn typ_to_trigger_term(ctx: &Ctx, typ: &Typ) -> Expr {
+    let ids = typ_to_ids(ctx, typ);
+    let last = ids.last().unwrap().clone();
+    if crate::context::DECORATE && matches!(&**typ, TypX::Decorate(..)) {
+        if let ExprX::Var(_) = &*last {
+            return ids[0].clone();
+        }
+    }
+    last
+}
+
 pub(crate) fn fun_id(ctx: &Ctx, typs: &Typs, typ: &Typ) -> Expr {
     let f_name = ctx.name_ctxt.prefix_type_id_fun(typs.len());
     let mut args: Vec<Expr> = Vec::new();

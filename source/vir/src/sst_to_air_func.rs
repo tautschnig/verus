@@ -135,7 +135,7 @@ fn func_def_quant(
     }
     let mut trigs = vec![f_app];
     for extra_trigger_term in extra_trigger_terms.iter() {
-        trigs.push(crate::sst_to_air::typ_to_id(ctx, extra_trigger_term));
+        trigs.push(crate::sst_to_air::typ_to_trigger_term(ctx, extra_trigger_term));
     }
     Ok(mk_bind_expr(
         &func_bind_trig(ctx, qid_name.to_string(), typ_params, params, &trigs, opts),

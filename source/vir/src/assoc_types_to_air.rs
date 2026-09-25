@@ -96,7 +96,7 @@ pub fn assoc_type_impls_to_air(ctx: &Ctx, assocs: &Vec<AssocTypeImpl>) -> Comman
             );
             let mut trigs = vec![projection];
             for extra_trigger_term in extra_trigger_terms.iter() {
-                trigs.push(crate::sst_to_air::typ_to_id(ctx, extra_trigger_term));
+                trigs.push(crate::sst_to_air::typ_to_trigger_term(ctx, extra_trigger_term));
             }
             let bind = func_bind_trig(ctx, qname, &typ_params, &Arc::new(vec![]), &trigs, None);
             let mut req_bounds = crate::traits::trait_bounds_to_air(ctx, &typ_bounds);
