@@ -249,6 +249,26 @@ pub trait ExIterator {
             self.obeys_prophetic_iter_laws() ==> map_post(self, f, r),
     ;
 
+    /// `for_each(f)` is `for x in self { f(x) }`. Verus closures have no mutable captured
+    /// state (their `requires`/`ensures` are the same for every call), so the effect of the
+    /// loop is the conjunction of the per-element postconditions; any mutation happens
+    /// through the elements (e.g. `&mut` items), whose futures the postconditions fix.
+    /// Nothing is said about the state of `self`'s components afterwards (for an adaptor over
+    /// `&mut` iterators, what they were advanced to): `self` is consumed and its components
+    /// are mutated inside, and there is no handle for its final state. Use a `for` loop when
+    /// that state is needed.
+    #[verifier::impls_cannot_extend_spec]
+    fn for_each<F>(self, f: F)
+        where
+            Self: Sized,
+            F: FnMut(Self::Item),
+        requires
+            self.obeys_prophetic_iter_laws(),
+            forall |k| #![auto] 0 <= k < self.remaining().len() ==> call_requires(f, (self.remaining()[k], )),
+        ensures
+            forall |k| #![auto] 0 <= k < self.remaining().len() ==> call_ensures(f, (self.remaining()[k], ), ()),
+    ;
+
     fn rev(self) -> (r: Rev<Self>)
         where Self: Sized,
         ensures

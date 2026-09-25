@@ -2302,3 +2302,50 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] test_for_each_and_as_ref_spec verus_code! {
+        use vstd::prelude::*;
+        use vstd::std_specs::core::AsRefSpec;
+
+        // `for_each(f)`: the per-element postconditions of `f` hold for every element;
+        // mutation goes through `&mut` items
+        fn zero_all(v: &mut Vec<u8>)
+            ensures
+                final(v)@.len() == old(v)@.len(),
+                forall|i: int| 0 <= i < final(v)@.len() ==> final(v)@[i] == 0,
+        {
+            v.iter_mut().for_each(|x: &mut u8| ensures *final(x) == 0 { *x = 0; });
+        }
+
+        fn all_small(v: &Vec<u8>)
+            requires forall|i: int| 0 <= i < v@.len() ==> v@[i] < 10,
+        {
+            v.iter().for_each(|x: &u8| requires *x < 10 { assert(*x < 10); });
+        }
+
+        // `as_ref()` through a bound: content when the impl is specified
+        fn generic_len<B: AsRef<[u8]>>(b: &B) -> (r: usize)
+            ensures B::obeys_as_ref_spec() ==> r == b.spec_as_ref()@.len(),
+        {
+            b.as_ref().len()
+        }
+
+        fn arr_and_slice(a: [u8; 4], s: &[u8])
+            requires s@.len() == 2,
+        {
+            let n = generic_len(&a);
+            assert(n == 4);
+            let m = generic_len(&s);
+            assert(m == 2);
+        }
+
+        fn wrong(v: &Vec<u8>) {
+            v.iter().for_each(|x: &u8| requires *x < 10 { }); // FAILS
+        }
+    } => Err(err) => {
+        assert_eq!(err.errors.len(), 1);
+        assert!(err.errors[0].rendered.contains("precondition not satisfied"));
+        assert!(err.errors[0].rendered.contains("FAILS"));
+    }
+}

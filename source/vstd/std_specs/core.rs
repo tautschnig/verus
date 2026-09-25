@@ -113,13 +113,22 @@ pub trait ExStructural {
     type ExternalTraitSpecificationFor: Structural;
 }
 
-/// `AsRef`/`AsMut` are accepted generically (a call through a bound has an unknown result,
-/// like `Deref`); the common concrete impls are specified below.
+/// `AsRef`: `spec_as_ref` is the value `as_ref` returns, for impls that specify it
+/// (`obeys_as_ref_spec()`); a call through a bound on an unspecified impl has an unknown
+/// result, as for `Deref`. `AsMut` is accepted generically; `[T; N]` and `[T]` are specified.
 #[verifier::external_trait_specification]
+#[verifier::external_trait_extension(AsRefSpec via AsRefSpecImpl)]
 pub trait ExAsRef<T: PointeeSized>: PointeeSized {
     type ExternalTraitSpecificationFor: core::convert::AsRef<T>;
 
-    fn as_ref(&self) -> &T;
+    spec fn obeys_as_ref_spec() -> bool;
+
+    spec fn spec_as_ref(&self) -> &T;
+
+    fn as_ref(&self) -> (r: &T)
+        ensures
+            Self::obeys_as_ref_spec() ==> r == self.spec_as_ref(),
+    ;
 }
 
 #[verifier::external_trait_specification]
@@ -129,12 +138,46 @@ pub trait ExAsMut<T: PointeeSized>: PointeeSized {
     fn as_mut(&mut self) -> &mut T;
 }
 
-pub assume_specification<T, const N: usize>[ <[T; N] as core::convert::AsRef<[T]>>::as_ref ](
-    a: &[T; N],
-) -> (r: &[T])
-    ensures
-        r@ == a@,
-;
+impl<T, const N: usize> AsRefSpecImpl<[T]> for [T; N] {
+    open spec fn obeys_as_ref_spec() -> bool {
+        true
+    }
+
+    open spec fn spec_as_ref(&self) -> &[T] {
+        super::super::array::spec_array_as_slice(self)
+    }
+}
+
+impl<T> AsRefSpecImpl<[T]> for [T] {
+    open spec fn obeys_as_ref_spec() -> bool {
+        true
+    }
+
+    open spec fn spec_as_ref(&self) -> &[T] {
+        self
+    }
+}
+
+// core's blanket impls `AsRef<U> for &T` and `AsRef<U> for &mut T` forward to `T`
+impl<'a, T: ?Sized + core::convert::AsRef<U>, U: ?Sized> AsRefSpecImpl<U> for &'a T {
+    open spec fn obeys_as_ref_spec() -> bool {
+        <T as AsRefSpec<U>>::obeys_as_ref_spec()
+    }
+
+    open spec fn spec_as_ref(&self) -> &U {
+        <T as AsRefSpec<U>>::spec_as_ref(*self)
+    }
+}
+
+impl<'a, T: ?Sized + core::convert::AsRef<U>, U: ?Sized> AsRefSpecImpl<U> for &'a mut T {
+    open spec fn obeys_as_ref_spec() -> bool {
+        <T as AsRefSpec<U>>::obeys_as_ref_spec()
+    }
+
+    open spec fn spec_as_ref(&self) -> &U {
+        <T as AsRefSpec<U>>::spec_as_ref(&**self)
+    }
+}
 
 pub assume_specification<T, const N: usize>[ <[T; N] as core::convert::AsMut<[T]>>::as_mut ](
     a: &mut [T; N],
@@ -142,11 +185,6 @@ pub assume_specification<T, const N: usize>[ <[T; N] as core::convert::AsMut<[T]
     ensures
         r@ == old(a)@,
         final(r)@ == final(a)@,
-;
-
-pub assume_specification<T>[ <[T] as core::convert::AsRef<[T]>>::as_ref ](s: &[T]) -> (r: &[T])
-    ensures
-        r@ == s@,
 ;
 
 pub assume_specification<T>[ <[T] as core::convert::AsMut<[T]>>::as_mut ](s: &mut [T]) -> (r: &mut [T])

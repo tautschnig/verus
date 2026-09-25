@@ -22,7 +22,7 @@ per-item skip reason for everything it does not translate
 `generate.py` module docstring; nothing is ever approximated.
 
 **56 harnesses generated**, all from `num.rs`. A full `cargo kani` run over the
-crate (generated + 19 hand-written in `lib.rs` + 21 in `adaptors.rs`, 96 in all) with
+crate (generated + 19 hand-written in `lib.rs` + 22 in `adaptors.rs`, 97 in all) with
 Kani 0.68.0 (CBMC 6.11.0) takes 647 s: **90 successful, 2 failures**, both in the
 `r2674` pair, explained below. Every other vstd spec in the translatable subset agrees
 with real std, which confirms the translator introduces **no false disagreement**; the
