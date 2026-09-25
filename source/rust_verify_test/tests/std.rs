@@ -2149,3 +2149,41 @@ test_verify_one_file! {
         }
     } => Ok(())
 }
+
+test_verify_one_file! {
+    #[test] test_legacy_int_module_consts verus_code! {
+        // The deprecated module constants (`core::u32::MAX`, `std::u8::MIN`) resolve to
+        // `core::legacy_int_modules::*` and have the associated constants' values.
+        fn f(x: u32) -> (r: u32)
+            ensures r >= x,
+        {
+            if x < core::u32::MAX { x + 1 } else { x }
+        }
+
+        fn g() -> (r: u64)
+            ensures r == 0xffff_ffff_ffff_ffff,
+        {
+            core::u64::MAX
+        }
+
+        fn h() -> (r: i8)
+            ensures r == -128,
+        {
+            std::i8::MIN
+        }
+
+        fn m(x: u16) -> (r: bool)
+            ensures r == (x == 0),
+        {
+            match x {
+                core::u16::MIN => true,
+                _ => false,
+            }
+        }
+
+        fn wrong() {
+            assert(core::u8::MAX == 254); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+

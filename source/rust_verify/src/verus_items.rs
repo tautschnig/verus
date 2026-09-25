@@ -1044,8 +1044,13 @@ pub(crate) fn get_rust_item_str(rust_path: Option<&str>) -> Option<RustItem> {
 
     if let Some(rust_path) = rust_path {
         static NUM_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-        let num_re =
-            NUM_RE.get_or_init(|| Regex::new(r"^([A-Za-z0-9_]+)::(MIN|MAX|BITS)").unwrap());
+        // `u32::MAX` is the associated constant (rust_path "u32::MAX"); the deprecated
+        // module constants `core::u32::MAX` / `std::u32::MAX` resolve to
+        // `core::legacy_int_modules::u32::MAX` and have the same value.
+        let num_re = NUM_RE.get_or_init(|| {
+            Regex::new(r"^(?:core::legacy_int_modules::)?([A-Za-z0-9_]+)::(MIN|MAX|BITS)$")
+                .unwrap()
+        });
         if let Some(captures) = num_re.captures(rust_path) {
             let ty_name = captures.get(1).expect("invalid int intrinsic regex");
             let const_name = captures.get(2).expect("invalid int intrinsic regex");
