@@ -525,6 +525,81 @@ fn chunks_exact_mut_remainder_stable_under_next() {
 }
 
 // ---------------------------------------------------------------------------
+// Zip::next / Take::next over `&mut` components   (iter.rs: the first iterator is advanced
+// by one `next` per call; the second only if the first produced an element; when the second
+// runs out the element taken from the first is dropped. Take advances the inner iterator
+// while its count is positive and leaves it untouched afterwards.)
+// ---------------------------------------------------------------------------
+
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(8)]
+fn zip_next_advances_components_as_spec() {
+    let (arr_a, la) = any_slice::<5>();
+    let (arr_b, lb) = any_slice::<5>();
+    let n: usize = kani::any();
+    kani::assume(n <= 7);
+    let a_s = &arr_a[..la];
+    let b_s = &arr_b[..lb];
+    let mut a = a_s.iter();
+    let mut b = b_s.iter();
+    // model: positions of the two component iterators
+    let mut pa = 0usize;
+    let mut pb = 0usize;
+    {
+        let mut z = a.by_ref().zip(b.by_ref());
+        let mut i = 0usize;
+        while i < n {
+            let r = z.next();
+            // spec: a.next() first
+            let x = if pa < la { pa += 1; Some(a_s[pa - 1]) } else { None };
+            let expected = match x {
+                None => None,
+                Some(xv) => {
+                    let y = if pb < lb { pb += 1; Some(b_s[pb - 1]) } else { None };
+                    match y { None => None, Some(yv) => Some((xv, yv)) }
+                }
+            };
+            assert!(r.map(|(p, q)| (*p, *q)) == expected, "Zip::next: yielded pair");
+            i += 1;
+        }
+    }
+    assert!(a.len() == la - pa, "Zip::next: first component advanced as modelled");
+    assert!(b.len() == lb - pb, "Zip::next: second component advanced as modelled");
+}
+
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(8)]
+fn take_next_advances_inner_as_spec() {
+    let (arr, len) = any_slice::<5>();
+    let k: usize = kani::any();
+    kani::assume(k <= 6);
+    let n: usize = kani::any();
+    kani::assume(n <= 7);
+    let s = &arr[..len];
+    let mut it = s.iter();
+    let mut pos = 0usize;
+    let mut count = k;
+    {
+        let mut t = it.by_ref().take(k);
+        let mut i = 0usize;
+        while i < n {
+            let r = t.next();
+            let expected = if count > 0 {
+                count -= 1;
+                if pos < len { pos += 1; Some(s[pos - 1]) } else { None }
+            } else {
+                None
+            };
+            assert!(r.copied() == expected, "Take::next: yielded element");
+            i += 1;
+        }
+    }
+    assert!(it.len() == len - pos, "Take::next: inner advanced only while count > 0");
+}
+
+// ---------------------------------------------------------------------------
 // Iterator::copied   (iter.rs: remaining == inner.remaining().map_values(|p| *p))
 // ---------------------------------------------------------------------------
 
@@ -735,6 +810,56 @@ mod tests {
                     let rem = it.into_remainder();
                     assert_eq!(rem.len(), s.len() % k);
                     assert_eq!(rem, &s[s.len() - s.len() % k..]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn zip_take_next_exhaustive() {
+        for a_s in all_slices(4) {
+            for b_s in all_slices(4) {
+                for n in 0..=6usize {
+                    let mut a = a_s.iter();
+                    let mut b = b_s.iter();
+                    let (mut pa, mut pb) = (0usize, 0usize);
+                    {
+                        let mut z = a.by_ref().zip(b.by_ref());
+                        for _ in 0..n {
+                            let r = z.next();
+                            let x = if pa < a_s.len() { pa += 1; Some(a_s[pa - 1]) } else { None };
+                            let expected = match x {
+                                None => None,
+                                Some(xv) => {
+                                    let y = if pb < b_s.len() { pb += 1; Some(b_s[pb - 1]) } else { None };
+                                    y.map(|yv| (xv, yv))
+                                }
+                            };
+                            assert_eq!(r.map(|(p, q)| (*p, *q)), expected);
+                        }
+                    }
+                    assert_eq!(a.len(), a_s.len() - pa);
+                    assert_eq!(b.len(), b_s.len() - pb);
+                }
+            }
+            for k in 0..=5usize {
+                for n in 0..=6usize {
+                    let mut it = a_s.iter();
+                    let (mut pos, mut count) = (0usize, k);
+                    {
+                        let mut t = it.by_ref().take(k);
+                        for _ in 0..n {
+                            let r = t.next();
+                            let expected = if count > 0 {
+                                count -= 1;
+                                if pos < a_s.len() { pos += 1; Some(a_s[pos - 1]) } else { None }
+                            } else {
+                                None
+                            };
+                            assert_eq!(r.copied(), expected);
+                        }
+                    }
+                    assert_eq!(it.len(), a_s.len() - pos);
                 }
             }
         }
