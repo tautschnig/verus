@@ -1,0 +1,1 @@
+/local/home/tautschn/verus-internal/tools/vstd-kani/target/kani/x86_64-unknown-linux-gnu/debug/libvstd_kani.rlib: /local/home/tautschn/verus-internal/tools/vstd-kani/src/adaptors.rs /local/home/tautschn/verus-internal/tools/vstd-kani/src/generated.rs /local/home/tautschn/verus-internal/tools/vstd-kani/src/lib.rs

@@ -442,6 +442,89 @@ fn chunks_exact_matches_spec() {
 }
 
 // ---------------------------------------------------------------------------
+// <&mut I as Iterator>::next   (iter.rs: the stored reference is unchanged, only the
+// referent advances; the call is I::next on a reborrow of the referent)
+// ---------------------------------------------------------------------------
+//
+// Observable content of the spec: (a) `n` calls of `next` through `&mut it` leave `it` in
+// the same state as `n` direct calls (the referent is advanced by `I::next`, nothing
+// else); (b) the `&mut I` inside a `for x in &mut it` loop is the same borrow throughout,
+// so after the loop `it` is the advanced iterator (the "future" of the reference).
+// Checked on the concrete iterators the survey used (slice::Iter, ChunksExactMut).
+
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(7)]
+fn by_mut_ref_next_matches_direct_next() {
+    let (arr, len) = any_slice::<5>();
+    let n: usize = kani::any();
+    kani::assume(n <= 6);
+    let s = &arr[..len];
+    let mut direct = s.iter();
+    let mut via_ref = s.iter();
+    let mut i = 0usize;
+    while i < n {
+        let d = direct.next();
+        let r = {
+            let r: &mut core::slice::Iter<u8> = &mut via_ref;
+            // this is `<&mut Iter as Iterator>::next`, not `Iter::next` on the referent
+            Iterator::next(&mut { r })
+        };
+        assert!(d == r, "&mut I: next yields the same element as the referent's next");
+        i += 1;
+    }
+    assert!(direct.len() == via_ref.len(), "&mut I: referent advanced identically");
+    // (b) a for-loop through `&mut it` exhausts `it`, and `it` is usable afterwards
+    let mut it = s.iter();
+    let mut count = 0usize;
+    for _x in &mut it {
+        count += 1;
+    }
+    assert!(count == len, "for x in &mut it: visits every element");
+    assert!(it.next().is_none(), "for x in &mut it: it is exhausted afterwards");
+    // partial: break after one element, `it` continues from the second
+    let mut it2 = s.iter();
+    for _x in &mut it2 {
+        break;
+    }
+    let rest = it2.len();
+    assert!(rest == if len == 0 { 0 } else { len - 1 }, "break leaves it at the next element");
+}
+
+// ---------------------------------------------------------------------------
+// ChunksExactMut::next keeps the iteration's accessors   (slice.rs:
+// chunks_exact_mut_len/size/remainder unchanged by next) — observable as: after any number
+// of `next` calls, `into_remainder()` is the same slice (len % k, the original tail)
+// ---------------------------------------------------------------------------
+
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(7)]
+fn chunks_exact_mut_remainder_stable_under_next() {
+    let (arr, len) = any_slice::<5>();
+    let k: usize = kani::any();
+    kani::assume(k >= 1 && k <= 5);
+    let n: usize = kani::any();
+    kani::assume(n <= 6);
+    let orig = arr;
+    let mut v: [u8; 5] = arr;
+    let mut it = v[..len].chunks_exact_mut(k);
+    let mut i = 0usize;
+    while i < n {
+        let _ = it.next();
+        i += 1;
+    }
+    let rem = it.into_remainder();
+    assert!(rem.len() == len % k, "into_remainder after n nexts: length is len % k");
+    let base = len - len % k;
+    let mut j = 0usize;
+    while j < rem.len() {
+        assert!(rem[j] == orig[base + j], "into_remainder after n nexts: the original tail");
+        j += 1;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Iterator::copied   (iter.rs: remaining == inner.remaining().map_values(|p| *p))
 // ---------------------------------------------------------------------------
 
@@ -608,6 +691,52 @@ mod tests {
             assert_eq!(got, s);
             let tail: Vec<u8> = s.iter().copied().skip(1).collect();
             assert_eq!(tail, s.iter().skip(1).cloned().collect::<Vec<u8>>());
+        }
+    }
+
+    #[test]
+    fn by_mut_ref_next_exhaustive() {
+        for s in all_slices(5) {
+            for n in 0..=6usize {
+                let mut direct = s.iter();
+                let mut via_ref = s.iter();
+                for _ in 0..n {
+                    let d = direct.next();
+                    let r = Iterator::next(&mut &mut via_ref);
+                    assert_eq!(d, r);
+                }
+                assert_eq!(direct.len(), via_ref.len());
+            }
+            let mut it = s.iter();
+            let mut count = 0;
+            for _x in &mut it {
+                count += 1;
+            }
+            assert_eq!(count, s.len());
+            assert!(it.next().is_none());
+            let mut it2 = s.iter();
+            for _x in &mut it2 {
+                break;
+            }
+            assert_eq!(it2.len(), s.len().saturating_sub(1));
+        }
+    }
+
+    #[test]
+    fn chunks_exact_mut_remainder_exhaustive() {
+        for s in all_slices(5) {
+            for k in 1..=5usize {
+                for n in 0..=6usize {
+                    let mut v = s.clone();
+                    let mut it = v.chunks_exact_mut(k);
+                    for _ in 0..n {
+                        let _ = it.next();
+                    }
+                    let rem = it.into_remainder();
+                    assert_eq!(rem.len(), s.len() % k);
+                    assert_eq!(rem, &s[s.len() - s.len() % k..]);
+                }
+            }
         }
     }
 

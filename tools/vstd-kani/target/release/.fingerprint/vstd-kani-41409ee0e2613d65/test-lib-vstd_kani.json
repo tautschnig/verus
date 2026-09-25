@@ -1,0 +1,1 @@
+{"rustc":1625334936438085654,"features":"[]","declared_features":"[]","target":12530301768723928129,"profile":10220379689200424945,"path":10763286916239946207,"deps":[],"local":[{"CheckDepInfo":{"dep_info":"release/.fingerprint/vstd-kani-41409ee0e2613d65/dep-test-lib-vstd_kani","checksum":false}}],"rustflags":[],"config":9396254390672932401,"compile_kind":0}
