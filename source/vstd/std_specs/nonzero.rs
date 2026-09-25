@@ -173,4 +173,31 @@ pub broadcast group group_nonzero_axioms {
     axiom_nonzero_is_not_zero,
 }
 
+/// `NonZero::<uN>::trailing_zeros` and `leading_zeros` count on the wrapped value
+/// (the wrapped value is nonzero, so `trailing_zeros` is below the bit width).
+macro_rules! nonzero_bit_specs {
+    ($uN:ty, $tz:ident, $lz:ident) => {
+        verus! {
+        pub assume_specification[ NonZero::<$uN>::trailing_zeros ](n: NonZero<$uN>) -> (r: u32)
+            ensures
+                r == super::bits::$tz(n@),
+            opens_invariants none
+            no_unwind
+        ;
+
+        pub assume_specification[ NonZero::<$uN>::leading_zeros ](n: NonZero<$uN>) -> (r: u32)
+            ensures
+                r == super::bits::$lz(n@),
+            opens_invariants none
+            no_unwind
+        ;
+        }
+    };
+}
+
+nonzero_bit_specs!(u8, u8_trailing_zeros, u8_leading_zeros);
+nonzero_bit_specs!(u16, u16_trailing_zeros, u16_leading_zeros);
+nonzero_bit_specs!(u32, u32_trailing_zeros, u32_leading_zeros);
+nonzero_bit_specs!(u64, u64_trailing_zeros, u64_leading_zeros);
+
 } // verus!

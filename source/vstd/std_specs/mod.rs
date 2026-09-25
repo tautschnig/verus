@@ -5,6 +5,7 @@ pub mod array;
 pub mod atomic;
 pub mod bits;
 pub mod borrow;
+pub mod bytes;
 pub mod char;
 pub mod clone;
 pub mod cmp;

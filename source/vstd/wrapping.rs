@@ -52,6 +52,18 @@ macro_rules! wrapping_specs {
                     x >> (shift % $bits)
                 }
 
+                /// `x.rotate_left(n)`: the bits shifted out at the top re-enter at the bottom.
+                pub open spec fn rotate_left(x: $uN, n: u32) -> $uN {
+                    let r = n % $bits;
+                    if r == 0 { x } else { (x << r) | (x >> ($bits - r)) }
+                }
+
+                /// `x.rotate_right(n)`: the bits shifted out at the bottom re-enter at the top.
+                pub open spec fn rotate_right(x: $uN, n: u32) -> $uN {
+                    let r = n % $bits;
+                    if r == 0 { x } else { (x >> r) | (x << ($bits - r)) }
+                }
+
             }
             pub mod $modname_i {
                 use super::*;

@@ -733,7 +733,32 @@ fn compare_external_ty<'tcx>(
                 rustc_middle::ty::TyKind::Array(ty1, const1),
                 rustc_middle::ty::TyKind::Array(ty2, const2),
             ) => {
-                const1 == const2
+                // Array lengths may be written as an unevaluated constant on one side (std's
+                // `[u8; size_of::<Self>()]` in `to_le_bytes`) and a literal on the other; compare
+                // the evaluated values when both evaluate.
+                let consts_equal = const1 == const2 || {
+                    let typing_env = TypingEnv::fully_monomorphized();
+                    match (const1.try_to_target_usize(tcx), const2.try_to_target_usize(tcx)) {
+                        (Some(a), Some(b)) => a == b,
+                        _ => {
+                            let n1 = tcx.normalize_erasing_regions(
+                                typing_env,
+                                rustc_middle::ty::Unnormalized::new_wip(*const1),
+                            );
+                            let n2 = tcx.normalize_erasing_regions(
+                                typing_env,
+                                rustc_middle::ty::Unnormalized::new_wip(*const2),
+                            );
+                            n1 == n2
+                                || match (n1.try_to_target_usize(tcx), n2.try_to_target_usize(tcx))
+                                {
+                                    (Some(a), Some(b)) => a == b,
+                                    _ => false,
+                                }
+                        }
+                    }
+                };
+                consts_equal
                     && compare_external_ty(tcx, verus_items, &ty1, &ty2, external_trait_from_to)
             }
             (

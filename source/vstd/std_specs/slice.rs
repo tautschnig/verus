@@ -9,7 +9,7 @@ use super::range::{
 use core::ops::{
     Index, IndexMut, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive,
 };
-use core::slice::{Chunks, Iter, IterMut, SliceIndex, Windows};
+use core::slice::{Chunks, ChunksExact, ChunksExactMut, Iter, IterMut, SliceIndex, Windows};
 
 use verus as verus_skip_verusfmt;
 verus_skip_verusfmt! {
@@ -536,6 +536,104 @@ pub assume_specification<'a, T>[ <[T]>::chunks ](s: &'a [T], chunk_size: usize) 
         IteratorSpec::remaining(&c).len() == spec_chunks(s@, chunk_size as nat).len(),
         forall|i: int| 0 <= i < IteratorSpec::remaining(&c).len()
             ==> (#[trigger] IteratorSpec::remaining(&c)[i])@ == spec_chunks(s@, chunk_size as nat)[i],
+        IteratorSpec::decrease(&c) is Some,
+;
+
+/***********************************************************************************************
+ * Definitions for `slice::ChunksExact` and `slice::ChunksExactMut`
+ ***********************************************************************************************/
+#[verifier::external_type_specification]
+#[verifier::external_body]
+#[verifier::accept_recursive_types(T)]
+pub struct ExChunksExact<'a, T: 'a>(ChunksExact<'a, T>);
+
+/// The number of full chunks of size `k` in a sequence of length `n` (the remainder is not
+/// yielded by `chunks_exact`).
+pub open spec fn spec_chunks_exact_count(n: nat, k: nat) -> nat
+    recommends
+        k > 0,
+{
+    n / k
+}
+
+impl<'a, T: 'a> super::iter::IteratorSpecImpl for ChunksExact<'a, T> {
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool {
+        true
+    }
+
+    uninterp spec fn remaining(&self) -> Seq<Self::Item>;
+
+    open spec fn will_return_none(&self) -> bool {
+        true
+    }
+
+    uninterp spec fn decrease(&self) -> Option<nat>;
+
+    open spec fn peek(&self, index: int) -> Option<Self::Item> {
+        None
+    }
+}
+
+pub assume_specification<'a, T>[ <[T]>::chunks_exact ](s: &'a [T], chunk_size: usize) -> (c:
+    ChunksExact<'a, T>)
+    requires
+        chunk_size > 0,
+    ensures
+        IteratorSpec::remaining(&c).len() == spec_chunks_exact_count(s@.len(), chunk_size as nat),
+        forall|i: int| 0 <= i < IteratorSpec::remaining(&c).len()
+            ==> (#[trigger] IteratorSpec::remaining(&c)[i])@ == s@.subrange(i * chunk_size, (i + 1) * chunk_size),
+        IteratorSpec::decrease(&c) is Some,
+;
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+#[verifier::accept_recursive_types(T)]
+pub struct ExChunksExactMut<'a, T: 'a>(ChunksExactMut<'a, T>);
+
+impl<'a, T: 'a> super::iter::IteratorSpecImpl for ChunksExactMut<'a, T> {
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool {
+        true
+    }
+
+    #[verifier::prophetic]
+    uninterp spec fn remaining(&self) -> Seq<Self::Item>;
+
+    open spec fn will_return_none(&self) -> bool {
+        true
+    }
+
+    uninterp spec fn decrease(&self) -> Option<nat>;
+
+    open spec fn peek(&self, index: int) -> Option<Self::Item> {
+        None
+    }
+}
+
+/// Like `iter_mut`: each yielded `&mut [T]` initially holds the corresponding full chunk, and
+/// its eventual contents flow back to that chunk; the remainder (fewer than `chunk_size`
+/// trailing elements) is not yielded and keeps its value.
+pub assume_specification<'a, T>[ <[T]>::chunks_exact_mut ](s: &'a mut [T], chunk_size: usize) -> (c:
+    ChunksExactMut<'a, T>)
+    requires
+        chunk_size > 0,
+    ensures
+        final(s)@.len() == old(s)@.len(),
+        IteratorSpec::remaining(&c).len() == spec_chunks_exact_count(old(s)@.len(), chunk_size as nat),
+        forall|i: int| #![trigger IteratorSpec::remaining(&c)[i]]
+            0 <= i < IteratorSpec::remaining(&c).len()
+            ==> (*IteratorSpec::remaining(&c)[i])@ == old(s)@.subrange(i * chunk_size, (i + 1) * chunk_size)
+                && (*final(IteratorSpec::remaining(&c)[i]))@.len() == chunk_size,
+        forall|j: int| #![trigger final(s)@[j]]
+            0 <= j < old(s)@.len() ==> final(s)@[j] == {
+                let i = j / (chunk_size as int);
+                if i < IteratorSpec::remaining(&c).len() {
+                    (*final(IteratorSpec::remaining(&c)[i]))@[j - i * chunk_size]
+                } else {
+                    old(s)@[j]
+                }
+            },
+        IteratorSpec::obeys_prophetic_iter_laws(&c),
+        IteratorSpec::will_return_none(&c),
         IteratorSpec::decrease(&c) is Some,
 ;
 

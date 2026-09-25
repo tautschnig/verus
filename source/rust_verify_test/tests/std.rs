@@ -2020,3 +2020,81 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    // Specifications the top-downloads survey found users replacing by hand:
+    // rotate_left/right, to/from_{le,be}_bytes, NonZero::trailing_zeros, chunks_exact(_mut)
+    #[test] practice_num_and_chunk_specs verus_code! {
+        use vstd::prelude::*;
+        use vstd::std_specs::bytes::{byte_of, lemma_byte_of_u64_shr};
+        use vstd::std_specs::iter::IteratorSpec;
+        fn rot(x: u32, r: u32) -> (y: u32)
+            requires r < 32,
+            ensures y == vstd::wrapping::u32_specs::rotate_right(x, r),
+        {
+            x.rotate_right(r)
+        }
+        fn rot_id(x: u32) -> (y: u32) ensures y == x { x.rotate_left(32) }
+        fn le(x: u32) -> (b: [u8; 4])
+            ensures b@[0] == byte_of(x as int, 0), b@[3] == byte_of(x as int, 3),
+        {
+            x.to_le_bytes()
+        }
+        fn be(low: u64) -> (b: [u8; 8]) ensures b@[0] == (low >> 56) as u8, b@[7] == low as u8 {
+            let r = low.to_be_bytes();
+            proof {
+                lemma_byte_of_u64_shr(low, 7);
+                lemma_byte_of_u64_shr(low, 0);
+                assert(((low >> 56u64) & 0xff) as u8 == (low >> 56) as u8) by (bit_vector);
+                assert(((low >> 0u64) & 0xff) as u8 == low as u8) by (bit_vector);
+            }
+            r
+        }
+        fn roundtrip(x: u32) -> (r: u32)
+            ensures forall|i: int| 0 <= i < 4 ==> byte_of(r as int, i) == byte_of(x as int, i),
+        {
+            u32::from_le_bytes(x.to_le_bytes())
+        }
+        fn tz(x: u64) -> (r: Option<u32>) ensures r is Some <==> x != 0 {
+            match core::num::NonZeroU64::new(x) {
+                Some(nz) => Some(nz.trailing_zeros()),
+                None => None,
+            }
+        }
+        fn fill(seed: &mut [u8; 8])
+            ensures final(seed)@[0] == 1, final(seed)@[4] == 1, final(seed)@[3] == old(seed)@[3],
+        {
+            for chunk in it: seed.chunks_exact_mut(4)
+                invariant
+                    forall|i: int| 0 <= i < it.index() ==> (*final(it.seq()[i]))@[0] == 1,
+                    forall|i: int| 0 <= i < it.index() ==> (*final(it.seq()[i]))@[3] == (*it.seq()[i])@[3],
+            {
+                chunk[0] = 1;
+            }
+        }
+        fn count(s: &[u8]) -> (n: usize)
+            requires s@.len() < 1000,
+            ensures n == s@.len() / 4,
+        {
+            let mut n: usize = 0;
+            for c in it: s.chunks_exact(4)
+                invariant s@.len() < 1000, n == it.index(), it.seq().len() == s@.len() / 4,
+            {
+                n = n + 1;
+            }
+            n
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] practice_bytes_wrong verus_code! {
+        use vstd::prelude::*;
+        use vstd::std_specs::bytes::byte_of;
+        fn wrong(x: u32) -> (b: [u8; 4])
+            ensures b@[0] == byte_of(x as int, 1), // FAILS
+        {
+            x.to_le_bytes()
+        }
+    } => Err(err) => assert_one_fails(err)
+}
