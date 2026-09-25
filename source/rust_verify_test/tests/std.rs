@@ -2187,3 +2187,40 @@ test_verify_one_file! {
     } => Err(err) => assert_one_fails(err)
 }
 
+test_verify_one_file! {
+    #[test] test_assert_eq_macros verus_code! {
+        use vstd::prelude::*;
+
+        // `assert_eq!` / `assert_ne!` expand to a comparison and a call to
+        // `core::panicking::assert_failed`, which requires false: the macros act as
+        // assertions on exec values.
+        fn f(x: u32, y: u32)
+            requires x == y,
+        {
+            assert_eq!(x, y);
+        }
+
+        fn g(v: &Vec<u8>)
+            requires v@.len() == 4,
+        {
+            assert_eq!(v.len(), 4);
+            assert_ne!(v.len(), 5);
+            assert_eq!(v.len(), 4, "length {}", v.len());
+        }
+
+        fn k(a: &[u8], b: &[u8])
+            requires a@ == b@,
+        {
+            assert_eq!(a, b);
+        }
+
+        fn wrong(x: u32, y: u32) {
+            assert_eq!(x, y); // FAILS
+        }
+    } => Err(err) => {
+        assert_eq!(err.errors.len(), 1);
+        assert!(err.errors[0].rendered.contains("precondition not satisfied"));
+        assert!(err.errors[0].rendered.contains("FAILS"));
+    }
+}
+
