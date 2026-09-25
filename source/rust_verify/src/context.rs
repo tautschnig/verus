@@ -70,6 +70,10 @@ pub(crate) struct BodyCtxt<'tcx> {
     pub(crate) mode: Mode,
     pub(crate) external_body: bool,
     pub(crate) in_ghost: bool,
+    /// The body of a dual-use `const` (a spec function whose body is also the exec value):
+    /// calls to exec functions with a `when_used_as_spec` counterpart are redirected to it,
+    /// as in ghost code, so that e.g. `core::mem::size_of::<T>()` can define a const.
+    pub(crate) dual_const_body: bool,
     pub(crate) atomically: Option<Arc<AtomicallyCtxt>>,
     pub(crate) migrate_postcondition_vars: Option<std::collections::HashSet<vir::ast::VarIdent>>,
     /// Context to interpret a header if we encounter one

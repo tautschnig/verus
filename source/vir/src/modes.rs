@@ -485,6 +485,8 @@ impl SpecialPaths {
 
 struct Ctxt {
     pub(crate) funs: HashMap<Fun, Function>,
+    /// spec functions that are the `when_used_as_spec` counterpart of some exec function
+    pub(crate) autospec_targets: HashSet<Fun>,
     pub(crate) datatypes: HashMap<Path, Datatype>,
     pub(crate) traits: HashSet<Path>,
     pub(crate) check_ghost_blocks: bool,
@@ -1915,6 +1917,20 @@ fn check_expr(
 
             if let Some(expr) = body {
                 let _ = check_expr(ctxt, record, typing, outer_mode, expect, expr, outer_proph)?;
+            }
+
+            // The body of a dual-use `const` (spec function, exec value) is both the spec
+            // definition and, as compiled by rustc, the exec value. A call to an exec function
+            // with a `when_used_as_spec` counterpart has been redirected to that counterpart
+            // (see `dual_const_body` in rust_verify), so the spec definition is the spec
+            // version while the exec value is the exec call; the two agree by the exec
+            // function's specification. Treat the result as exec here.
+            let dual_const_body = ctxt.fun_mode == Mode::Spec
+                && typing.ret_mode == Some(Mode::Exec)
+                && typing.block_ghostness == Ghost::Ghost;
+            if dual_const_body && function.x.mode == Mode::Spec && ctxt.autospec_targets.contains(x)
+            {
+                return Ok((Mode::Exec, out_proph));
             }
 
             Ok((function.x.ret.x.mode, out_proph))
@@ -4039,8 +4055,11 @@ pub fn check_crate(krate: &Krate) -> Result<(Krate, ErasureModes), Vec<VirErr>> 
     }
     let erasure_modes = ErasureModes { var_modes: vec![], ctor_modes: vec![] };
     let special_paths = SpecialPaths::new();
+    let autospec_targets =
+        funs.values().filter_map(|f| f.x.attrs.autospec.clone()).collect::<HashSet<_>>();
     let mut ctxt = Ctxt {
         funs,
+        autospec_targets,
         datatypes,
         traits: krate.traits.iter().map(|t| t.x.name.clone()).collect(),
         check_ghost_blocks: false,

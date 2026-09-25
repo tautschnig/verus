@@ -670,3 +670,44 @@ test_verify_one_file! {
         }
     } => Ok(())
 }
+
+test_verify_one_file! {
+    #[test] test_dual_const_size_of verus_code! {
+        use vstd::prelude::*;
+
+        // A dual-use `const` may call an exec function that has a `when_used_as_spec`
+        // counterpart: the spec definition uses the counterpart, the exec value is rustc's
+        // const evaluation, and the exec function's specification relates the two.
+        const WORD: usize = core::mem::size_of::<u64>();
+        const BITS: usize = 8 * core::mem::size_of::<u32>();
+        const HALF: usize = WORD / 2;
+
+        fn f() -> (r: usize)
+            ensures r == 8,
+        {
+            WORD
+        }
+
+        fn g(v: &[u8])
+            requires v@.len() >= BITS,
+        {
+            let x = v[31];
+        }
+
+        fn h() {
+            assert(HALF == 4);
+        }
+
+        fn wrong() {
+            assert(WORD == 4); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    #[test] test_dual_const_plain_exec_call_rejected verus_code! {
+        const fn ex() -> usize { 3 }
+        const A: usize = ex();
+    } => Err(err) => assert_vir_error_msg(err, "cannot call function `test_crate::ex` with mode exec")
+}
+

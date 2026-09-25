@@ -177,7 +177,11 @@ fn fn_call_or_assoc_const_to_vir<'tcx>(
 
     let path = bctx.ctxt.def_id_to_vir_path(f);
     let name = Arc::new(FunX { path: path.clone() });
-    let autospec_usage = if bctx.in_ghost { AutospecUsage::IfMarked } else { AutospecUsage::Final };
+    let autospec_usage = if bctx.in_ghost || bctx.dual_const_body {
+        AutospecUsage::IfMarked
+    } else {
+        AutospecUsage::Final
+    };
 
     // Compute the 'target_kind'.
     //
@@ -383,7 +387,11 @@ pub(crate) fn const_var_to_vir<'tcx>(
     let typ = typ_of_node_unadjusted(bctx, span, hir_id)?;
     let path = bctx.ctxt.def_id_to_vir_path(id);
     let fun = FunX { path };
-    let autospec_usage = if bctx.in_ghost { AutospecUsage::IfMarked } else { AutospecUsage::Final };
+    let autospec_usage = if bctx.in_ghost || bctx.dual_const_body {
+        AutospecUsage::IfMarked
+    } else {
+        AutospecUsage::Final
+    };
     Ok(bctx.spanned_typed_new(span, &typ, ExprX::ConstVar(Arc::new(fun), autospec_usage)))
 }
 
@@ -476,7 +484,11 @@ pub(crate) fn call_overloaded_method<'tcx>(
         _ => crate::internal_err!(span, "unexpected deref"),
     };
 
-    let autospec_usage = if bctx.in_ghost { AutospecUsage::IfMarked } else { AutospecUsage::Final };
+    let autospec_usage = if bctx.in_ghost || bctx.dual_const_body {
+        AutospecUsage::IfMarked
+    } else {
+        AutospecUsage::Final
+    };
 
     let typ_args = mk_typ_args(bctx, trait_args, trait_fun_id, span)?;
     let impl_paths = get_impl_paths(bctx, trait_fun_id, trait_args, None, false, span)?;
