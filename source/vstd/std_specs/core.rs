@@ -195,7 +195,26 @@ pub assume_specification [core::panicking::panic_fmt] (s: core::fmt::Arguments<'
         false,
 ;
 
+/// The failure path of `assert_eq!` / `assert_ne!` / `assert_matches!`: like `panic!`, it
+/// must be unreachable in verified code. This makes those macros usable as assertions on
+/// exec values (the comparison itself is `PartialEq::eq` on references, so it is only as
+/// informative as the type's `obeys_eq_spec`).
+pub assume_specification<T: core::fmt::Debug + ?Sized, U: core::fmt::Debug + ?Sized>[
+    core::panicking::assert_failed::<T, U>
+](
+    kind: core::panicking::AssertKind,
+    left: &T,
+    right: &U,
+    args: Option<core::fmt::Arguments<'_>>,
+) -> !
+    requires
+        false,
+;
+
 } // verus!
+
+#[verifier::external_type_specification]
+pub struct ExAssertKind(core::panicking::AssertKind);
 
 #[verifier::external_type_specification]
 #[verifier::external_body]

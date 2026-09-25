@@ -2250,3 +2250,78 @@ test_verify_one_file! {
         }
     } => Ok(())
 }
+
+test_verify_one_file! {
+    #[test] test_legacy_int_module_consts verus_code! {
+        // The deprecated module constants (`core::u32::MAX`, `std::u8::MIN`) resolve to
+        // `core::legacy_int_modules::*` and have the associated constants' values.
+        fn f(x: u32) -> (r: u32)
+            ensures r >= x,
+        {
+            if x < core::u32::MAX { x + 1 } else { x }
+        }
+
+        fn g() -> (r: u64)
+            ensures r == 0xffff_ffff_ffff_ffff,
+        {
+            core::u64::MAX
+        }
+
+        fn h() -> (r: i8)
+            ensures r == -128,
+        {
+            std::i8::MIN
+        }
+
+        fn m(x: u16) -> (r: bool)
+            ensures r == (x == 0),
+        {
+            match x {
+                core::u16::MIN => true,
+                _ => false,
+            }
+        }
+
+        fn wrong() {
+            assert(core::u8::MAX == 254); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    #[test] test_assert_eq_macros verus_code! {
+        use vstd::prelude::*;
+
+        // `assert_eq!` / `assert_ne!` expand to a comparison and a call to
+        // `core::panicking::assert_failed`, which requires false: the macros act as
+        // assertions on exec values.
+        fn f(x: u32, y: u32)
+            requires x == y,
+        {
+            assert_eq!(x, y);
+        }
+
+        fn g(v: &Vec<u8>)
+            requires v@.len() == 4,
+        {
+            assert_eq!(v.len(), 4);
+            assert_ne!(v.len(), 5);
+            assert_eq!(v.len(), 4, "length {}", v.len());
+        }
+
+        fn k(a: &[u8], b: &[u8])
+            requires a@ == b@,
+        {
+            assert_eq!(a, b);
+        }
+
+        fn wrong(x: u32, y: u32) {
+            assert_eq!(x, y); // FAILS
+        }
+    } => Err(err) => {
+        assert_eq!(err.errors.len(), 1);
+        assert!(err.errors[0].rendered.contains("precondition not satisfied"));
+        assert!(err.errors[0].rendered.contains("FAILS"));
+    }
+}
+
