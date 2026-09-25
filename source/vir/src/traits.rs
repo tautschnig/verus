@@ -1702,7 +1702,7 @@ pub fn trait_impl_to_air(ctx: &Ctx, imp: &TraitImpl) -> Commands {
         format!("{}_{}", path_as_friendly_rust_name(&imp.x.impl_path), crate::def::QID_TRAIT_IMPL);
     let mut trigs = vec![tr_bound.clone()];
     for extra_trigger_term in extra_trigger_terms.iter() {
-        trigs.push(crate::sst_to_air::typ_to_id(ctx, extra_trigger_term));
+        trigs.push(crate::sst_to_air::typ_to_trigger_term(ctx, extra_trigger_term));
     }
     let bind = crate::sst_to_air_func::func_bind_trig(
         ctx,
