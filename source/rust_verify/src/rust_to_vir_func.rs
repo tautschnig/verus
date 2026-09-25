@@ -344,6 +344,7 @@ fn mk_bctx<'tcx>(
         mode,
         external_body,
         in_ghost: mode != Mode::Exec,
+        dual_const_body: false,
         atomically: None,
         migrate_postcondition_vars,
         in_fn_sig: false,
@@ -369,8 +370,9 @@ fn body_to_vir<'tcx>(
     param_names: Vec<VarIdent>,
     external_opaque_type_map: Option<HashMap<Path, Path>>,
     is_async: bool,
+    dual_const_body: bool,
 ) -> Result<vir::ast::Expr, VirErr> {
-    let bctx = mk_bctx(
+    let mut bctx = mk_bctx(
         ctxt,
         fun_id,
         id,
@@ -381,6 +383,7 @@ fn body_to_vir<'tcx>(
         param_names,
         external_opaque_type_map,
     );
+    bctx.dual_const_body = dual_const_body;
     let body_expr =
         if is_async { extract_desugared_async_body(&bctx.ctxt, body)? } else { &body.value };
     let e = expr_to_vir_consume(&bctx, body_expr)?;
@@ -1921,6 +1924,7 @@ pub(crate) fn check_item_fn<'tcx>(
             param_names,
             assume_specification_opaque_type_map.clone(),
             false,
+            false,
         )?;
         create_reveal_group(
             ctxt,
@@ -2312,6 +2316,7 @@ pub(crate) fn finish_function<'tcx>(
                 param_names,
                 assume_specification_opaque_type_map.clone(),
                 is_async,
+                false,
             )?;
             let header =
                 vir::headers::read_header(&mut vir_body, &vir::headers::HeaderAllows::All)?;
@@ -3393,6 +3398,7 @@ pub(crate) fn finish_const_or_static<'tcx>(
         vec![],
         None,
         false,
+        func_mode == Mode::Spec && body_mode == Mode::Exec,
     )?;
     let header = vir::headers::read_header(
         &mut vir_body,
