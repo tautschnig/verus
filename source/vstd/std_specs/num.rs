@@ -137,6 +137,20 @@ macro_rules! num_specs {
 
             #[verifier::allow_in_spec]
             #[cfg(not(verus_verify_core))]
+            pub assume_specification[<$uN>::rotate_left](x: $uN, n: u32) -> $uN
+                returns $mod_u::rotate_left(x, n)
+                opens_invariants none
+                no_unwind;
+
+            #[verifier::allow_in_spec]
+            #[cfg(not(verus_verify_core))]
+            pub assume_specification[<$uN>::rotate_right](x: $uN, n: u32) -> $uN
+                returns $mod_u::rotate_right(x, n)
+                opens_invariants none
+                no_unwind;
+
+            #[verifier::allow_in_spec]
+            #[cfg(not(verus_verify_core))]
             pub assume_specification[<$uN>::checked_add](x: $uN, y: $uN) -> Option<$uN>
                 returns (
                     if x + y > <$uN>::MAX {

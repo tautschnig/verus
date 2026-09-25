@@ -348,6 +348,100 @@ fn cmp_max_min_match_ord() {
 }
 
 // ---------------------------------------------------------------------------
+// rotate_left/right (wrapping.rs model), to/from_{le,be}_bytes (bytes.rs byte_of),
+// NonZero::trailing_zeros, chunks_exact / chunks_exact_mut
+// ---------------------------------------------------------------------------
+
+/// `byte_of(x, i)` = `(x >> 8i) & 0xff`.
+fn byte_of(x: u128, i: u32) -> u8 {
+    ((x >> (8 * i)) & 0xff) as u8
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn rotate_matches_spec() {
+    let x: u32 = kani::any();
+    let n: u32 = kani::any();
+    let r = n % 32;
+    let left = if r == 0 { x } else { (x << r) | (x >> (32 - r)) };
+    let right = if r == 0 { x } else { (x >> r) | (x << (32 - r)) };
+    assert!(x.rotate_left(n) == left, "u32::rotate_left");
+    assert!(x.rotate_right(n) == right, "u32::rotate_right");
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn bytes_match_spec() {
+    let x: u32 = kani::any();
+    let le = x.to_le_bytes();
+    let be = x.to_be_bytes();
+    let mut i = 0u32;
+    while i < 4 {
+        assert!(le[i as usize] == byte_of(x as u128, i), "to_le_bytes");
+        assert!(be[i as usize] == byte_of(x as u128, 3 - i), "to_be_bytes");
+        i += 1;
+    }
+    let b: [u8; 4] = kani::any();
+    let f = u32::from_le_bytes(b);
+    let g = u32::from_be_bytes(b);
+    let mut i = 0u32;
+    while i < 4 {
+        assert!(byte_of(f as u128, i) == b[i as usize], "from_le_bytes");
+        assert!(byte_of(g as u128, 3 - i) == b[i as usize], "from_be_bytes");
+        i += 1;
+    }
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn nonzero_trailing_zeros_matches_primitive() {
+    let x: u64 = kani::any();
+    kani::assume(x != 0);
+    let nz = core::num::NonZeroU64::new(x).unwrap();
+    assert!(nz.trailing_zeros() == x.trailing_zeros(), "NonZero::trailing_zeros");
+    assert!(nz.leading_zeros() == x.leading_zeros(), "NonZero::leading_zeros");
+}
+
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(6)]
+fn chunks_exact_matches_spec() {
+    let (arr, len) = any_slice::<4>();
+    let k: usize = kani::any();
+    kani::assume(k >= 1 && k <= 5);
+    let s = &arr[..len];
+    let expected_count = s.len() / k;
+    let mut i = 0usize;
+    for c in s.chunks_exact(k) {
+        assert!(i < expected_count, "chunks_exact: more chunks than len / k");
+        assert!(c.len() == k, "chunks_exact: chunk length");
+        let mut j = 0usize;
+        while j < k {
+            assert!(c[j] == s[i * k + j], "chunks_exact: chunk i must equal s[i*k..(i+1)*k]");
+            j += 1;
+        }
+        i += 1;
+    }
+    assert!(i == expected_count, "chunks_exact: fewer chunks than len / k");
+    // chunks_exact_mut: writes reach exactly the full chunks; the remainder is untouched
+    let mut v: [u8; 4] = arr;
+    let orig = arr;
+    for c in v[..len].chunks_exact_mut(k) {
+        c[0] = 0xAA;
+    }
+    let mut j = 0usize;
+    while j < len {
+        let i = j / k;
+        if i < expected_count && j % k == 0 {
+            assert!(v[j] == 0xAA, "chunks_exact_mut: first byte of each full chunk written");
+        } else {
+            assert!(v[j] == orig[j], "chunks_exact_mut: other bytes untouched");
+        }
+        j += 1;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // std::io::_print / _eprint   (io.rs): no postcondition; the spec only claims
 // the call returns (it may panic on a failed write, which the spec does not
 // exclude: assume_specification without `no_unwind`). Nothing to falsify; a
@@ -448,6 +542,32 @@ mod tests {
             assert_eq!(c.is_ascii_digit(), '0' <= c && c <= '9');
             assert_eq!(c.is_ascii_hexdigit(), ('0' <= c && c <= '9') || ('a' <= c && c <= 'f') || ('A' <= c && c <= 'F'));
             assert_eq!(c.is_ascii_whitespace(), c == ' ' || c == '\t' || c == '\n' || c == '\u{C}' || c == '\r');
+        }
+    }
+
+    #[test]
+    fn rotate_bytes_chunks_exhaustive() {
+        for x in [0u32, 1, 0x8000_0000, 0xdead_beef, u32::MAX] {
+            for n in 0..70u32 {
+                let r = n % 32;
+                let left = if r == 0 { x } else { (x << r) | (x >> (32 - r)) };
+                assert_eq!(x.rotate_left(n), left);
+                let right = if r == 0 { x } else { (x >> r) | (x << (32 - r)) };
+                assert_eq!(x.rotate_right(n), right);
+            }
+            let le = x.to_le_bytes();
+            for i in 0..4u32 {
+                assert_eq!(le[i as usize], byte_of(x as u128, i));
+                assert_eq!(x.to_be_bytes()[i as usize], byte_of(x as u128, 3 - i));
+            }
+            assert_eq!(u32::from_le_bytes(le), x);
+        }
+        for s in all_slices(5) {
+            for k in 1..=6usize {
+                let got: Vec<Vec<u8>> = s.chunks_exact(k).map(|c| c.to_vec()).collect();
+                let exp: Vec<Vec<u8>> = (0..s.len() / k).map(|i| s[i * k..(i + 1) * k].to_vec()).collect();
+                assert_eq!(got, exp);
+            }
         }
     }
 
