@@ -545,3 +545,47 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] test_for_loop_by_mut_ref_leaves_facts_on_iterator verus_code! {
+        use vstd::prelude::*;
+        use vstd::std_specs::iter::IteratorSpec;
+
+        // `for x in &mut it` goes through core's blanket `impl Iterator for &mut I`.
+        // After the loop, `it` is exhausted and can be used again.
+        fn exhaust(v: &Vec<u8>) {
+            let mut iter = v.iter();
+            for x in &mut iter {
+            }
+            assert(IteratorSpec::remaining(&iter).len() == 0);
+            let n = iter.next();
+            assert(n.is_none());
+        }
+
+        // Partial consumption: break out early, then continue on the original iterator.
+        fn first_then_rest(v: &Vec<u8>)
+            requires v@.len() >= 2,
+        {
+            let mut iter = v.iter();
+            for x in it: &mut iter
+                invariant_except_break it.index() == 0,
+                invariant
+                    it.seq() == v@.as_ref(),
+                    IteratorSpec::remaining(it.iter) == it.seq().skip(it.index()),
+            {
+                proof { it.lemma_wf_remaining(); }
+                break;
+            }
+            // `iter` is the loop's iterator: what remains is a suffix of `v`
+            assert(IteratorSpec::remaining(&iter).len() <= v@.len());
+            let r = iter.next();
+        }
+
+        fn wrong(v: &Vec<u8>) {
+            let mut iter = v.iter();
+            for x in &mut iter {
+            }
+            assert(IteratorSpec::remaining(&iter).len() == v@.len()); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}

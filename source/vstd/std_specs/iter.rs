@@ -426,6 +426,21 @@ impl <I> IteratorSpecImpl for &mut I
     }
 }
 
+/// core's blanket `impl<I: Iterator + ?Sized> Iterator for &mut I` is `(**self).next()`: it
+/// advances the referent but keeps the reference itself, so the future (the value at the end
+/// of the borrow) of the stored `&mut I` is unchanged. The trait-level `next` contract still
+/// applies (through the forwarding `IteratorSpecImpl` above, so on the referent's current
+/// value). This is what lets `for x in &mut it { .. }` leave facts on `it` after the loop.
+pub assume_specification<'a, I: Iterator + ?Sized>[ <&'a mut I as Iterator>::next ](
+    r: &mut &'a mut I,
+) -> (ret: Option<I::Item>)
+    ensures
+        &*final(*final(r)) == &*final(*old(r)),
+        // the call is `I::next` on a reborrow of the referent
+        exists|m: &mut I| #![auto]
+            call_ensures(I::next, (m,), ret) && &*m == &**old(r) && &*final(m) == &**final(r),
+;
+
 /********************************************************************************
  * Definitions for `filter()`
  ********************************************************************************/
@@ -1122,6 +1137,25 @@ impl <I: Iterator> VerusForLoopWrapper<I> {
                 &&& self.history@.len() == self.index()
                 &&& forall |i| 0 <= i < self.index() ==> #[trigger] self.history@[i] == self.seq()[i]
             }
+    }
+
+    /// The underlying iterator's remaining elements are the loop's `seq()` from `index()`
+    /// on. This is part of `wf()` but kept closed there (it is only needed when the
+    /// iterator is used again after the loop, typically after a `break` out of a
+    /// `for x in &mut it` loop).
+    pub proof fn lemma_wf_remaining(self)
+        requires
+            self.wf(),
+        ensures
+            self.iter.remaining() =~= self.seq().skip(self.index()),
+    {
+        broadcast use group_seq_lemmas;
+        assert(self.wf_inner());
+        assert(self.iter.remaining().len() == self.seq().skip(self.index()).len());
+        assert forall|i: int| 0 <= i < self.iter.remaining().len() implies
+            #[trigger] self.iter.remaining()[i] == self.seq().skip(self.index())[i] by {
+            assert(self.iter.remaining()[i] == self.seq()[self.index() + i]);
+        }
     }
 
     /// Bundle the real iterator with its ghost state and loop invariants
