@@ -146,6 +146,7 @@ fn gen_typ(state: &mut State, typ: &vir::ast::Typ) -> Typ {
                 TypDecoration::Ghost => TypNum::Ghost,
                 TypDecoration::Tracked => TypNum::Tracked,
                 TypDecoration::Never => TypNum::Never,
+                TypDecoration::RefInv => panic!("RefInv is internal to VIR"),
                 TypDecoration::ConstPtr => TypNum::ConstPtr,
             };
             let mut ts = vec![t.clone()];

@@ -1052,6 +1052,9 @@ pub fn typ_to_diagnostic_str(typ: &Typ) -> String {
             };
             format!("{:?}<{}{}>", decoration, typ_to_diagnostic_str(typ), allocator)
         }
+        TypX::Decorate(TypDecoration::RefInv, _, typ) => {
+            format!("*{}", typ_to_diagnostic_str(typ))
+        }
         TypX::Decorate(TypDecoration::Never, _, _typ) => {
             format!("!")
         }

@@ -220,6 +220,7 @@ pub fn range_to_id(range: &IntRange) -> Expr {
 fn decoration_str(d: TypDecoration) -> &'static str {
     match d {
         TypDecoration::Ref => crate::def::DECORATE_REF,
+        TypDecoration::RefInv => crate::def::DECORATE_REF_INV,
         TypDecoration::Box => crate::def::DECORATE_BOX,
         TypDecoration::Rc => crate::def::DECORATE_RC,
         TypDecoration::Arc => crate::def::DECORATE_ARC,
@@ -2123,6 +2124,30 @@ fn stm_to_stmts_inner(ctx: &Ctx, state: &mut State, stm: &Stm) -> Result<Vec<Stm
                 req_args.push(exp_to_expr(ctx, arg, expr_ctxt)?);
             }
             let req_args = Arc::new(req_args);
+
+            // rustc has established the callee's associated-type equality bounds for this
+            // instantiation (`I::Item == &T` with `I := Iter<u8>`, `T := u8`); state them, so
+            // that the projection terms exist in the solver's ground terms. Without this,
+            // axioms about impls whose type parameter is fixed only through such a bound (the
+            // `Copied<I>::Item` axiom, or any `IteratorSpecImpl for Copied<I>`) never trigger:
+            // rustc resolves the projection before Verus sees it, and no term mentions it.
+            if func.x.typ_params.len() == typs.len() {
+                let typ_substs: std::collections::HashMap<crate::ast::Ident, Typ> =
+                    func.x.typ_params.iter().cloned().zip(typs.iter().cloned()).collect();
+                for bound in func.x.typ_bounds.iter() {
+                    if let crate::ast::GenericBoundX::TypEquality(..) = &**bound {
+                        let bound = crate::sst_util::subst_typ_in_bound(&typ_substs, bound);
+                        if let crate::ast::GenericBoundX::TypEquality(path, typ_args, name, typ) =
+                            &*bound
+                        {
+                            let e = crate::traits::typ_equality_bound_to_air(
+                                ctx, path, typ_args, name, typ,
+                            );
+                            stmts.push(Arc::new(StmtX::Assume(e)));
+                        }
+                    }
+                }
+            }
 
             if func.x.require.len() > 0
                 && (!ctx.checking_spec_preconditions_for_non_spec() || *mode == Mode::Spec)

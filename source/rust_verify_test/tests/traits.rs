@@ -4837,3 +4837,33 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_vir_error_msg(err, "Call to non-static function fails to satisfy `callee.requires(args)`")
 }
+
+test_verify_one_file! {
+    // A trait impl whose type parameter is fixed only through `Item = &T` (the shape of
+    // core's `impl Iterator for Copied<I>`): the associated type of the impl must be known
+    // to the solver at use sites. Call sites now assume the callee's instantiated
+    // associated-type equality bounds, and `T` is eliminated from the impl's axioms as the
+    // referent of the projection.
+    #[test] impl_typ_param_fixed_by_ref_projection verus_code! {
+        use vstd::prelude::*;
+        trait Src { type Item; spec fn item(&self) -> Self::Item; }
+        struct Own(u64);
+        impl Src for Own { type Item = u64; spec fn item(&self) -> u64 { self.0 } }
+        struct Deref2<S>(S);
+        impl<'a, S, T: 'a> Src for Deref2<S>
+            where S: Src<Item = &'a T>, T: Copy
+        {
+            type Item = T;
+            spec fn item(&self) -> T { *self.0.item() }
+        }
+        struct ByRef<'a>(&'a Own);
+        impl<'a> Src for ByRef<'a> { type Item = &'a u64; spec fn item(&self) -> &'a u64 { &self.0.0 } }
+        fn use_it<S: Src<Item = u64>>(s: &S) -> (r: u64) ensures r == s.item() { assume(false); 0 }
+        fn test(o: &Own) {
+            let d = Deref2(ByRef(o));
+            assert(d.item() == o.0);
+            let r = use_it(&d);
+            assert(r == o.0);
+        }
+    } => Ok(())
+}

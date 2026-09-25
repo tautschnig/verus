@@ -1558,15 +1558,29 @@ pub(crate) fn fix_missing_trigger_params(
     // First, look for variables A that can be eliminated from typ_params via substitution
     // (this is the good case where we can strictly improve the triggering)
     loop {
-        // Collect all candidates A for which an equality bound T(args)::X == A
+        // Collect all candidates A for which an equality bound T(args)::X == A,
+        // or T(args)::X == &A (then A is the referent of the projection: RefInv(T(args)::X)).
         // Compute free vars of args of all candidates
-        let mut candidates: Vec<(usize, Ident, (Path, Typs, Ident))> = Vec::new();
+        let mut candidates: Vec<(usize, Ident, bool, (Path, Typs, Ident))> = Vec::new();
         let mut candidate_free_vars: HashSet<Ident> = HashSet::new();
         for (i, bound) in typ_bounds.iter().enumerate() {
             if let GenericBoundX::TypEquality(path, args, assoc, typ) = &**bound {
-                if let TypX::TypParam(a) = &**typ {
+                let (a, through_ref) = match &**typ {
+                    TypX::TypParam(a) => (Some(a), false),
+                    TypX::Decorate(crate::ast::TypDecoration::Ref, None, inner) => match &**inner {
+                        TypX::TypParam(a) => (Some(a), true),
+                        _ => (None, false),
+                    },
+                    _ => (None, false),
+                };
+                if let Some(a) = a {
                     if typ_params.contains(a) && !already_in_trigger.contains(a) {
-                        let candidate = (i, a.clone(), (path.clone(), args.clone(), assoc.clone()));
+                        let candidate = (
+                            i,
+                            a.clone(),
+                            through_ref,
+                            (path.clone(), args.clone(), assoc.clone()),
+                        );
                         candidates.push(candidate);
                         for t in args.iter() {
                             crate::sst_util::free_vars_typ_insert(t, &mut candidate_free_vars);
@@ -1576,11 +1590,16 @@ pub(crate) fn fix_missing_trigger_params(
             }
         }
         // Pick an A that does not appear in candidate_free_vars
-        if let Some((i, a, g)) =
-            candidates.iter().find(|(_, a, _)| !candidate_free_vars.contains(a))
+        if let Some((i, a, through_ref, g)) =
+            candidates.iter().find(|(_, a, _, _)| !candidate_free_vars.contains(a))
         {
             let (trait_path, trait_typ_args, name) = g.clone();
-            let a_typ = Arc::new(TypX::Projection { trait_typ_args, trait_path, name });
+            let proj = Arc::new(TypX::Projection { trait_typ_args, trait_path, name });
+            let a_typ = if *through_ref {
+                Arc::new(TypX::Decorate(crate::ast::TypDecoration::RefInv, None, proj))
+            } else {
+                proj
+            };
 
             // Substitute to eliminate A
             Arc::make_mut(typ_params).retain(|p| p != a);

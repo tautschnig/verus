@@ -112,6 +112,7 @@ fn typ_node_resolvability(t: &Typ) -> NodeResolve {
             | TypDecoration::Arc
             | TypDecoration::Ghost
             | TypDecoration::Never
+            | TypDecoration::RefInv
             | TypDecoration::ConstPtr => NodeResolve::No,
             TypDecoration::Box | TypDecoration::Tracked => NodeResolve::TypArgDependent,
         },
