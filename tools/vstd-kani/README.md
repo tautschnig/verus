@@ -22,12 +22,34 @@ per-item skip reason for everything it does not translate
 `generate.py` module docstring; nothing is ever approximated.
 
 **56 harnesses generated**, all from `num.rs`. A full `cargo kani` run over the
-crate (generated + 19 hand-written) is **75 / 75 successful, 0 failures, 98 s
-total** (`( ulimit -v 16777216; timeout 2400 cargo kani --output-format terse )`;
-Kani 0.67.0). Every current vstd spec in the translatable subset agrees with real
-std — the expected oracle result, which confirms the translator introduces **no
-false disagreement**. (The historical-bug regression harnesses `r2603_*_old_*`
-and `r2674_old_*` still fire, so the #2603/#2674 catch is preserved.)
+crate (generated + 19 hand-written in `lib.rs` + 17 in `adaptors.rs`, 92 in all) with
+Kani 0.68.0 (CBMC 6.11.0) takes 647 s: **90 successful, 2 failures**, both in the
+`r2674` pair, explained below. Every other vstd spec in the translatable subset agrees
+with real std, which confirms the translator introduces **no false disagreement**; the
+historical-bug regression harnesses `r2603_*_old_*` still fire, so the #2603 catch is
+preserved. (Kani 0.67.0 on the earlier 75-harness crate: 75 / 75 in 98 s.)
+
+**Unwinding completeness.** No harness has a failing unwinding assertion: 23
+`unwinding assertion` checks exist (all in `adaptors.rs`, whose trip counts are
+symbolic) and all pass, so every loop is fully unrolled. What remains bounded is the
+*assumed input domain* of 11 harnesses (slice lengths ≤ 3–5, chunk/step sizes ≤ 5–6),
+a restriction of the statement checked, not of its check; 76 harnesses range over the
+full input type. See `verus-work.git/plan/12-kani-completeness.md` for the per-harness
+table.
+
+**Kani checks Kani's std, not Verus's.** Kani 0.68.0 bundles nightly-2026-08-21
+(rust-lang/rust `8925ea3`); Verus pins stable 1.98.1. Between the two,
+`RangeInclusive::next` changed (it now sets `exhausted` only on overflow), so after
+exhausting `1..=1`, `end_bound()` is `Excluded(1)` under 1.98.1 and `Included(1)` under
+the nightly. Consequently `r2674_new_spec_holds` (the vstd spec from #2687, correct for
+1.98.1) fails under Kani, and `r2674_old_spec_is_falsifiable` reports "no panic" because
+the pre-#2687 spec happens to be right for the newer std. The stock-`rustc` replay in
+this crate's `#[cfg(test)]` module runs under the pinned toolchain
+(`rustup run 1.98.1 cargo test`) and passes, and is the authoritative check for that
+spec. The general lesson, recorded in the soundness review (risk II.1, "nearby std"): a
+vstd spec that describes a representation detail of std (here the `exhausted` flag) is
+correct only for the pinned std, and the pin is part of the trusted base; when Verus
+moves its toolchain, #2687's spec must be revisited.
 
 ### Coverage over `num.rs`
 

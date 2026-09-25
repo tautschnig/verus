@@ -98,6 +98,12 @@ fn exhaust_and_end_bound(lo: u8, hi: u8) -> (Bound<u8>, u8) {
 }
 
 #[cfg(kani)]
+// NOTE (Kani 0.68.0): Kani's bundled std (nightly-2026-08-21) changed `RangeInclusive::next`
+// to set `exhausted` only on overflow, so `end_bound()` after exhausting `1..=1` is
+// `Included(1)` there, while it is `Excluded(1)` under the toolchain Verus pins (1.98.1).
+// Under Kani this harness therefore reports "no panic" and `r2674_new_spec_holds` fails.
+// The stock-rustc replay `replay_2674_old_spec_wrong_new_right` below, run under the
+// pinned toolchain, is the authoritative check. See README.md.
 #[kani::proof]
 #[kani::should_panic] // the pre-fix spec is wrong; this assertion must fail
 #[kani::unwind(4)]
