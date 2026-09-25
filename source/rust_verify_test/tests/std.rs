@@ -2224,3 +2224,38 @@ test_verify_one_file! {
     }
 }
 
+test_verify_one_file! {
+    #[test] test_cfg_macro_condition_prunes_dead_branch verus_code! {
+        use vstd::prelude::*;
+
+        // `if cfg!(..)` is a literal condition for the target being compiled: the dead
+        // branch is not verified (it may use functionality that is unsupported or only
+        // meaningful on the other target), like the body of a `#[cfg]`-disabled item.
+        fn tz(x: u64) -> (r: u64)
+            ensures r == x.trailing_zeros(),
+        {
+            if cfg!(target_arch = "arm") && 8 % 8 == 0 {
+                x.swap_bytes().leading_zeros() as u64 // no vstd spec for swap_bytes
+            } else {
+                x.trailing_zeros() as u64
+            }
+        }
+
+        fn live(x: u64) -> (r: u64)
+            ensures r == 1,
+        {
+            if !cfg!(target_arch = "arm") { 1 } else { x.swap_bytes() }
+        }
+
+        fn no_else() {
+            if cfg!(target_arch = "arm") { let _ = 1u64.swap_bytes(); }
+        }
+
+        fn wrong() -> (r: u64)
+            ensures r == 2, // FAILS
+        {
+            if cfg!(target_arch = "x86_64") || cfg!(target_arch = "aarch64") { 1 } else { 2 }
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+

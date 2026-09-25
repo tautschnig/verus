@@ -2216,6 +2216,46 @@ pub(crate) fn expr_cast_enum_int_to_vir<'tcx>(
     return Ok(mk_expr(ExprX::Match(place_vir, Arc::new(vir_arms), false))?);
 }
 
+/// The value of an `if` condition that is a `cfg!(..)` literal, possibly combined with
+/// `&&`, `||`, `!` and parentheses, where every literal comes from a `cfg!` expansion and
+/// short-circuiting makes the whole condition static (`cfg!(x) && e` is static when
+/// `cfg!(x)` is false). `None` when the condition is not static in this sense.
+fn static_cfg_condition<'tcx>(cond: &'tcx Expr<'tcx>) -> Option<bool> {
+    fn is_cfg_expansion(span: rustc_span::Span) -> bool {
+        let data = span.ctxt().outer_expn_data();
+        matches!(
+            data.kind,
+            rustc_span::hygiene::ExpnKind::Macro(rustc_span::hygiene::MacroKind::Bang, name)
+                if name == rustc_span::sym::cfg
+        )
+    }
+    fn go<'tcx>(e: &'tcx Expr<'tcx>) -> Option<bool> {
+        match &e.kind {
+            ExprKind::DropTemps(e) => go(e),
+            ExprKind::Lit(lit) => match lit.node {
+                rustc_ast::LitKind::Bool(b) if is_cfg_expansion(e.span) => Some(b),
+                _ => None,
+            },
+            ExprKind::Unary(UnOp::Not, e) => go(e).map(|b| !b),
+            ExprKind::Binary(op, l, r) => match op.node {
+                BinOpKind::And => match go(l) {
+                    Some(false) => Some(false),
+                    Some(true) => go(r),
+                    None => None,
+                },
+                BinOpKind::Or => match go(l) {
+                    Some(true) => Some(true),
+                    Some(false) => go(r),
+                    None => None,
+                },
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+    go(cond)
+}
+
 pub(crate) fn expr_to_vir_innermost<'tcx>(
     bctx: &BodyCtxt<'tcx>,
     expr: &Expr<'tcx>,
@@ -3241,6 +3281,20 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
                     )?)
                 }
                 _ => {
+                    // `if cfg!(..) { a } else { b }`: the condition is a literal for the
+                    // target being compiled, so one branch is dead code on this target (as
+                    // with `#[cfg]`). Do not verify it: it may use functionality that is only
+                    // meaningful, or only specified, on the other target.
+                    if let Some(b) = static_cfg_condition(cond) {
+                        let live: Option<&Expr> = if b { Some(*lhs) } else { *rhs };
+                        return match live {
+                            Some(e) => {
+                                let live = expr_to_vir_consume(bctx, e)?;
+                                mk_expr(ExprX::Block(Arc::new(Vec::new()), Some(live)))
+                            }
+                            None => mk_expr(ExprX::Block(Arc::new(Vec::new()), None)),
+                        };
+                    }
                     let vir_cond = expr_to_vir_consume(bctx, cond)?;
                     let vir_lhs = expr_to_vir_consume(bctx, lhs)?;
                     let vir_rhs = rhs.map(|e| expr_to_vir_consume(bctx, e)).transpose()?;
