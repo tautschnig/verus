@@ -17,7 +17,8 @@ pub fn layout_of_typ_supported(typ: &Typ, span: &Span) -> Result<(), VirErr> {
             | TypDecoration::Box
             | TypDecoration::Tracked
             | TypDecoration::Ghost
-            | TypDecoration::Never,
+            | TypDecoration::Never
+            | TypDecoration::RefInv,
             None,
             _,
         )

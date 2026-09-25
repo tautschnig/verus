@@ -213,6 +213,11 @@ pub enum IntRange {
 pub enum TypDecoration {
     /// &T
     Ref,
+    /// Internal only (never produced by the front end): the referent of a type known to be a
+    /// reference. Introduced by `traits::fix_missing_trigger_params` to eliminate a type
+    /// parameter `A` bound only by `Proj == &A`, as `A := RefInv(Proj)`. Its decoration is
+    /// `decorate_ref_inv(d)` with the prelude axiom `decorate_ref_inv(decorate_ref(d)) == d`.
+    RefInv,
     /// Box<T>
     /// This is complicated due to the Allocator type argument; see `TypDecorationArg`.
     Box,

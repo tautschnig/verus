@@ -79,6 +79,7 @@ impl ResolvedTypeCollection {
                     | TypDecoration::Arc
                     | TypDecoration::Ghost
                     | TypDecoration::Never
+                    | TypDecoration::RefInv
                     | TypDecoration::ConstPtr => {
                         // trivial resolve
                     }
