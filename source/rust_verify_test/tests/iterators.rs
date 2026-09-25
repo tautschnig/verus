@@ -563,22 +563,25 @@ test_verify_one_file! {
         }
 
         // Partial consumption: break out early, then continue on the original iterator.
-        fn first_then_rest(v: &Vec<u8>)
+        // (The loop is verified in isolation, so the precondition is restated as an invariant.)
+        fn first_then_rest(v: &Vec<u8>) -> (r: Option<&u8>)
             requires v@.len() >= 2,
+            ensures r matches Some(x) && *x == v@[1],
         {
             let mut iter = v.iter();
             for x in it: &mut iter
                 invariant_except_break it.index() == 0,
                 invariant
                     it.seq() == v@.as_ref(),
-                    IteratorSpec::remaining(it.iter) == it.seq().skip(it.index()),
+                    v@.len() >= 2,
+                ensures
+                    it.index() == 1,
+                    IteratorSpec::remaining(it.iter) == it.seq().skip(1),
             {
                 proof { it.lemma_wf_remaining(); }
                 break;
             }
-            // `iter` is the loop's iterator: what remains is a suffix of `v`
-            assert(IteratorSpec::remaining(&iter).len() <= v@.len());
-            let r = iter.next();
+            iter.next()
         }
 
         fn wrong(v: &Vec<u8>) {
