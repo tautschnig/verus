@@ -442,6 +442,36 @@ fn chunks_exact_matches_spec() {
 }
 
 // ---------------------------------------------------------------------------
+// Iterator::copied   (iter.rs: remaining == inner.remaining().map_values(|p| *p))
+// ---------------------------------------------------------------------------
+
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(7)]
+fn copied_matches_spec() {
+    let (arr, len) = any_slice::<5>();
+    let s = &arr[..len];
+    let mut i = 0usize;
+    for x in s.iter().copied() {
+        assert!(i < s.len(), "copied: more items than the slice");
+        assert!(x == s[i], "copied: item i equals s[i]");
+        i += 1;
+    }
+    assert!(i == s.len(), "copied: fewer items than the slice");
+    // memchr shapes: copied().skip(1) and rev().copied().skip(1)
+    let mut j = 1usize;
+    for x in s.iter().copied().skip(1) {
+        assert!(x == s[j], "copied.skip(1)");
+        j += 1;
+    }
+    let mut k = s.len();
+    for x in s.iter().rev().copied().skip(1) {
+        k -= 1;
+        assert!(x == s[k - 1], "rev.copied.skip(1)");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // std::io::_print / _eprint   (io.rs): no postcondition; the spec only claims
 // the call returns (it may panic on a failed write, which the spec does not
 // exclude: assume_specification without `no_unwind`). Nothing to falsify; a
@@ -568,6 +598,16 @@ mod tests {
                 let exp: Vec<Vec<u8>> = (0..s.len() / k).map(|i| s[i * k..(i + 1) * k].to_vec()).collect();
                 assert_eq!(got, exp);
             }
+        }
+    }
+
+    #[test]
+    fn copied_exhaustive() {
+        for s in all_slices(5) {
+            let got: Vec<u8> = s.iter().copied().collect();
+            assert_eq!(got, s);
+            let tail: Vec<u8> = s.iter().copied().skip(1).collect();
+            assert_eq!(tail, s.iter().skip(1).cloned().collect::<Vec<u8>>());
         }
     }
 

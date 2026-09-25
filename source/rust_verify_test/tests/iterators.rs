@@ -486,3 +486,62 @@ test_verify_one_file! {
         }
     } => Ok(())
 }
+
+test_verify_one_file! {
+    // `copied()` over a slice iterator, including the `skip(1)` and `rev()` shapes memchr uses
+    #[test] copied_spec verus_code! {
+        use vstd::prelude::*;
+        use vstd::std_specs::iter::IteratorSpec;
+        fn next_facts(v: &Vec<u8>) requires v@.len() >= 1 {
+            let mut c = v.iter().copied();
+            let ghost r0 = IteratorSpec::remaining(&c);
+            assert(r0.len() == v@.len());
+            let x = c.next();
+            assert(x == Some(r0[0]));
+            assert(IteratorSpec::remaining(&c) == r0.drop_first());
+        }
+        fn sum_copied(v: &Vec<u8>) -> (s: u64) requires v@.len() < 100, ensures s <= 255 * v@.len() {
+            let mut s: u64 = 0;
+            for x in it: v.iter().copied()
+                invariant v@.len() < 100, it.seq() =~= v@, s <= 255 * it.index(),
+            {
+                s = s + x as u64;
+            }
+            s
+        }
+        fn count_tail(needle: &[u8]) -> (n: usize)
+            requires needle@.len() >= 1, needle@.len() < 1000,
+            ensures n == needle@.len() - 1,
+        {
+            let mut n: usize = 0;
+            for b in it: needle.iter().copied().skip(1)
+                invariant needle@.len() < 1000, it.seq() == needle@.skip(1), n == it.index(),
+            {
+                n = n + 1;
+            }
+            n
+        }
+        fn hash_rev(needle: &[u8]) -> (h: u64) requires needle@.len() >= 1 {
+            let mut h: u64 = 0;
+            for b in it: needle.iter().rev().copied().skip(1)
+                invariant it.seq() == needle@.reverse().skip(1),
+            {
+                h = h.wrapping_add(b as u64);
+            }
+            h
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] copied_spec_wrong verus_code! {
+        use vstd::prelude::*;
+        use vstd::std_specs::iter::IteratorSpec;
+        fn wrong(v: &Vec<u8>) requires v@.len() >= 2 {
+            let mut c = v.iter().copied();
+            let ghost r0 = IteratorSpec::remaining(&c);
+            let x = c.next();
+            assert(x == Some(r0[1])); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}

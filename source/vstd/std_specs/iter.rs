@@ -2,7 +2,9 @@ use super::super::prelude::*;
 use super::super::seq::{
     group_seq_lemmas, lemma_seq_empty, lemma_seq_subrange_index, lemma_seq_subrange_len,
 };
-use core::iter::{Chain, Filter, FlatMap, FromIterator, Iterator, Rev, Skip, StepBy, Take, Zip};
+use core::iter::{
+    Chain, Copied, Filter, FlatMap, FromIterator, Iterator, Rev, Skip, StepBy, Take, Zip,
+};
 
 use verus as verus_skip_verusfmt;
 verus_skip_verusfmt! {
@@ -161,6 +163,16 @@ pub trait ExIterator {
             self.obeys_prophetic_iter_laws() ==>
                 self.will_return_none() &&
                 FromIteratorSpec::from_iter_ensures(self.remaining(), collection),
+    ;
+
+    // We can't provide the ensures directly here, since Rust doesn't think that Copied<Self> is an iterator
+    #[verifier::impls_cannot_extend_spec]
+    fn copied<'a, T>(self) -> (r: Copied<Self>)
+        where
+            Self: Sized + Iterator<Item = &'a T>,
+            T: 'a + Copy,
+        ensures
+            self.obeys_prophetic_iter_laws() ==> copied_post::<T, Self>(self, r),
     ;
 
     fn filter<P>(self, predicate: P) -> (r: core::iter::Filter<Self, P>)
@@ -628,6 +640,68 @@ impl <I> DoubleEndedIteratorSpecImpl for Rev<I>
 
     open spec fn peek_back(&self, index: int) -> Option<Self::Item> {
         rev_iter(*self).peek(index)
+    }
+}
+
+/********************************************************************************
+ * Definitions for `copied()`
+ ********************************************************************************/
+#[verifier::external_body]
+#[verifier::external_type_specification]
+#[verifier::reject_recursive_types(I)]
+pub struct ExCopied<I>(Copied<I>);
+
+// Ghost accessor for the inner iterator
+pub uninterp spec fn copied_iter<I>(c: Copied<I>) -> I;
+
+// Define Iter::copied's postcondition. `T` (the copied item type) is a type argument so that
+// the postcondition axiom can be triggered on it (it is fixed only by `I::Item == &T`).
+pub uninterp spec fn copied_post<T, I>(i: I, c: Copied<I>) -> bool;
+
+pub broadcast axiom fn copied_postcondition<'a, I, T: 'a>(i: I, r: Copied<I>)
+    where
+        I: IteratorSpec<Item = &'a T>,
+        T: Copy,
+    requires
+        i.obeys_prophetic_iter_laws(),
+        #[trigger] copied_post::<T, I>(i, r),
+    ensures
+        IteratorSpec::remaining(&r) == i.remaining().map_values(|p: &'a T| *p),
+        copied_iter(r) == i,
+        IteratorSpec::will_return_none(&r) <==> i.will_return_none(),
+        IteratorSpec::decrease(&r) is Some == i.decrease() is Some,
+;
+
+impl <'a, I, T: 'a> IteratorSpecImpl for Copied<I>
+    where I: Iterator<Item = &'a T>, T: Copy {
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool {
+        copied_iter(*self).obeys_prophetic_iter_laws()
+    }
+
+    #[verifier::prophetic]
+    uninterp spec fn remaining(&self) -> Seq<T>;
+
+    #[verifier::prophetic]
+    uninterp spec fn will_return_none(&self) -> bool;
+
+    uninterp spec fn decrease(&self) -> Option<nat>;
+
+    open spec fn peek(&self, index: int) -> Option<T> {
+        match copied_iter(*self).peek(index) {
+            Some(p) => Some(*p),
+            None => None,
+        }
+    }
+}
+
+impl <'a, I, T: 'a> DoubleEndedIteratorSpecImpl for Copied<I>
+    where I: DoubleEndedIteratorSpec<Item = &'a T>, T: Copy
+{
+    open spec fn peek_back(&self, index: int) -> Option<T> {
+        match copied_iter(*self).peek_back(index) {
+            Some(p) => Some(*p),
+            None => None,
+        }
     }
 }
 
@@ -1144,6 +1218,7 @@ pub broadcast group group_iter_axioms {
     filter_postcondition,
     take_postcondition,
     skip_postcondition,
+    copied_postcondition,
     step_by_postcondition,
     flat_map_postcondition,
     chain_postcondition,
