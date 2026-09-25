@@ -600,6 +600,41 @@ fn take_next_advances_inner_as_spec() {
 }
 
 // ---------------------------------------------------------------------------
+// Iterator::for_each   (iter.rs: f is applied to every remaining element; per-element
+// postconditions hold for all elements) — checked as: each element visited exactly once, in
+// order, and a mutation through `&mut` items reaches every element
+// ---------------------------------------------------------------------------
+
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(7)]
+fn for_each_visits_every_element_once_in_order() {
+    let (arr, len) = any_slice::<5>();
+    let s = &arr[..len];
+    let mut seen: [u8; 5] = [0; 5];
+    let mut count = 0usize;
+    // closure without captured mutation is what Verus can express; here the harness itself
+    // records the visit order through a mutable capture (allowed in plain Rust)
+    s.iter().for_each(|x| {
+        seen[count] = *x;
+        count += 1;
+    });
+    assert!(count == len, "for_each: exactly len calls");
+    let mut i = 0usize;
+    while i < len {
+        assert!(seen[i] == s[i], "for_each: elements in order");
+        i += 1;
+    }
+    let mut v: [u8; 5] = arr;
+    v[..len].iter_mut().for_each(|x| *x = 0);
+    let mut j = 0usize;
+    while j < 5 {
+        assert!(v[j] == if j < len { 0 } else { arr[j] }, "for_each over iter_mut: every element written");
+        j += 1;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Iterator::copied   (iter.rs: remaining == inner.remaining().map_values(|p| *p))
 // ---------------------------------------------------------------------------
 
@@ -862,6 +897,18 @@ mod tests {
                     assert_eq!(it.len(), a_s.len() - pos);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn for_each_exhaustive() {
+        for s in all_slices(5) {
+            let mut seen = Vec::new();
+            s.iter().for_each(|x| seen.push(*x));
+            assert_eq!(seen, s);
+            let mut v = s.clone();
+            v.iter_mut().for_each(|x| *x = 0);
+            assert!(v.iter().all(|x| *x == 0));
         }
     }
 
