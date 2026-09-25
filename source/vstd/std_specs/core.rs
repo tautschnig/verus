@@ -113,6 +113,48 @@ pub trait ExStructural {
     type ExternalTraitSpecificationFor: Structural;
 }
 
+/// `AsRef`/`AsMut` are accepted generically (a call through a bound has an unknown result,
+/// like `Deref`); the common concrete impls are specified below.
+#[verifier::external_trait_specification]
+pub trait ExAsRef<T: PointeeSized>: PointeeSized {
+    type ExternalTraitSpecificationFor: core::convert::AsRef<T>;
+
+    fn as_ref(&self) -> &T;
+}
+
+#[verifier::external_trait_specification]
+pub trait ExAsMut<T: PointeeSized>: PointeeSized {
+    type ExternalTraitSpecificationFor: core::convert::AsMut<T>;
+
+    fn as_mut(&mut self) -> &mut T;
+}
+
+pub assume_specification<T, const N: usize>[ <[T; N] as core::convert::AsRef<[T]>>::as_ref ](
+    a: &[T; N],
+) -> (r: &[T])
+    ensures
+        r@ == a@,
+;
+
+pub assume_specification<T, const N: usize>[ <[T; N] as core::convert::AsMut<[T]>>::as_mut ](
+    a: &mut [T; N],
+) -> (r: &mut [T])
+    ensures
+        r@ == old(a)@,
+        final(r)@ == final(a)@,
+;
+
+pub assume_specification<T>[ <[T] as core::convert::AsRef<[T]>>::as_ref ](s: &[T]) -> (r: &[T])
+    ensures
+        r@ == s@,
+;
+
+pub assume_specification<T>[ <[T] as core::convert::AsMut<[T]>>::as_mut ](s: &mut [T]) -> (r: &mut [T])
+    ensures
+        r@ == old(s)@,
+        final(r)@ == final(s)@,
+;
+
 // Since this trait involves the unstable library feature `const_destruct`,
 // we only enable it when verifying core
 #[cfg(verus_verify_core)]
