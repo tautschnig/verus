@@ -285,6 +285,19 @@ pub trait ExIterator {
         ensures
             self.obeys_prophetic_iter_laws() ==> zip_post(self, other, r),
     ;
+
+    /// `by_ref` is `self`: a reborrow of the iterator, so that adaptors can be applied
+    /// without consuming it (`it.by_ref().take(n)`, `a.by_ref().zip(b.by_ref())`). The
+    /// returned reference's current value is the iterator's, and what the reference is
+    /// advanced to is what the iterator becomes.
+    #[verifier::impls_cannot_extend_spec]
+    fn by_ref(&mut self) -> (r: &mut Self)
+        where
+            Self: Sized,
+        ensures
+            *r == *old(self),
+            *final(r) == *final(self),
+    ;
 }
 
 #[verifier::external_trait_specification]

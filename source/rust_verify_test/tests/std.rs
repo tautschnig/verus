@@ -2259,3 +2259,47 @@ test_verify_one_file! {
     } => Err(err) => assert_one_fails(err)
 }
 
+test_verify_one_file! {
+    #[test] test_iterator_by_ref_and_as_ref verus_code! {
+        use vstd::prelude::*;
+        use vstd::std_specs::iter::IteratorSpec;
+
+        // `by_ref()` is a reborrow: advancing it advances the original iterator
+        fn by_ref_then_rest(v: &Vec<u8>) -> (r: Option<&u8>)
+            requires v@.len() == 3,
+            ensures r matches Some(x) && *x == v@[2],
+        {
+            let mut it = v.iter();
+            {
+                let r = it.by_ref();
+                let a = r.next();
+                let b = r.next();
+            }
+            it.next()
+        }
+
+        // `AsRef<[T]>` for arrays and slices; generic `AsRef` bounds are accepted
+        fn as_ref_array(a: [u8; 4]) {
+            let s: &[u8] = a.as_ref();
+            assert(s@ == a@);
+            assert(s@.len() == 4);
+        }
+
+        fn as_ref_generic<B: AsRef<[u8]>>(b: B) -> usize {
+            b.as_ref().len()
+        }
+
+        fn as_mut_array(a: &mut [u8; 2])
+            ensures final(a)@[0] == 7,
+        {
+            let s: &mut [u8] = a.as_mut();
+            s[0] = 7;
+        }
+
+        fn wrong(a: [u8; 4]) {
+            let s: &[u8] = a.as_ref();
+            assert(s@.len() == 3); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
