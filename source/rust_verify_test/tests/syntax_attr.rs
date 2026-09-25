@@ -1016,7 +1016,11 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
-    #[test] test_no_verus_verify_attribute_on_impl_block_fails code!{
+    // `#[verus_verify]` on the method only (not on the impl block) used to fail here,
+    // because the return-value binding was typed through a call `test(a, b)` that has to
+    // be `Self::test(a, b)` inside an impl. With a concrete return type the binding is
+    // typed directly, so the impl-level attribute is not required.
+    #[test] test_no_verus_verify_attribute_on_impl_block code!{
         use vstd::prelude::*;
 
         pub struct Foo;
@@ -1035,7 +1039,7 @@ test_verify_one_file! {
                 1
             }
         }
-    } => Err(_) => {}
+    } => Ok(())
 }
 
 test_verify_one_file! {
@@ -1770,4 +1774,41 @@ test_verify_one_file! {
         #[verus_verify(external_body)]
         static MY_STATIC2: u64 = 0;
     } => Err(e) => assert_any_vir_error_msg(e, "#[verifier::external_body] doesn't make sense for this item type -- it is only applicable to functions and datatype declarations" )
+}
+
+test_verify_one_file! {
+    // `#[verus_verify]` on the method (not the impl block) with a named return value on an
+    // associated function: the return value is bound with its declared type, so the
+    // expansion does not need to know whether to write `f(..)` or `Self::f(..)`.
+    #[test] test_verus_spec_ret_binding_on_assoc_fn_per_method code! {
+        use vstd::prelude::*;
+
+        #[verus_verify]
+        #[derive(Clone, Copy)]
+        enum Level { A, B, C }
+
+        impl Level {
+            #[verus_verify]
+            #[verus_spec(r => ensures r.is_some() == (u <= 2))]
+            fn from_usize(u: usize) -> Option<Level> {
+                match u {
+                    0 => Some(Level::A),
+                    1 => Some(Level::B),
+                    2 => Some(Level::C),
+                    _ => None,
+                }
+            }
+
+            #[verus_verify]
+            #[verus_spec(r => ensures r.is_some())]
+            fn method(&self, u: usize) -> Option<Level> {
+                Some(*self)
+            }
+
+            #[verus_verify]
+            fn roundtrip(&self) -> Level {
+                Level::from_usize(*self as usize).unwrap()
+            }
+        }
+    } => Ok(())
 }

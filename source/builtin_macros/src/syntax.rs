@@ -1085,7 +1085,28 @@ impl Visitor {
                         }
                     }
                     if let Some(ty) = ret_ty {
-                        if is_closure {
+                        // With a concrete return type the return value can be bound with its
+                        // declared type. Only `impl Trait` return types need the type to be
+                        // recovered from a call to the function (below), and that call has
+                        // to be spelled differently inside and outside an impl (`Self::f`
+                        // vs `f`): the impl case is only known when `#[verus_verify]` is on
+                        // the impl block, so per-method `#[verus_verify]` on an associated
+                        // function would otherwise fail to resolve `f`.
+                        let has_impl_trait = {
+                            struct V(bool);
+                            impl<'ast> syn::visit::Visit<'ast> for V {
+                                fn visit_type_impl_trait(&mut self, _: &'ast syn::TypeImplTrait) {
+                                    self.0 = true;
+                                }
+                            }
+                            let mut v = V(false);
+                            match syn::parse2::<syn::Type>(ty.to_token_stream()) {
+                                Ok(t) => syn::visit::Visit::visit_type(&mut v, &t),
+                                Err(_) => v.0 = true, // unknown shape: keep the old encoding
+                            }
+                            v.0
+                        };
+                        if is_closure || !has_impl_trait {
                             // closures cannot return impl xxx so it's safe to
                             spec_stmts.push(Stmt::Expr(
                                 Expr::Verbatim(
