@@ -22,20 +22,20 @@ per-item skip reason for everything it does not translate
 `generate.py` module docstring; nothing is ever approximated.
 
 **56 harnesses generated**, all from `num.rs`. A full `cargo kani` run over the
-crate (generated + 19 hand-written in `lib.rs` + 17 in `adaptors.rs`, 92 in all) with
+crate (generated + 19 hand-written in `lib.rs` + 19 in `adaptors.rs`, 94 in all) with
 Kani 0.68.0 (CBMC 6.11.0) takes 647 s: **90 successful, 2 failures**, both in the
 `r2674` pair, explained below. Every other vstd spec in the translatable subset agrees
 with real std, which confirms the translator introduces **no false disagreement**; the
 historical-bug regression harnesses `r2603_*_old_*` still fire, so the #2603 catch is
 preserved. (Kani 0.67.0 on the earlier 75-harness crate: 75 / 75 in 98 s.)
 
-**Unwinding completeness.** No harness has a failing unwinding assertion: 23
+**Unwinding completeness.** No harness has a failing unwinding assertion: 27
 `unwinding assertion` checks exist (all in `adaptors.rs`, whose trip counts are
 symbolic) and all pass, so every loop is fully unrolled. What remains bounded is the
 *assumed input domain* of 11 harnesses (slice lengths ≤ 3–5, chunk/step sizes ≤ 5–6),
 a restriction of the statement checked, not of its check; 76 harnesses range over the
 full input type. See `verus-work.git/plan/12-kani-completeness.md` for the per-harness
-table.
+table. The two harnesses added on 2026-09-25 (`by_mut_ref_next_matches_direct_next` for the blanket `<&mut I as Iterator>::next` spec, `chunks_exact_mut_remainder_stable_under_next` for the `ChunksExactMut::next` accessor spec) pass with all four of their unwinding assertions SUCCESS.
 
 **Kani checks Kani's std, not Verus's.** Kani 0.68.0 bundles nightly-2026-08-21
 (rust-lang/rust `8925ea3`); Verus pins stable 1.98.1. Between the two,
