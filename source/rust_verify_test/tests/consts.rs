@@ -187,9 +187,39 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
-    #[test] spec_dual_mode_unsupported verus_code! {
+    // an unannotated `static` is `exec static`: usable in exec code, no facts about its
+    // value without `ensures`
+    #[test] unannotated_static_is_exec verus_code! {
+        use vstd::prelude::*;
+
         static E: u64 = 0;
-    } => Err(e) => assert_vir_error_msg(e, "explicitly mark the static as `exec`")
+        static RULES: &'static [(&'static str, u8)] = &[("a", 1), ("b", 2)];
+
+        fn find(name: &str) -> Option<u8> {
+            for (n, r) in RULES {
+                if *n == name { return Some(*r); }
+            }
+            None
+        }
+
+        fn test1() {
+            let a = &E;
+            let b = &E;
+            assert(a == b);
+        }
+
+        fn test2() {
+            let e = E;
+            assert(e == 0); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    #[test] unannotated_static_not_readable_in_spec verus_code! {
+        static E: u64 = 0;
+        spec fn f() -> u64 { E }
+    } => Err(e) => assert_vir_error_msg(e, "cannot read static with mode exec")
 }
 
 test_verify_one_file! {
@@ -710,4 +740,3 @@ test_verify_one_file! {
         const A: usize = ex();
     } => Err(err) => assert_vir_error_msg(err, "cannot call function `test_crate::ex` with mode exec")
 }
-

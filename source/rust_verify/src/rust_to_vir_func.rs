@@ -2919,15 +2919,11 @@ pub(crate) fn check_item_const_or_static<'tcx>(
 
     let mode_opt = crate::attributes::get_mode_opt(attrs);
     let (func_mode, body_mode, ret_mode) = if is_static {
-        // All statics are exec
-        // For consistency with const, require the user to mark it 'exec' explicitly
+        // All statics are exec. An unannotated `static` (as in unmodified Rust code) is
+        // treated as `exec static`; without an `ensures` clause nothing is known about
+        // its value.
         match mode_opt {
-            None => {
-                return err_span(
-                    span,
-                    "explicitly mark the static as `exec` and use an `ensures` clause",
-                );
-            }
+            None => {}
             Some(m) => {
                 if m != Mode::Exec {
                     return err_span(span, "a static item can only have mode `exec`");
