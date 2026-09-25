@@ -180,6 +180,37 @@ pub assume_specification<T>[ Option::<T>::unwrap_or ](option: Option<T>, default
     no_unwind
 ;
 
+// or, and
+#[verifier::inline]
+pub open spec fn spec_or<T>(option: Option<T>, optb: Option<T>) -> Option<T> {
+    match option {
+        Some(_) => option,
+        None => optb,
+    }
+}
+
+#[verifier::when_used_as_spec(spec_or)]
+pub assume_specification<T>[ Option::<T>::or ](option: Option<T>, optb: Option<T>) -> (r: Option<T>)
+    ensures
+        r == spec_or(option, optb),
+    no_unwind
+;
+
+#[verifier::inline]
+pub open spec fn spec_and<T, U>(option: Option<T>, optb: Option<U>) -> Option<U> {
+    match option {
+        Some(_) => optb,
+        None => None,
+    }
+}
+
+#[verifier::when_used_as_spec(spec_and)]
+pub assume_specification<T, U>[ Option::<T>::and ](option: Option<T>, optb: Option<U>) -> (r: Option<U>)
+    ensures
+        r == spec_and(option, optb),
+    no_unwind
+;
+
 // expect
 #[verifier::inline]
 pub open spec fn spec_expect<T>(option: Option<T>, msg: &str) -> T

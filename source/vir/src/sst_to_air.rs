@@ -2258,7 +2258,11 @@ fn stm_to_stmts_inner(ctx: &Ctx, state: &mut State, stm: &Stm) -> Result<Vec<Stm
 
             let typ_args: Vec<Expr> = typs.iter().flat_map(typ_to_ids).collect();
             let (has_ens, resolved_ens, ens_fun, ens_typ_args) = match resolved_method {
-                Some((res_fun, res_typs)) if ctx.funcs_with_ensure_predicate[res_fun] => {
+                Some((res_fun, res_typs))
+                    if *ctx.funcs_with_ensure_predicate.get(res_fun).unwrap_or_else(|| {
+                        panic!("no ensure-predicate entry for resolved method {:?}", res_fun)
+                    }) =>
+                {
                     // Use ens predicate for the statically-resolved function
                     let res_typ_args = res_typs.iter().flat_map(typ_to_ids).collect();
                     (true, true, res_fun, res_typ_args)

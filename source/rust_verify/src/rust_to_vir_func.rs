@@ -2179,9 +2179,10 @@ pub(crate) fn check_item_fn<'tcx>(
         func = fix_external_fn_specification_trait_method_decl_typs(sig.span, func)?;
     }
 
+    let mut derived_spec_fn: Option<vir::ast::Function> = None;
     if let Some(action) = autoderive_action {
         if let Some(body_hir_id) = body_hir_id {
-            crate::automatic_derive::modify_derived_item(
+            derived_spec_fn = crate::automatic_derive::modify_derived_item(
                 ctxt,
                 id,
                 &inputs,
@@ -2212,6 +2213,10 @@ pub(crate) fn check_item_fn<'tcx>(
     if let Some(f) = &autospec.new_func {
         state.insert_fun_warn_config(ctxt, &f.x.name, id);
         functions.push(f.clone());
+    }
+    if let Some(f) = derived_spec_fn {
+        state.insert_fun_warn_config(ctxt, &f.x.name, id);
+        functions.push(f);
     }
 
     if is_verus_spec { Ok(None) } else { Ok(Some(name)) }

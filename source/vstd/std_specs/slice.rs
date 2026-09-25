@@ -624,17 +624,44 @@ pub assume_specification<'a, T>[ <[T]>::chunks_exact_mut ](s: &'a mut [T], chunk
             ==> (*IteratorSpec::remaining(&c)[i])@ == old(s)@.subrange(i * chunk_size, (i + 1) * chunk_size)
                 && (*final(IteratorSpec::remaining(&c)[i]))@.len() == chunk_size,
         forall|j: int| #![trigger final(s)@[j]]
-            0 <= j < old(s)@.len() ==> final(s)@[j] == {
+            0 <= j < (spec_chunks_exact_count(old(s)@.len(), chunk_size as nat) * chunk_size)
+            ==> final(s)@[j] == {
                 let i = j / (chunk_size as int);
-                if i < IteratorSpec::remaining(&c).len() {
-                    (*final(IteratorSpec::remaining(&c)[i]))@[j - i * chunk_size]
-                } else {
-                    old(s)@[j]
-                }
+                (*final(IteratorSpec::remaining(&c)[i]))@[j - i * chunk_size]
             },
         IteratorSpec::obeys_prophetic_iter_laws(&c),
         IteratorSpec::will_return_none(&c),
         IteratorSpec::decrease(&c) is Some,
+        chunks_exact_mut_len(c) == old(s)@.len(),
+        chunks_exact_mut_size(c) == chunk_size,
+        // the remainder reference sees the tail: its initial contents, and its final contents
+        // reach the slice
+        (*chunks_exact_mut_remainder(c))@ == old(s)@.subrange(
+            (spec_chunks_exact_count(old(s)@.len(), chunk_size as nat) * chunk_size) as int,
+            old(s)@.len() as int,
+        ),
+        forall|j: int| #![trigger final(s)@[j]]
+            (spec_chunks_exact_count(old(s)@.len(), chunk_size as nat) * chunk_size) <= j < old(s)@.len()
+            ==> final(s)@[j] == (*final(chunks_exact_mut_remainder(c)))@[
+                j - (spec_chunks_exact_count(old(s)@.len(), chunk_size as nat) * chunk_size)],
+;
+
+/// The remainder of a `chunks_exact_mut` iteration: the trailing `len % k` elements the
+/// iterator does not yield. Ghost accessors for the slice the iterator was created over and
+/// the chunk size, fixed by `chunks_exact_mut`'s postcondition.
+pub uninterp spec fn chunks_exact_mut_len<'a, T>(c: ChunksExactMut<'a, T>) -> nat;
+
+pub uninterp spec fn chunks_exact_mut_size<'a, T>(c: ChunksExactMut<'a, T>) -> nat;
+
+/// The final contents of the remainder reach the slice through `into_remainder`'s result,
+/// like the chunks reach it through the yielded references.
+pub uninterp spec fn chunks_exact_mut_remainder<'a, T>(c: ChunksExactMut<'a, T>) -> &'a mut [T];
+
+pub assume_specification<'a, T>[ ChunksExactMut::<'a, T>::into_remainder ](c: ChunksExactMut<'a, T>) -> (r:
+    &'a mut [T])
+    ensures
+        r == chunks_exact_mut_remainder(c),
+        (*r)@.len() == chunks_exact_mut_len(c) % chunks_exact_mut_size(c),
 ;
 
 /***********************************************************************************************

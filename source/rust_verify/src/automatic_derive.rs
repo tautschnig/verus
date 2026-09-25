@@ -8,6 +8,7 @@ use vir::ast::{
     SpannedTyped, TypDecoration, TypX, UnaryOpr, UnfinalizedReadKind, VariantCheck, VirErr,
     VirErrAs,
 };
+use vir::def::Spanned;
 use vir::messages::WarningAllow;
 
 /// Traits with special handling
@@ -71,9 +72,9 @@ pub fn modify_derived_item<'tcx>(
     hir_id: HirId,
     action: &AutomaticDeriveAction,
     function: &mut FunctionX,
-) -> Result<(), VirErr> {
+) -> Result<Option<vir::ast::Function>, VirErr> {
     let AutomaticDeriveAction::Special(special) = action else {
-        return Ok(());
+        return Ok(None);
     };
     match special {
         SpecialTrait::Clone => {
@@ -82,7 +83,7 @@ pub fn modify_derived_item<'tcx>(
             }
         }
     }
-    Ok(())
+    Ok(None)
 }
 
 fn clone_add_post_condition<'tcx>(
@@ -92,7 +93,7 @@ fn clone_add_post_condition<'tcx>(
     span: Span,
     hir_id: HirId,
     functionx: &mut FunctionX,
-) -> Result<(), VirErr> {
+) -> Result<Option<vir::ast::Function>, VirErr> {
     let mut adt_did: Option<rustc_span::def_id::DefId> = None;
     if inputs.len() >= 1 {
         use rustc_middle::ty::{AdtDef, TyKind};
@@ -126,17 +127,17 @@ fn clone_add_post_condition<'tcx>(
     };
 
     let Some(body) = &functionx.body else {
-        return Ok(());
+        return Ok(None);
     };
 
     if functionx.ensure.0.len() != 0 {
         warn_unexpected();
-        return Ok(());
+        return Ok(None);
     }
 
     let ExprX::Block(_stmts, Some(last_expr)) = &body.x else {
         warn_unexpected();
-        return Ok(());
+        return Ok(None);
     };
 
     // `self` as a spec value (the referent of the &self parameter) and the return value.
@@ -145,7 +146,7 @@ fn clone_add_post_condition<'tcx>(
         TypX::Decorate(TypDecoration::Ref, _, t) => t.clone(),
         _ => {
             warn_unexpected();
-            return Ok(());
+            return Ok(None);
         }
     };
     let self_place = SpannedTyped::new(
@@ -163,7 +164,12 @@ fn clone_add_post_condition<'tcx>(
             UnfinalizedReadKind { preliminary_kind: ReadKind::Copy, id: 0 },
         ),
     );
-    let ret_var =
+    // Inside the synthesized predicate the clone result is a parameter named `clone_result`;
+    // the method's own `ensures` passes its return value for it.
+    let ret_spec_name =
+        vir::ast_util::str_unique_var("clone_result", vir::ast::VarIdentDisambiguate::AirLocal);
+    let ret_var = SpannedTyped::new(&last_expr.span, &self_typ, ExprX::Var(ret_spec_name.clone()));
+    let method_ret_var =
         SpannedTyped::new(&last_expr.span, &self_typ, ExprX::Var(functionx.ret.x.name.clone()));
 
     let ensure = match &last_expr.x {
@@ -176,7 +182,7 @@ fn clone_add_post_condition<'tcx>(
             ),
             _ => {
                 warn_unexpected();
-                return Ok(());
+                return Ok(None);
             }
         },
         // struct: `S { f: Clone::clone(&self.f), .. }`
@@ -186,7 +192,7 @@ fn clone_add_post_condition<'tcx>(
                 fieldwise_cloned(ctxt, &last_expr.span, dt, variant, binders, &self_val, &ret_var)
             else {
                 warn_unsupported();
-                return Ok(());
+                return Ok(None);
             };
             vir::ast_util::conjoin(&last_expr.span, &conjuncts)
         }
@@ -197,7 +203,7 @@ fn clone_add_post_condition<'tcx>(
             for arm in arms.iter() {
                 let ExprX::Ctor(dt, variant, binders, None) = &arm.x.body.x else {
                     warn_unsupported();
-                    return Ok(());
+                    return Ok(None);
                 };
                 let Some(fields) = fieldwise_cloned(
                     ctxt,
@@ -209,7 +215,7 @@ fn clone_add_post_condition<'tcx>(
                     &ret_var,
                 ) else {
                     warn_unsupported();
-                    return Ok(());
+                    return Ok(None);
                 };
                 let is_variant = |e: &Expr| {
                     SpannedTyped::new(
@@ -234,23 +240,140 @@ fn clone_add_post_condition<'tcx>(
         }
         _ => {
             warn_unexpected();
-            return Ok(());
+            return Ok(None);
         }
     };
 
     let ensure = cleanup_span_ids(ctxt, span, hir_id, &ensure);
-    functionx.ensure.0 = Arc::new(vec![ensure]);
-    // The postcondition names the datatype's fields, which a public function's `ensures` may not
-    // do for a datatype that is not itself public. rustc marks the derived impl method public,
-    // but nothing outside the datatype's visibility can name the type, let alone call its
-    // clone, so restricting the function to the datatype's visibility loses nothing.
+
+    // The fieldwise postcondition names the datatype's fields, which a public method's
+    // `ensures` may not do when some field is not public. So the postcondition is a call to
+    // a synthesized `closed spec fn clone_spec(self, ret)` whose body is the fieldwise
+    // conjunction: the predicate is well-formed everywhere, and its body is visible exactly
+    // where the fields are (the datatype's transparency: the join of the datatype's visibility
+    // with its fields'). Callers outside that scope get an opaque fact, which is all they could
+    // use anyway; callers inside see the fields.
+    let mut body_vis = functionx.visibility.clone();
     if let Some(adt_did) = adt_did {
-        let dt_vis = crate::rust_to_vir_base::mk_visibility(ctxt, adt_did);
-        if dt_vis.at_least_as_restrictive_as(&functionx.visibility) {
-            functionx.visibility = dt_vis;
+        body_vis = body_vis.join(&crate::rust_to_vir_base::mk_visibility(ctxt, adt_did));
+        let adt_def = ctxt.tcx.adt_def(adt_did);
+        for variant in adt_def.variants().iter() {
+            for field in variant.fields.iter() {
+                body_vis = body_vis
+                    .join(&crate::rust_to_vir_base::mk_visibility_from_vis(ctxt, field.vis));
+            }
         }
     }
-    Ok(())
+    let spec_name = Arc::new(vir::ast::FunX {
+        path: functionx.name.path.pop_segment().push_segment(Arc::new("clone_spec".to_string())),
+    });
+    let mk_spec_param = |p: &vir::ast::Param| {
+        Spanned::new(
+            p.span.clone(),
+            vir::ast::ParamX {
+                name: p.x.name.clone(),
+                typ: p.x.typ.clone(),
+                mode: Mode::Spec,
+                unwrapped_info: None,
+                user_mut: false,
+            },
+        )
+    };
+    let ret_spec_param = Spanned::new(
+        functionx.ret.span.clone(),
+        vir::ast::ParamX {
+            name: ret_spec_name.clone(),
+            typ: functionx.ret.x.typ.clone(),
+            mode: Mode::Spec,
+            unwrapped_info: None,
+            user_mut: false,
+        },
+    );
+    let bool_ret = Spanned::new(
+        functionx.ret.span.clone(),
+        vir::ast::ParamX {
+            name: vir::ast_util::air_unique_var(vir::def::RETURN_VALUE),
+            typ: vir::ast_util::bool_typ(),
+            mode: Mode::Spec,
+            unwrapped_info: None,
+            user_mut: false,
+        },
+    );
+    let spec_fn = ctxt.spanned_new(
+        span,
+        FunctionX {
+            name: spec_name.clone(),
+            proxy: None,
+            kind: vir::ast::FunctionKind::Static,
+            visibility: functionx.visibility.clone(),
+            body_visibility: vir::ast::BodyVisibility::Visibility(body_vis.clone()),
+            opaqueness: vir::ast::Opaqueness::Revealed { visibility: body_vis },
+            owning_module: functionx.owning_module.clone(),
+            mode: Mode::Spec,
+            typ_params: functionx.typ_params.clone(),
+            typ_bounds: functionx.typ_bounds.clone(),
+            params: Arc::new(vec![mk_spec_param(self_param), ret_spec_param]),
+            ret: bool_ret,
+            ens_has_return: true,
+            require: Arc::new(vec![]),
+            ensure: (Arc::new(vec![]), Arc::new(vec![])),
+            returns: None,
+            decrease: Arc::new(vec![]),
+            decrease_when: None,
+            decrease_by: None,
+            fndef_axioms: None,
+            mask_spec: None,
+            atomic_update: None,
+            unwind_spec: None,
+            item_kind: vir::ast::ItemKind::Function,
+            attrs: Default::default(),
+            body: Some(ensure),
+            extra_dependencies: vec![],
+            async_ret: None,
+        },
+    );
+    // ensures clone_spec(self, ret)
+    let self_arg = SpannedTyped::new(
+        &last_expr.span,
+        &self_param.x.typ,
+        ExprX::ReadPlace(
+            SpannedTyped::new(
+                &last_expr.span,
+                &self_param.x.typ,
+                PlaceX::Local(self_param.x.name.clone()),
+            ),
+            UnfinalizedReadKind { preliminary_kind: ReadKind::Copy, id: 0 },
+        ),
+    );
+    let call = SpannedTyped::new(
+        &last_expr.span,
+        &vir::ast_util::bool_typ(),
+        ExprX::Call {
+            target: CallTarget::Fun(
+                vir::ast::CallTargetKind::Static,
+                spec_name,
+                Arc::new(
+                    functionx
+                        .typ_params
+                        .iter()
+                        .map(|x| Arc::new(TypX::TypParam(x.clone())))
+                        .collect(),
+                ),
+                Arc::new(vec![]),
+                vir::ast::CallTargetAttrs {
+                    autospec: vir::ast::AutospecUsage::IfMarked,
+                    const_var: false,
+                    assume_external_allowed: false,
+                },
+            ),
+            args: Arc::new(vec![self_arg, method_ret_var]),
+            post_args: None,
+            body: None,
+        },
+    );
+    let call = cleanup_span_ids(ctxt, span, hir_id, &call);
+    functionx.ensure.0 = Arc::new(vec![call]);
+    Ok(Some(spec_fn))
 }
 
 /// For a derived clone body `V { f: Clone::clone(&self.f) | *self.f, .. }`, the conjuncts

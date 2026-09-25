@@ -2098,3 +2098,26 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    // A derived Clone on a `pub struct` with private fields: the fieldwise specification is a
+    // closed spec fn whose body is visible only where the fields are; other modules see the
+    // opaque predicate and can still call `clone` (and resolve it through the trait).
+    #[test] derive_clone_private_fields_cross_module verus_code! {
+        use vstd::prelude::*;
+        mod m {
+            use vstd::prelude::*;
+            #[derive(Clone, Copy, PartialEq, Eq)]
+            pub(crate) enum Symbol { A, B }
+            #[derive(Clone)]
+            pub struct GP { table: [u8; 64], pub(crate) padding: Symbol, n: u32 }
+            impl GP {
+                pub fn dup(&self) -> (r: GP) { self.clone() }
+                fn dup2(&self) -> (r: GP) ensures r.padding == self.padding, r.n == self.n { self.clone() }
+            }
+        }
+        fn use_it(g: &m::GP) -> (r: m::GP) { g.dup() }
+        fn clone_it(g: &m::GP) -> (r: m::GP) { g.clone() }
+    } => Ok(())
+}
+
