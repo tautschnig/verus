@@ -4143,6 +4143,21 @@ impl Visitor {
             #[verus::internal(auto_decreases)]
             #vstd::prelude::is_variant(#vstd::std_specs::iter::IteratorSpec::decrease(&#x_iter_name.iter), "Some")
         ));
+        // `for x in &mut it { .. }` iterates through core's blanket `impl Iterator for &mut I`.
+        // The wrapper's `iter` is then a `&mut I` whose future (the value `it` takes when
+        // the borrow ends) is fixed by the borrow; the loop keeps it, so state it as an
+        // invariant, otherwise nothing is known about `it` after the loop. The snapshot
+        // holds the initial `&mut I` value, including that future.
+        let by_ref_inv: Option<Expr> = match &*expr {
+            Expr::Reference(r) if r.mutability.is_some() => {
+                Some(Expr::Verbatim(quote_spanned_vstd!(vstd, expr.span() =>
+                    #vstd::prelude::spec_eq(
+                        &*#vstd::prelude::final_(#x_iter_name.iter),
+                        &*#vstd::prelude::final_(#x_iter_name.snapshot.view()))
+                )))
+            }
+            _ => None,
+        };
         let invariant_for = if let Some(mut invariant) = invariant {
             for inv in &mut invariant.exprs.exprs {
                 *inv = Expr::Verbatim(quote_spanned_vstd!(vstd, inv.span() => {
@@ -4154,10 +4169,17 @@ impl Visitor {
             if no_loop_invariant.is_none() {
                 invariant.exprs.exprs.insert(0, init_inv);
                 invariant.exprs.exprs.insert(1, wf_inv);
+                if let Some(inv) = by_ref_inv.clone() {
+                    invariant.exprs.exprs.insert(2, inv);
+                }
             }
             Some(Invariant { token: Token![invariant](span), exprs: invariant.exprs })
         } else if no_loop_invariant.is_none() {
-            Some(parse_quote_spanned!(span => invariant #init_inv, #wf_inv,))
+            if let Some(inv) = by_ref_inv.clone() {
+                Some(parse_quote_spanned!(span => invariant #init_inv, #wf_inv, #inv,))
+            } else {
+                Some(parse_quote_spanned!(span => invariant #init_inv, #wf_inv,))
+            }
         } else {
             None
         };
@@ -4207,6 +4229,12 @@ impl Visitor {
                     #vstd::std_specs::iter::IteratorSpec::will_return_none(&#x_iter_name.snapshot.view()),
                     #[verus::internal(auto_loop_ensures)]
                     #vstd::prelude::spec_eq(#x_iter_name.index.view(), #x_iter_name.seq().len()),
+                    // the underlying iterator is exhausted (follows from wf(); stated so that a
+                    // by-reference iteration, `for x in &mut it`, leaves the fact on `it`)
+                    #[verus::internal(auto_loop_ensures)]
+                    #vstd::prelude::imply(
+                        #vstd::std_specs::iter::IteratorSpec::obeys_prophetic_iter_laws(&#x_iter_name.iter),
+                        #vstd::prelude::spec_eq(#vstd::std_specs::iter::IteratorSpec::remaining(&#x_iter_name.iter).len(), 0)),
                     true,
             );
             if let Some(user_ensures) = ensures {
