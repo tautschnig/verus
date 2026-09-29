@@ -1815,20 +1815,27 @@ pub(crate) fn check_item_fn<'tcx>(
         Some(&mut *ctxt.diagnostics.borrow_mut()),
     )?;
 
+    // Parameters written as `_` or as a destructuring pattern (`(a, b): (A, B)`,
+    // `&(x, y): &(X, Y)`, `S { f, .. }: S`) get a hidden VIR parameter; the pattern is
+    // bound from it by `let pat = hidden;` at the start of the body, after the header, and
+    // the spec clauses are wrapped in the same declarations (as for closure parameters).
+    let mut param_patterns: Vec<(usize, VarIdent, &rustc_hir::Pat<'tcx>)> = Vec::new();
     let params: Vec<(VarIdent, Span, Option<HirId>, bool)> = match body_id {
         CheckItemFnEither::BodyId(body_id) => {
             let body = find_body(ctxt, body_id);
             let Body { params, value: _ } = body;
             let mut ps = Vec::new();
-            for Param { hir_id, pat, ty_span: _, span } in params.iter() {
-                // Check the parameter's pattern is a plain identifier (e.g., `x: T`).
-                // VIR expects each param to be associated with exactly one identifier so complex params
-                // (e.g., `(x, y): T` or `_: T` or `a @ b: T`) are unsupported
+            for (idx, Param { hir_id, pat, ty_span: _, span }) in params.iter().enumerate() {
                 if !matches!(pat.kind, rustc_hir::PatKind::Binding(_, _, _, None)) {
-                    return err_span(
-                        *span,
-                        "function parameters must be a plain identifier pattern (e.g. `x: T` or `mut x: T`)",
+                    let name = vir::ast_util::str_unique_var(
+                        "%param",
+                        vir::ast::VarIdentDisambiguate::RustcId(pat.hir_id.local_id.index()),
                     );
+                    if !matches!(pat.kind, rustc_hir::PatKind::Wild) {
+                        param_patterns.push((idx, name.clone(), pat));
+                    }
+                    ps.push((name, *span, Some(*hir_id), false));
+                    continue;
                 }
                 let (is_mut_var, name) = pat_to_mut_var(pat)?;
                 // is_mut_var: means a parameter is like `mut x: X`
@@ -2318,8 +2325,70 @@ pub(crate) fn finish_function<'tcx>(
                 is_async,
                 false,
             )?;
-            let header =
+            let mut header =
                 vir::headers::read_header(&mut vir_body, &vir::headers::HeaderAllows::All)?;
+            if !param_patterns.is_empty() {
+                let bctx = mk_bctx(
+                    ctxt,
+                    id,
+                    body_id,
+                    mode,
+                    external_body,
+                    &external_trait_from_to,
+                    migrate_postcondition_vars.clone(),
+                    vir_params.iter().map(|p| p.x.name.clone()).collect(),
+                    assume_specification_opaque_type_map.clone(),
+                );
+                let mut decls: Vec<vir::ast::Stmt> = Vec::new();
+                for (idx, name, pat) in param_patterns.iter() {
+                    let param = &vir_params[*idx];
+                    let pattern = crate::rust_to_vir_expr::pattern_to_vir(&bctx, pat)?;
+                    if let Some(span) = vir::patterns::pattern_find_mut_binding(&pattern) {
+                        return Err(vir::messages::error(
+                            &span,
+                            "mutable-reference bindings in function parameter patterns are not supported",
+                        ));
+                    }
+                    let init = bctx.spanned_typed_new(
+                        pat.span,
+                        &param.x.typ,
+                        vir::ast::PlaceX::Local(name.clone()),
+                    );
+                    // the generated initializer has no source HIR node
+                    ctxt.erasure_info.borrow_mut().hir_vir_ids.push((None, init.span.id));
+                    decls.push(bctx.spanned_new(
+                        pat.span,
+                        vir::ast::StmtX::Decl {
+                            pattern,
+                            mode: Some((param.x.mode, vir::ast::DeclProph::Default)),
+                            init: Some(init),
+                            els: None,
+                            assert_irrefutable: false,
+                        },
+                    ));
+                }
+                let wrap = |e: &vir::ast::Expr| -> vir::ast::Expr {
+                    ctxt.spanned_typed_new_vir(
+                        &e.span,
+                        &e.typ,
+                        vir::ast::ExprX::Block(
+                            ctxt.clone_stmts_with_fresh_ids(&decls),
+                            Some(e.clone()),
+                        ),
+                    )
+                };
+                let wrap_all =
+                    |es: &vir::ast::Exprs| Arc::new(es.iter().map(|e| wrap(e)).collect());
+                header.require = wrap_all(&header.require);
+                header.recommend = wrap_all(&header.recommend);
+                header.ensure = (wrap_all(&header.ensure.0), wrap_all(&header.ensure.1));
+                header.decrease = wrap_all(&header.decrease);
+                vir_body = ctxt.spanned_typed_new_vir(
+                    &vir_body.span,
+                    &vir_body.typ,
+                    vir::ast::ExprX::Block(Arc::new(decls), Some(vir_body.clone())),
+                );
+            }
             (Some(vir_body), header, Some(body.value.hir_id))
         }
         CheckItemFnEither::ParamNames(_params) => {

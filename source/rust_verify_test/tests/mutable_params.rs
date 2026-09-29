@@ -589,39 +589,67 @@ test_verify_one_file_with_options! {
 }
 
 // https://github.com/verus-lang/verus/issues/1933
-// An ident subpattern (`a @ b: T`) in parameter position used to silently
-// register only the outer name (`a`), leaving `b` unregistered - referencing
-// `b` in the body then panicked in mode-checking instead of being rejected
-// here with a clear error.
+// An ident subpattern (`a @ b: T`) in parameter position used to register only
+// the outer name. Non-identifier parameter patterns are now bound from a hidden
+// parameter by `let pat = param;` at the start of the body, so every name the
+// pattern binds is registered.
 test_verify_one_file_with_options! {
-    #[test] ident_subpattern_in_param_position_rejected_not_panicking [] => verus_code! {
-        fn double(a @ b: i32) -> i32 { a + b }
-    } => Err(err) => assert_vir_error_msg(err, "plain identifier pattern")
-}
+    #[test] ident_subpattern_in_param_position [] => verus_code! {
+        fn double(a @ b: i32) -> (r: i32)
+            requires -1000 < a < 1000,
+            ensures r == 2 * a,
+        {
+            a + b
+        }
 
-// A more useful shape than the plain identifier-alias repro above: the
-// subpattern here is a real destructure (`(a, b)`), not just another name -
-// this hits the same underlying bug (pat_to_mut_var silently drops the
-// subpattern regardless of what it is), so it must be rejected the same way
-// rather than only handling the trivial ident-only case from the issue.
-test_verify_one_file_with_options! {
-    #[test] tuple_destructure_at_pattern_in_param_position_rejected_not_panicking [] => verus_code! {
-        fn process(whole @ (a, b): (i32, i32)) -> i32 { a + b + whole.0 }
-    } => Err(err) => assert_vir_error_msg(err, "plain identifier pattern")
-}
-
-// Not just `@` patterns - the check is a positive allow-list (plain
-// identifier only), so ordinary destructuring/wildcard patterns in
-// parameter position are rejected the same way, with the same clear error,
-// rather than relying on pat_to_mut_var's own separate catch-all.
-test_verify_one_file_with_options! {
-    #[test] tuple_pattern_in_param_position_rejected [] => verus_code! {
-        fn add_pair((a, b): (i32, i32)) -> i32 { a + b }
-    } => Err(err) => assert_vir_error_msg(err, "plain identifier pattern")
+        fn process(whole @ (a, b): (i32, i32)) -> (r: i32)
+            requires 0 <= a < 10, 0 <= b < 10,
+            ensures r == a + b + whole.0,
+        {
+            a + b + whole.0
+        }
+    } => Ok(())
 }
 
 test_verify_one_file_with_options! {
-    #[test] wildcard_pattern_in_param_position_rejected [] => verus_code! {
-        fn ignore_arg(_: i32) -> i32 { 0 }
-    } => Err(err) => assert_vir_error_msg(err, "plain identifier pattern")
+    #[test] pattern_params [] => verus_code! {
+        struct M;
+        trait L { fn enabled(&self, m: &M) -> bool; }
+        struct Nop;
+        impl L for Nop { fn enabled(&self, _: &M) -> bool { false } }
+
+        fn ignore_arg(_: i32) -> (r: i32) ensures r == 0 { 0 }
+        fn add_pair((a, b): (i32, i32)) -> (r: i32)
+            requires 0 <= a < 10, 0 <= b < 10,
+            ensures r == a + b,
+        {
+            a + b
+        }
+        fn first(&(a, b): &(u32, u32)) -> (r: u32) requires a < 10 ensures r == a { a }
+        fn mut_in_pattern((x, mut y): (u32, u32)) -> (r: u32) ensures r == x { y = x; y }
+        struct P { u: u64, v: u64 }
+        fn field(P { u, .. }: P) -> (r: u64) ensures r == u { u }
+        spec fn sum((a, b): (int, int)) -> int { a + b }
+        proof fn sum_lemma((a, b): (int, int)) ensures sum((a, b)) == a + b {}
+
+        fn caller() {
+            let r = first(&(3, 4));
+            assert(r == 3);
+            let s = add_pair((1, 2));
+            assert(s == 3);
+            assert(sum((1, 2)) == 3);
+        }
+
+        fn wrong(&(a, b): &(u32, u32)) -> (r: u32)
+            ensures r == b, // FAILS
+        {
+            a
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file_with_options! {
+    #[test] pattern_param_mut_ref_binding_rejected [] => verus_code! {
+        fn f((a, ref mut b): (u32, u32)) { *b = a; }
+    } => Err(err) => assert_vir_error_msg(err, "mutable-reference bindings in function parameter patterns")
 }
