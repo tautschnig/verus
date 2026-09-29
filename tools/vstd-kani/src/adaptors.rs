@@ -635,6 +635,27 @@ fn for_each_visits_every_element_once_in_order() {
 }
 
 // ---------------------------------------------------------------------------
+// <[T; N] as IntoIterator>::into_iter   (array.rs: remaining == a@, yielded in order;
+// peek_back reverses)
+// ---------------------------------------------------------------------------
+
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(6)]
+fn array_into_iter_yields_elements_in_order() {
+    let a: [u8; 4] = kani::any();
+    let mut it = a.into_iter();
+    let mut i = 0usize;
+    while i < 4 {
+        assert!(it.next() == Some(a[i]), "array IntoIter: i-th element");
+        i += 1;
+    }
+    assert!(it.next().is_none(), "array IntoIter: exhausted after N");
+    let mut back = a.into_iter();
+    assert!(back.next_back() == Some(a[3]), "array IntoIter: next_back is the last");
+}
+
+// ---------------------------------------------------------------------------
 // Iterator::copied   (iter.rs: remaining == inner.remaining().map_values(|p| *p))
 // ---------------------------------------------------------------------------
 
@@ -909,6 +930,16 @@ mod tests {
             let mut v = s.clone();
             v.iter_mut().for_each(|x| *x = 0);
             assert!(v.iter().all(|x| *x == 0));
+        }
+    }
+
+    #[test]
+    fn array_into_iter_exhaustive() {
+        for a in [[0u8, 1, 2, 3], [9, 9, 9, 9], [3, 1, 4, 1]] {
+            let got: Vec<u8> = a.into_iter().collect();
+            assert_eq!(got, a.to_vec());
+            let back: Vec<u8> = a.into_iter().rev().collect();
+            assert_eq!(back, a.iter().rev().cloned().collect::<Vec<u8>>());
         }
     }
 

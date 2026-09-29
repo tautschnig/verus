@@ -122,4 +122,54 @@ impl<T, U, const N: usize> super::cmp::PartialEqSpecImpl<[U]> for [T; N] where
     }
 }
 
+
+// `for x in [a, b, c]` (by value): `core::array::IntoIter`, specified like `vec::IntoIter`.
+#[verifier::external_type_specification]
+#[verifier::external_body]
+#[verifier::accept_recursive_types(T)]
+pub struct ExArrayIntoIter<T, const N: usize>(core::array::IntoIter<T, N>);
+
+/// The elements of an array iteration, fixed at construction (like `vec::into_iter_elts`).
+pub uninterp spec fn array_into_iter_elts<T, const N: usize>(i: core::array::IntoIter<T, N>) -> Seq<T>;
+
+impl<T, const N: usize> super::iter::IteratorSpecImpl for core::array::IntoIter<T, N> {
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool {
+        true
+    }
+
+    uninterp spec fn remaining(&self) -> Seq<Self::Item>;
+
+    uninterp spec fn will_return_none(&self) -> bool;
+
+    uninterp spec fn decrease(&self) -> Option<nat>;
+
+    open spec fn peek(&self, index: int) -> Option<Self::Item> {
+        if 0 <= index < array_into_iter_elts(*self).len() {
+            Some(array_into_iter_elts(*self)[index])
+        } else {
+            None
+        }
+    }
+}
+
+impl<T, const N: usize> super::iter::DoubleEndedIteratorSpecImpl for core::array::IntoIter<T, N> {
+    open spec fn peek_back(&self, index: int) -> Option<Self::Item> {
+        let len = array_into_iter_elts(*self).len();
+        if 0 <= index < len {
+            Some(array_into_iter_elts(*self)[len - index - 1])
+        } else {
+            None
+        }
+    }
+}
+
+pub assume_specification<T, const N: usize>[ <[T; N] as core::iter::IntoIterator>::into_iter ](
+    a: [T; N],
+) -> (iter: <[T; N] as core::iter::IntoIterator>::IntoIter)
+    ensures
+        super::iter::IteratorSpec::remaining(&iter) == a@,
+        array_into_iter_elts(iter) == super::iter::IteratorSpec::remaining(&iter),
+        super::iter::IteratorSpec::decrease(&iter) is Some,
+;
+
 } // verus!

@@ -2493,3 +2493,37 @@ test_verify_one_file! {
         fn g(x: &dyn Obj) -> u32 { x.f() }
     } => Err(err) => assert_vir_error_msg(err, "because it has an unsized blanket impl")
 }
+
+test_verify_one_file! {
+    #[test] test_array_into_iter verus_code! {
+        use vstd::prelude::*;
+
+        // `for x in [a, b, c]` iterates the array by value, in order
+        fn sum3() -> (r: u32)
+            ensures r == 6,
+        {
+            let a = [1u32, 2, 3];
+            let mut s: u32 = 0;
+            for x in it: a
+                invariant
+                    it.seq() == seq![1u32, 2, 3],
+                    s == (if it.index() >= 1 { 1u32 } else { 0 })
+                        + (if it.index() >= 2 { 2u32 } else { 0 })
+                        + (if it.index() >= 3 { 3u32 } else { 0 }),
+            {
+                s = s + x;
+            }
+            s
+        }
+
+        fn wrong() {
+            let a = [1u32, 2];
+            for x in it: a
+                invariant it.seq() == seq![1u32, 2],
+            {
+                assert(x == 1); // FAILS
+            }
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
