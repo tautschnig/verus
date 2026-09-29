@@ -250,10 +250,10 @@ test_verify_one_file_with_options! {
         {
         }
 
-        fn test() -> Box<dyn core::any::Any> {
+        pub fn test() -> Box<dyn core::any::Any> {
             Box::new(foo)
         }
-    } => Err(err) => assert_vir_error_msg(err, "trait core::any::Any not declared to Verus")
+    } => Err(err) => assert_vir_error_msg(err, "function pointer or dyn Fn types in public signatures")
 }
 
 /////// Fancy trait support

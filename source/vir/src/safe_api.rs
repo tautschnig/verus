@@ -146,9 +146,11 @@ fn typ_mentions_dyn_fn(typ: &crate::ast::Typ) -> bool {
     let mut found = false;
     let ft = &|found: &mut bool, t: &crate::ast::Typ| -> Result<(), VirErr> {
         if let TypX::Dyn(path, _, _, _) = &**t {
+            // `dyn Any` too: a client can downcast it back to the callable it hides
             if [ClosureKind::Fn, ClosureKind::FnMut, ClosureKind::FnOnce]
                 .iter()
                 .any(|k| k.trait_path() == *path)
+                || crate::ast_util::path_as_friendly_rust_name(path) == "core::any::Any"
             {
                 *found = true;
             }
