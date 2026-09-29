@@ -3039,7 +3039,9 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
-    #[test] diallow_open_invariants_on_drop verus_code! {
+    // `opens_invariants none` and `no_unwind` are the defaults for a Drop impl (unannotated
+    // Rust code does not carry them) and are checked on the body
+    #[test] drop_defaults_to_no_invariants_no_unwind verus_code! {
         struct A { v: u64 }
 
         impl Drop for A {
@@ -3048,20 +3050,59 @@ test_verify_one_file! {
             {
             }
         }
-    } => Err(err) => assert_vir_error_msg(err, "the implementation for Drop must be marked opens_invariants none")
-}
 
-test_verify_one_file! {
-    #[test] diallow_unwind_on_drop verus_code! {
-        struct A { v: u64 }
+        struct B { v: u64 }
 
-        impl Drop for A {
+        impl Drop for B {
             fn drop(&mut self)
                 opens_invariants none
             {
             }
         }
-    } => Err(err) => assert_vir_error_msg(err, "the implementation for Drop must be marked no_unwind")
+
+        struct C { v: u64 }
+
+        impl Drop for C {
+            fn drop(&mut self) {
+                self.v = 0;
+            }
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] disallow_open_invariants_on_drop verus_code! {
+        struct A { v: u64 }
+
+        impl Drop for A {
+            fn drop(&mut self)
+                opens_invariants any
+                no_unwind
+            {
+            }
+        }
+    } => Err(err) => assert_vir_error_msg(err, "the implementation for Drop must be marked opens_invariants none")
+}
+
+test_verify_one_file! {
+    // the default `no_unwind` is checked: a drop calling a function that may unwind fails
+    #[test] drop_default_no_unwind_is_checked verus_code! {
+        use vstd::prelude::*;
+
+        fn may_unwind() {}
+
+        struct A { v: u64 }
+
+        impl Drop for A {
+            fn drop(&mut self) {
+                may_unwind();
+            }
+        }
+    } => Err(err) => {
+        // both defaults are checked: the callee may unwind and may open invariants
+        assert!(err.errors.iter().any(|e| e.message.contains("cannot show this call will not unwind")));
+        assert!(err.errors.iter().any(|e| e.message.contains("callee may open invariants that caller cannot")));
+    }
 }
 
 test_verify_one_file! {
