@@ -1265,7 +1265,51 @@ test_verify_one_file! {
                 _ => { }
             };
         }
-    //} => Err(err) => assert_one_fails(err)
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    // `A | B if g` runs `g` for each matching alternative, in order
+    #[test] or_pattern_with_guard verus_code! {
+        use vstd::prelude::*;
+        fn h(p: (u32, u32)) -> (r: u32)
+            ensures
+                p == (1u32, 5u32) ==> r == 5, // first alternative's guard false, second true
+                p == (7u32, 1u32) ==> r == 7,
+                p == (1u32, 1u32) ==> r == 0,
+        {
+            match p { (y, _) | (_, y) if y > 2 => y, _ => 0 }
+        }
+        enum E { A(u32), B(u32), C }
+        fn g(e: E) -> (r: u32)
+            ensures (e is A && e->A_0 > 5) ==> r == e->A_0, (e is B && e->B_0 > 5) ==> r == e->B_0,
+        {
+            match e { E::A(x) | E::B(x) if x > 5 => x, E::A(_) | E::B(_) => 0, E::C => 1 }
+        }
+        fn loop_in_body(b: u8) -> u32 {
+            match b {
+                1 | 2 if b > 0 => {
+                    let mut i = 0;
+                    while i < 3 invariant i <= 3 decreases 3 - i { i += 1; }
+                    i
+                }
+                _ => 0,
+            }
+        }
+        fn wrong(b: u8, r: bool) -> (x: bool)
+            ensures x == r, // FAILS
+        {
+            match b { 116 | 102 if r => true, _ => false }
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    // a closure in the arm would be lowered once per alternative; still rejected
+    #[test] or_pattern_with_guard_closure_rejected verus_code! {
+        fn f(b: u8) -> u32 {
+            match b { 1 | 2 if b > 0 => { let c = |x: u32| x; c(4) } _ => 0 }
+        }
     } => Err(err) => assert_vir_error_msg(err, "Not supported: match arm containing both an or-pattern (|) and a match-guard")
 }
 

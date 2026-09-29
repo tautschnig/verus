@@ -3550,6 +3550,26 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
             let vir_place = simplify_place_by_cancelling(&vir_place);
             let mut vir_arms: Vec<vir::ast::Arm> = Vec::new();
             for arm in arms.iter() {
+                // `A | B if g => body` tries A, evaluates `g` with A's bindings, and if the
+                // pattern does not match or `g` is false, tries B and evaluates `g` again with
+                // B's bindings (the Rust reference: a guard may run once per alternative). That
+                // is exactly the arms `A if g => body, B if g => body`, in this order, so a
+                // guarded arm whose pattern is a top-level or-pattern is split into one arm per
+                // alternative, each lowered from the same HIR guard and body.
+                // Closures and constructor values inside would be lowered twice with the same
+                // names, which VIR does not allow; such arms keep the rejection (well_formed).
+                if let (Some(guard_expr), PatKind::Or(alts)) = (&arm.guard, &arm.pat.kind)
+                    && !hir_contains_closure_or_fn_value(bctx, guard_expr)
+                    && !hir_contains_closure_or_fn_value(bctx, arm.body)
+                {
+                    for alt in alts.iter() {
+                        let pattern = pattern_to_vir(bctx, alt)?;
+                        let guard = expr_to_vir_consume(bctx, guard_expr)?;
+                        let body = expr_to_vir_consume(bctx, &arm.body)?;
+                        vir_arms.push(bctx.spanned_new(arm.span, ArmX { pattern, guard, body }));
+                    }
+                    continue;
+                }
                 let pattern = pattern_to_vir(bctx, &arm.pat)?;
                 let guard = match &arm.guard {
                     None => bctx.spanned_typed_new(
@@ -4882,6 +4902,45 @@ fn async_block_to_vir<'tcx>(
         body: None,
     };
     Ok(bctx.spanned_typed_new(span, &future_typ, x))
+}
+
+/// Does `e` contain a closure, an async block, or a constructor used as a function value
+/// (all lowered to VIR closures with names derived from their HIR ids)?
+fn hir_contains_closure_or_fn_value<'tcx>(bctx: &BodyCtxt<'tcx>, e: &'tcx Expr<'tcx>) -> bool {
+    use rustc_hir::intravisit::{self, Visitor};
+    struct V<'a, 'tcx> {
+        bctx: &'a BodyCtxt<'tcx>,
+        found: bool,
+    }
+    impl<'a, 'tcx> Visitor<'tcx> for V<'a, 'tcx> {
+        fn visit_expr(&mut self, e: &'tcx Expr<'tcx>) {
+            match &e.kind {
+                ExprKind::Closure(..) => self.found = true,
+                ExprKind::Call(callee, args) if matches!(callee.kind, ExprKind::Path(_)) => {
+                    // a called constructor is not a constructor value
+                    for a in args.iter() {
+                        self.visit_expr(a);
+                    }
+                    return;
+                }
+                ExprKind::Path(_) => {
+                    if let TyKind::FnDef(did, _) = self.bctx.types.node_type(e.hir_id).kind()
+                        && matches!(
+                            self.bctx.ctxt.tcx.def_kind(*did),
+                            rustc_hir::def::DefKind::Ctor(..)
+                        )
+                    {
+                        self.found = true;
+                    }
+                }
+                _ => {}
+            }
+            intravisit::walk_expr(self, e);
+        }
+    }
+    let mut v = V { bctx, found: false };
+    v.visit_expr(e);
+    v.found
 }
 
 pub(crate) fn closure_to_vir<'tcx>(

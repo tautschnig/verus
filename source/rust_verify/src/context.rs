@@ -268,8 +268,10 @@ impl<'tcx> BodyCtxt<'tcx> {
         let (map, next_id) = &mut *self.label_map.borrow_mut();
         let label = vir::ast::Label { id: *next_id, name: label.map(|l| l.ident.to_string()) };
         *next_id += 1;
-        let found = map.insert(hir_id, label.clone());
-        assert!(found.is_none());
+        // A HIR loop may be lowered more than once (the body of a guarded or-pattern arm is
+        // lowered once per alternative); each lowering gets a fresh label, and its `break`s,
+        // lowered before the next copy starts, find the current one.
+        map.insert(hir_id, label.clone());
         label
     }
 
