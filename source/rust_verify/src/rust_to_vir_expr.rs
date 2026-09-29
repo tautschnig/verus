@@ -3795,6 +3795,14 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
                 true,
             )?))
         }
+        ExprKind::Closure(Closure {
+            kind:
+                rustc_hir::ClosureKind::Coroutine(rustc_hir::CoroutineKind::Desugared(
+                    rustc_hir::CoroutineDesugaring::Async,
+                    rustc_hir::CoroutineSource::Block,
+                )),
+            ..
+        }) => Ok(ExprOrPlace::Expr(async_block_to_vir(bctx, expr, expr_typ()?)?)),
         ExprKind::Closure(Closure { .. }) => {
             Ok(ExprOrPlace::Expr(closure_to_vir(bctx, expr, expr_typ()?, false, None)?))
         }
@@ -4691,6 +4699,100 @@ pub(crate) fn record_ignore_dummy_capture_operation<'tcx>(
     expr: &Expr<'tcx>,
 ) {
     crate::fn_call_to_vir::record_call(bctx, expr, ResolvedCall::MiscEraseAbsolutely);
+}
+
+/// `async { body }` / `async move { body }`.
+///
+/// The body runs when the future is polled, which may be never, once, or later than the
+/// block's creation. It is verified here, at the creation point, as the body of a
+/// zero-argument closure: captures are the values at creation (rustc's borrow checker keeps
+/// borrowed captures unchanged while the future is alive, and closures that mutate captures
+/// are rejected by `vir::closures`). The resulting future is an unconstrained value of type
+/// `dyn Future<Output = T>` (see the type mapping in rust_to_vir_base); awaiting it yields an
+/// unconstrained `T`. So nothing proved about the body is assumed at the await, and the
+/// body's own obligations are all checked.
+fn async_block_to_vir<'tcx>(
+    bctx: &BodyCtxt<'tcx>,
+    closure_expr: &Expr<'tcx>,
+    future_typ: Typ,
+) -> Result<vir::ast::Expr, VirErr> {
+    let ExprKind::Closure(Closure { body: body_id, def_id, .. }) = &closure_expr.kind else {
+        panic!("async_block_to_vir expects ExprKind::Closure");
+    };
+    if bctx.in_ghost {
+        unsupported_err!(closure_expr.span, "async blocks in ghost code");
+    }
+    let span = closure_expr.span;
+    let body = bctx.ctxt.tcx.hir_body(*body_id);
+    // rustc wraps the block's value in `DropTemps` inside a block
+    let inner = match body.value.kind {
+        ExprKind::Block(block, ..) if block.stmts.is_empty() => match block.expr {
+            Some(Expr { kind: ExprKind::DropTemps(e), .. }) => *e,
+            _ => body.value,
+        },
+        _ => body.value,
+    };
+    let ret_rust_ty = match bctx.types.node_type(closure_expr.hir_id).kind() {
+        TyKind::Coroutine(_, substs) => substs.as_coroutine().return_ty(),
+        _ => panic!("async block without a coroutine type"),
+    };
+    let ret_typ = bctx.mid_ty_to_vir(span, &ret_rust_ty)?;
+
+    let body_bctx = {
+        let mut all_params = (*bctx.params).clone();
+        all_params.push(vec![]);
+        let bctx = bctx.set_header_setting(HeaderSetting::Fn);
+        BodyCtxt { params: std::rc::Rc::new(all_params), ..bctx }
+    };
+    let mut vir_body = expr_to_vir_consume(&body_bctx, inner)?;
+    let header = vir::headers::read_header(&mut vir_body, &vir::headers::HeaderAllows::Closure)?;
+    if header.require.len() > 0 || header.ensure.0.len() > 0 {
+        return err_span(span, "async blocks cannot have `requires` or `ensures` clauses");
+    }
+    bctx.ctxt.push_body_erasure(*def_id, BodyErasure { erase_body: false, ret_spec: false });
+
+    let ret_name = str_unique_var(
+        vir::def::CLOSURE_RETURN_VALUE_PREFIX,
+        vir::ast::VarIdentDisambiguate::RustcId(body_id.hir_id.local_id.index()),
+    );
+    let closure_typ = Arc::new(TypX::AnonymousClosure(
+        Arc::new(vec![]),
+        ret_typ.clone(),
+        vir::ast::ClosureKind::FnOnce,
+        def_id.local_def_index.index(),
+    ));
+    let closure = bctx.spanned_typed_new(
+        span,
+        &closure_typ,
+        ExprX::NonSpecClosure {
+            params: Arc::new(vec![]),
+            proof_fn_modes: None,
+            body: vir_body,
+            requires: Arc::new(vec![]),
+            ensures: Arc::new(vec![]),
+            ret: Arc::new(VarBinderX { name: ret_name, a: ret_typ }),
+            external_spec: None, // filled in by ast_simplify
+        },
+    );
+    let fun = vir::fun!(CrateId::Vstd => "future", "async_block_future");
+    let call_target = CallTarget::Fun(
+        vir::ast::CallTargetKind::Static,
+        fun,
+        Arc::new(vec![closure_typ, future_typ.clone()]),
+        Arc::new(vec![]),
+        vir::ast::CallTargetAttrs {
+            autospec: AutospecUsage::Final,
+            const_var: false,
+            assume_external_allowed: false,
+        },
+    );
+    let x = ExprX::Call {
+        target: call_target,
+        args: Arc::new(vec![closure]),
+        post_args: None,
+        body: None,
+    };
+    Ok(bctx.spanned_typed_new(span, &future_typ, x))
 }
 
 pub(crate) fn closure_to_vir<'tcx>(

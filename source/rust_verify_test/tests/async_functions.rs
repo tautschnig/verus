@@ -269,3 +269,79 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_vir_error_msg(err, "return type does not match binder in ensures")
 }
+
+
+test_verify_one_file_with_options! {
+    #[test] test_async_blocks ["--edition 2024"] => verus_code! {
+        use vstd::prelude::*;
+        use core::future::Future;
+
+        async fn one() -> (r: u32) ensures r == 1 { 1 }
+
+        #[verifier::external_body]
+        fn block_on<F: Future + Send + 'static>(f: F) -> F::Output { unimplemented!() }
+
+        // the body is verified where the block is written, with ghost code and `?`
+        async fn first(v: &Vec<u32>) -> Option<u32> {
+            let r = async {
+                let x = v.first()?;
+                proof { assert(v@.len() > 0); }
+                Some(*x)
+            };
+            let nested = async move { async { 3u32 }.await };
+            let _ = nested.await;
+            r.await
+        }
+
+        fn run(x: u32) -> u32 {
+            let v: u32 = block_on(async move { x / 2 });
+            v
+        }
+
+        #[verifier::external_body]
+        fn block_on_local<F: Future>(f: F) -> F::Output { unimplemented!() }
+
+        fn run_local() -> u32 {
+            let v: u32 = block_on_local(async { one().await + 1 });
+            v
+        }
+
+        // body obligations are checked even if the future is never awaited
+        fn body_checked(x: u32) {
+            let fut = async move { x + 1 }; // FAILS
+        }
+
+        // nothing is known about the awaited value
+        async fn awaited_unknown() {
+            let v = async { 5u32 }.await;
+            assert(v == 5); // FAILS
+        }
+    } => Err(err) => assert_fails(err, 2)
+}
+
+test_verify_one_file_with_options! {
+    #[test] test_async_block_mutable_capture_rejected ["--edition 2024"] => verus_code! {
+        use vstd::prelude::*;
+        fn m() {
+            let mut x = 1u32;
+            let fut = async { x = 2; };
+            let _ = fut;
+        }
+    } => Err(err) => assert_vir_error_msg(err, "closures capturing a mutable reference")
+}
+
+test_verify_one_file_with_options! {
+    // the values held across an await are not known before MIR building
+    #[test] test_async_block_send_bound_with_await_rejected ["--edition 2024"] => verus_code! {
+        use vstd::prelude::*;
+        use core::future::Future;
+        fn one() -> u32 { 1 }
+        async fn two() -> u32 { 2 }
+        #[verifier::external_body]
+        fn block_on<F: Future + Send + 'static>(f: F) -> F::Output { unimplemented!() }
+        fn run() -> u32 {
+            let v: u32 = block_on(async { two().await });
+            v
+        }
+    } => Err(err) => assert_vir_error_msg(err, "on an async block that uses `.await`")
+}

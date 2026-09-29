@@ -481,6 +481,29 @@ pub(crate) fn get_impl_paths<'tcx>(
     )
 }
 
+/// Does the body of the coroutine `coroutine_id` (an async block) contain an `.await`?
+fn coroutine_body_awaits<'tcx>(tcx: TyCtxt<'tcx>, coroutine_id: DefId) -> bool {
+    use rustc_hir::intravisit::{self, Visitor};
+    struct FindAwait {
+        found: bool,
+    }
+    impl<'v> Visitor<'v> for FindAwait {
+        fn visit_expr(&mut self, e: &'v rustc_hir::Expr<'v>) {
+            if let rustc_hir::ExprKind::Match(_, _, rustc_hir::MatchSource::AwaitDesugar) = e.kind {
+                self.found = true;
+            }
+            // nested closures and async blocks are separate bodies and are not visited:
+            // a nested block that is awaited here is an await of this body
+            intravisit::walk_expr(self, e);
+        }
+    }
+    let Some(local_id) = coroutine_id.as_local() else { return true };
+    let body = tcx.hir_body_owned_by(local_id);
+    let mut v = FindAwait { found: false };
+    v.visit_expr(body.value);
+    v.found
+}
+
 pub(crate) fn get_impl_paths_for_clauses<'tcx>(
     tcx: TyCtxt<'tcx>,
     verus_items: &crate::verus_items::VerusItems,
@@ -523,6 +546,45 @@ pub(crate) fn get_impl_paths_for_clauses<'tcx>(
             } else {
                 unreachable!()
             };
+
+            // An auto-trait bound (Send, Sync, ..) on an async block: rustc's builtin impl
+            // requires the bound for the captured values and for the values held across
+            // an `.await` (the witness types). Selecting it computes the witness types, which
+            // builds the block's MIR before Verus's erasure context exists (an internal
+            // error). The captured types are known: recurse into them, so impls reached
+            // through them (and their where-clauses) are recorded as for any other type.
+            // The witness types are not: reject blocks that await.
+            if tcx.trait_is_auto(trait_refs.def_id)
+                && let TyKind::Coroutine(coroutine_id, coroutine_args) =
+                    trait_refs.args.type_at(0).kind()
+            {
+                if coroutine_body_awaits(tcx, *coroutine_id) {
+                    return err_span(
+                        span,
+                        format!(
+                            "Verus does not support the bound `{}` on an async block that uses `.await` (the values held across an await are not known to Verus at this point)",
+                            tcx.def_path_str(trait_refs.def_id)
+                        ),
+                    );
+                }
+                for upvar_ty in coroutine_args.as_coroutine().upvar_tys().iter() {
+                    use crate::rustc_type_ir::Upcast;
+                    let clause =
+                        rustc_middle::ty::Binder::dummy(ClauseKind::Trait(TraitPredicate {
+                            trait_ref: rustc_middle::ty::TraitRef::new(
+                                tcx,
+                                trait_refs.def_id,
+                                [GenericArg::from(upvar_ty)],
+                            ),
+                            polarity: rustc_middle::ty::PredicatePolarity::Positive,
+                        }))
+                        .upcast(tcx);
+                    if !predicate_worklist.iter().any(|(_, c)| *c == clause) {
+                        predicate_worklist.push((None, clause));
+                    }
+                }
+                continue;
+            }
 
             let candidate_query_input = typing_env.as_query_input(trait_refs);
             let candidate = tcx.codegen_select_candidate(candidate_query_input);
@@ -608,6 +670,15 @@ pub(crate) fn get_impl_paths_for_clauses<'tcx>(
                                     }
                                     _ => {}
                                 }
+                            } else if Some(trait_def_id) == tcx.lang_items().future_trait()
+                                && matches!(
+                                    trait_args.into_type_list(tcx)[0].kind(),
+                                    TyKind::Coroutine(..)
+                                )
+                            {
+                                // `{async block}: Future`: the block's VIR type is
+                                // `dyn Future<Output = T>`, whose impl is the builtin object
+                                // impl (as for `ImplSource::Builtin(Object)` above).
                             } else if Some(trait_def_id) == tcx.lang_items().sized_trait()
                                 || Some(trait_def_id) == tcx.lang_items().unpin_trait()
                                 || Some(trait_def_id) == tcx.lang_items().meta_sized_trait()
@@ -1517,6 +1588,28 @@ pub(crate) fn mid_ty_to_vir_ghost<'tcx>(
                 Arc::new(bindings),
             ));
             (Arc::new(TypX::Decorate(TypDecoration::Ref, None, dyn_typ)), false)
+        }
+        TyKind::Coroutine(def_id, substs)
+            if matches!(
+                tcx.coroutine_kind(*def_id),
+                Some(rustc_hir::CoroutineKind::Desugared(
+                    rustc_hir::CoroutineDesugaring::Async,
+                    rustc_hir::CoroutineSource::Block
+                ))
+            ) =>
+        {
+            // The type of an `async { .. }` block is modelled as `dyn Future<Output = T>`:
+            // it is only used through `Future` (awaited, or passed to a generic executor),
+            // and nothing is known about its value (see `vstd::future::async_block_future`).
+            let ret = t_rec(&substs.as_coroutine().return_ty())?.0;
+            let future_trait = tcx.lang_items().future_trait().expect("Future lang item");
+            let path =
+                def_id_to_vir_path(tcx, verus_items, future_trait, None::<&mut HashMap<_, _>>);
+            let bindings = vec![(Arc::new("Output".to_string()), ret)];
+            (
+                Arc::new(TypX::Dyn(path, Arc::new(vec![]), Arc::new(vec![]), Arc::new(bindings))),
+                false,
+            )
         }
         TyKind::Coroutine(..) => unsupported_err!(span, "generator types"),
         TyKind::CoroutineWitness(..) => unsupported_err!(span, "generator witness types"),
