@@ -1500,7 +1500,7 @@ test_verify_one_file! {
                 assert(false); // FAILS
             }
         }
-    } => Err(err) => assert_vir_error_msg(err, "The verifier does not yet support the following Rust feature: block with label")
+    } => Err(err) => assert_one_fails(err)
 }
 
 test_verify_one_file! {

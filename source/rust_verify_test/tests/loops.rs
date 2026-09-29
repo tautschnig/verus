@@ -2259,6 +2259,49 @@ test_verify_one_file_with_options! {
 }
 
 test_verify_one_file_with_options! {
+    #[test] test_labeled_blocks ["--edition 2024"] => verus_code! {
+        use vstd::prelude::*;
+        fn f(x: u32) -> (r: u32)
+            ensures x > 3 ==> r == 1, x <= 3 ==> r == 2,
+        {
+            let v = 'value: { if x > 3 { break 'value 1; } 2 };
+            v
+        }
+        // facts about variables assigned in the block reach the code after it on both paths
+        fn g(x: u32) -> (r: u32)
+            ensures x == 0 ==> r == 0, x != 0 ==> r == 5,
+        {
+            let mut n = 0u32;
+            'b: { if x == 0 { break 'b; } n = 5; }
+            n
+        }
+        fn h(v: &Vec<u32>) -> (r: bool)
+            ensures r == (exists|i: int| 0 <= i < v.len() && v[i] == 7),
+        {
+            let found = 'search: {
+                let mut i = 0;
+                while i < v.len()
+                    invariant 0 <= i <= v.len(), forall|j: int| 0 <= j < i ==> v[j] != 7,
+                    decreases v.len() - i,
+                {
+                    if v[i] == 7 { break 'search true; }
+                    i += 1;
+                }
+                false
+            };
+            found
+        }
+        fn push_maybe(v: &mut Vec<u32>)
+            requires old(v)@.len() == 1,
+        {
+            'b: { if v[0] == 0 { break 'b; } v.push(1); }
+            assert(v@.len() == 1 || v@.len() == 2);
+            assert(v@.len() == 1); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file_with_options! {
     // the `if` of a let chain keeps the entry state of variables assigned in its branches
     #[test] test_let_chain_entry_state ["--edition 2024"] => verus_code! {
         use vstd::prelude::*;

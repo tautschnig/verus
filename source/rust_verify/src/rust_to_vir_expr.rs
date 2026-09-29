@@ -2318,6 +2318,159 @@ fn let_chain_to_vir<'a, 'tcx>(
     )))
 }
 
+/// Does `e` contain a `break` whose target is a value loop or labeled block registered in
+/// `loop_break_vars` (i.e., one lowered to a non-isolated VIR loop)?
+fn breaks_to_registered_target<'tcx, 'v>(bctx: &BodyCtxt<'tcx>, e: &'v Expr<'v>) -> bool {
+    struct V<'a> {
+        targets: &'a std::collections::HashMap<HirId, (vir::ast::VarIdent, vir::ast::Typ)>,
+        found: bool,
+    }
+    impl<'a, 'w> rustc_hir::intravisit::Visitor<'w> for V<'a> {
+        fn visit_expr(&mut self, e: &'w Expr<'w>) {
+            if let ExprKind::Break(dest, _) = &e.kind {
+                if let Ok(t) = dest.target_id {
+                    if self.targets.contains_key(&t) {
+                        self.found = true;
+                    }
+                }
+            }
+            rustc_hir::intravisit::walk_expr(self, e);
+        }
+    }
+    let targets = bctx.loop_break_vars.borrow();
+    let mut v = V { targets: &targets, found: false };
+    rustc_hir::intravisit::Visitor::visit_expr(&mut v, e);
+    v.found
+}
+
+/// `'l: { body }` (a block that `break 'l v` can leave early). Lowered in VIR only, like a
+/// value `loop` and a let chain, to a one-iteration non-isolated loop:
+///   { let %r; 'l: loop decreases 1 { %r = body; break 'l }; %r }
+/// A `break 'l v` inside lowers to `{ %r = v; break 'l }` through the value-loop handling
+/// (`loop_break_vars`, keyed by the block's HIR id). Not supported in ghost code.
+fn labeled_block_to_vir<'tcx>(
+    bctx: &BodyCtxt<'tcx>,
+    expr: &Expr<'tcx>,
+    body: &'tcx rustc_hir::Block<'tcx>,
+    label: &rustc_ast::ast::Label,
+) -> Result<ExprOrPlace, VirErr> {
+    if bctx.in_ghost {
+        unsupported_err!(expr.span, "block with label in ghost code");
+    }
+    let unit = vir::ast_util::unit_typ();
+    // `break 'l` targets the block's HIR id (not the block expression's)
+    let vlabel = bctx.fresh_label(body.hir_id, &Some(*label));
+    let res_ty = bctx.types.node_type(expr.hir_id);
+    let typ = bctx.mid_ty_to_vir(expr.span, &res_ty)?;
+    let generated = |id| bctx.ctxt.erasure_info.borrow_mut().hir_vir_ids.push((None, id));
+    let has_value = !(res_ty.is_unit() || res_ty.is_never());
+    let name = vir::def::break_value_var(expr.hir_id.local_id.index());
+    // registered even without a value, so that loops inside that break out to the block are
+    // made non-isolated (see `breaks_to_registered_target`)
+    bctx.loop_break_vars.borrow_mut().insert(body.hir_id, (name.clone(), typ.clone()));
+    let block_typ = typ_of_node_unadjusted(bctx, body.span, &body.hir_id)?;
+    let value = block_to_vir(bctx, body, &expr.span, &block_typ)?;
+    let brk = bctx.spanned_typed_new(
+        expr.span,
+        &unit,
+        ExprX::BreakOrContinue { label: vlabel.clone(), is_break: true },
+    );
+    generated(brk.span.id);
+    let res_place = || {
+        let p = bctx.spanned_typed_new(expr.span, &typ, PlaceX::Local(name.clone()));
+        generated(p.span.id);
+        p
+    };
+    let loop_body = if has_value && !res_ty.is_never() {
+        let assign = bctx.spanned_typed_new(
+            expr.span,
+            &unit,
+            ExprX::Assign {
+                place: res_place(),
+                rhs: value,
+                op: None,
+                resolve: false,
+                typ: typ.clone(),
+            },
+        );
+        generated(assign.span.id);
+        bctx.spanned_typed_new(
+            expr.span,
+            &unit,
+            ExprX::Block(
+                Arc::new(vec![bctx.spanned_new(expr.span, StmtX::Expr(assign))]),
+                Some(brk),
+            ),
+        )
+    } else {
+        bctx.spanned_typed_new(
+            expr.span,
+            &unit,
+            ExprX::Block(
+                Arc::new(vec![bctx.spanned_new(expr.span, StmtX::Expr(value))]),
+                Some(brk),
+            ),
+        )
+    };
+    let int_typ = Arc::new(TypX::Int(vir::ast::IntRange::Int));
+    let one = bctx.spanned_typed_new(
+        expr.span,
+        &int_typ,
+        ExprX::Const(vir::ast_util::const_int_from_u128(1)),
+    );
+    generated(one.span.id);
+    let loop_e = bctx.spanned_typed_new(
+        expr.span,
+        &unit,
+        ExprX::Loop {
+            loop_isolation: false,
+            allow_complex_invariants: true,
+            is_for_loop: false,
+            assume_termination: false,
+            label: vlabel,
+            cond: None,
+            body: loop_body,
+            invs: Arc::new(vec![]),
+            decrease: Arc::new(vec![one]),
+            atomic_call: false,
+            one_shot: true,
+        },
+    );
+    generated(loop_e.span.id);
+    if !has_value {
+        return Ok(ExprOrPlace::Expr(loop_e));
+    }
+    let binding = vir::ast::PatternBinding {
+        name: name.clone(),
+        by_ref: vir::ast::ByRef::No,
+        typ: typ.clone(),
+        user_mut: None,
+        copy: bctx.is_copy(res_ty),
+    };
+    let pattern = bctx.spanned_typed_new(expr.span, &typ, PatternX::Var(binding));
+    generated(pattern.span.id);
+    let decl = bctx.spanned_new(
+        expr.span,
+        StmtX::Decl {
+            pattern,
+            mode: Some((Mode::Exec, vir::ast::DeclProph::Default)),
+            init: None,
+            els: None,
+            assert_irrefutable: false,
+        },
+    );
+    let read = ExprOrPlace::Place(res_place()).consume(bctx, res_ty);
+    generated(read.span.id);
+    Ok(ExprOrPlace::Expr(bctx.spanned_typed_new(
+        expr.span,
+        &typ,
+        ExprX::Block(
+            Arc::new(vec![decl, bctx.spanned_new(expr.span, StmtX::Expr(loop_e))]),
+            Some(read),
+        ),
+    )))
+}
+
 /// The value of an `if` condition that is a `cfg!(..)` literal, possibly combined with
 /// `&&`, `||`, `!` and parentheses, where every literal comes from a `cfg!` expansion and
 /// short-circuiting makes the whole condition static (`cfg!(x) && e` is static when
@@ -2459,6 +2612,7 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
     };
 
     match &expr.kind {
+        ExprKind::Block(body, Some(label)) => labeled_block_to_vir(bctx, expr, body, label),
         ExprKind::Block(body, label) => {
             unsupported_err_unless!(label.is_none(), expr.span, "block with label");
             if is_invariant_block(bctx, expr)? {
@@ -3646,6 +3800,10 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
             header_span,
         ) => {
             let label = bctx.fresh_label(expr.hir_id, label);
+            // A while loop whose body breaks out to an enclosing value loop or labeled block
+            // cannot be isolated (Verus rejects a break from an isolated loop to a
+            // non-isolated one); as for `loop` inside a value loop.
+            let loop_isolation = loop_isolation && !breaks_to_registered_target(bctx, expr);
             // rustc desugars a while loop of the form `while cond { body }`
             // to `loop { if cond { body } else { break; } }`
             // We want to "un-desugar" it to represent it as a while loop.
