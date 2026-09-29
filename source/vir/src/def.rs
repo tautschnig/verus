@@ -382,6 +382,11 @@ impl NameCtxt {
     }
 }
 
+/// The local holding the value of a `loop` whose `break`s carry a value (rust_to_vir).
+pub fn break_value_var(id: usize) -> VarIdent {
+    VarIdent(Arc::new("%break_value".to_string()), crate::ast::VarIdentDisambiguate::RustcId(id))
+}
+
 // Only use this for printing diagnostics
 // Do not use this to generate AIR -- it is unsound to ignore the id
 // (However, it's always ok to use this when the krate is not CrateId::Id)
