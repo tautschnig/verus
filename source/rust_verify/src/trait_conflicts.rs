@@ -455,6 +455,14 @@ pub(crate) fn gen_check_trait_impl_conflicts(
         if !dyn_traits.contains(&t.x.name) {
             continue;
         }
+        // The one trait admitted for `dyn` despite an unsized blanket impl
+        // (`vir::traits::unsized_blanket_overlap_is_inert`: `core::any::Any` with no associated
+        // types and no specified methods). Its blanket impl already covers `dyn Any`, and
+        // the two impls contribute identical facts, so the overlap that this synthetic impl
+        // exists to expose is, for this trait, exactly the admitted one.
+        if vir::traits::is_inert_unsized_blanket_trait(t) {
+            continue;
+        }
         let name = state.trait_name(&t.x.name);
         let span = spans.from_air_span(&t.span, None);
         let (mut generic_params, mut generic_bounds) = gen_generics(

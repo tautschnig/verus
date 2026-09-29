@@ -2450,3 +2450,46 @@ test_verify_one_file! {
         assert!(err.errors[0].rendered.contains("FAILS"));
     }
 }
+
+test_verify_one_file! {
+    #[test] test_std_thread_spawn_join verus_code! {
+        use vstd::prelude::*;
+
+        // `std::thread::spawn` requires the closure's precondition; `join`'s `Ok` value
+        // satisfies the closure's postcondition; `Err` (a panic payload, `Box<dyn Any + Send>`)
+        // carries nothing
+        fn worker(x: u32) -> (r: u32)
+            requires x < 100,
+            ensures r == x + 1,
+        {
+            x + 1
+        }
+
+        fn run() -> (r: Option<u32>)
+            ensures r matches Some(v) ==> v == 6,
+        {
+            let h = std::thread::spawn(move || -> (r: u32) ensures r == 6 { worker(5) });
+            match h.join() {
+                Ok(v) => Some(v),
+                Err(_) => None,
+            }
+        }
+
+        fn wrong() {
+            let h = std::thread::spawn(|| -> (r: u32) ensures r == 1 { 1 });
+            if let Ok(v) = h.join() {
+                assert(v == 2); // FAILS
+            }
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    // The exemption for `core::any::Any` does not extend to other traits with an unsized
+    // blanket impl (rust-lang/rust#57893)
+    #[test] test_dyn_unsized_blanket_still_rejected verus_code! {
+        trait Obj { fn f(&self) -> u32; }
+        impl<T: ?Sized> Obj for T { fn f(&self) -> u32 { 0 } }
+        fn g(x: &dyn Obj) -> u32 { x.f() }
+    } => Err(err) => assert_vir_error_msg(err, "because it has an unsized blanket impl")
+}

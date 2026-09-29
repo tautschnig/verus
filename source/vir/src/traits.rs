@@ -2158,11 +2158,52 @@ fn compute_dyn_compatibility(
     }
     if let Some(d) = unsized_blanket_super {
         d
-    } else if unsized_blanketed_traits.contains(tr_path) {
+    } else if unsized_blanketed_traits.contains(tr_path)
+        && !unsized_blanket_overlap_is_inert(tr, fun_map)
+    {
         Arc::new(DynCompatible::RejectUnsizedBlanketImpl { trait_path: tr_path.clone() })
     } else {
         Arc::new(DynCompatible::Accept)
     }
+}
+
+/// rust-lang/rust#57893: an unsized blanket impl `impl<T: ?Sized> Tr for T` overlaps rustc's
+/// built-in `impl Tr for dyn Tr`, and the two may disagree. rustc's exploit goes through an
+/// associated type, whose projection on `dyn Tr` has two different values. In Verus's
+/// encoding, the facts an impl contributes are its `tr_bound` (identical for both impls: the
+/// trait holds) and, per trait, associated-type projections and method specifications.
+/// When the trait has no associated types and no method with a specification, the two impls
+/// agree on everything Verus says about them, so the overlap cannot produce a contradiction.
+///
+/// We exempt exactly `core::any::Any` under that condition (checked, not assumed; vstd
+/// declares it with an unspecified `type_id`): its payload type `Box<dyn Any + Send>` is the
+/// error type of `std::thread::JoinHandle::join` and of `std::panic::catch_unwind`, and
+/// rejecting it makes those APIs unusable. A general exemption would also have to rule out
+/// specifications added by `external_trait_extension`, so it is not attempted here.
+/// The trait was admitted for `dyn` by `unsized_blanket_overlap_is_inert` (its recorded
+/// dyn verdict is Accept although it is `core::any::Any`, which has an unsized blanket impl
+/// in `core`). Used by the trait-conflict check, which sees the imported trait but not
+/// necessarily its method definitions.
+pub fn is_inert_unsized_blanket_trait(tr: &Trait) -> bool {
+    path_as_friendly_rust_name(&tr.x.name) == "core::any::Any"
+        && matches!(tr.x.dyn_compatible.as_deref(), Some(crate::ast::DynCompatible::Accept))
+        && tr.x.assoc_typs.is_empty()
+}
+
+pub fn unsized_blanket_overlap_is_inert(tr: &Trait, fun_map: &HashMap<Fun, Function>) -> bool {
+    let is_any = crate::ast_util::path_as_friendly_rust_name(&tr.x.name) == "core::any::Any";
+    is_any
+        && tr.x.assoc_typs.is_empty()
+        && tr.x.external_trait_extension.is_none()
+        && tr.x.methods.iter().all(|m| match fun_map.get(m) {
+            Some(f) => {
+                f.x.require.is_empty()
+                    && f.x.ensure.0.is_empty()
+                    && f.x.ensure.1.is_empty()
+                    && f.x.returns.is_none()
+            }
+            None => false,
+        })
 }
 
 fn get_dyn_compatibility(
