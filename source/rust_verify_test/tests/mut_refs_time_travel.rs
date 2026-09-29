@@ -1447,7 +1447,8 @@ test_verify_one_file_with_options! {
         enum Option<V> { Some(V), None }
 
         fn test_if_let_move_conjunction(s: Option<(X, X)>, cond: bool) {
-            // this should be ok, but Verus doesn't support if-let chains right now
+            // rustc rejects this (E0382: `s` is partially moved when `cond` is false);
+            // Verus lowers the let chain and reports rustc's error
             let mut s = s;
             if let Option::Some((a, ref mut b)) = s && cond {
                 let t1 = a;
@@ -1455,7 +1456,7 @@ test_verify_one_file_with_options! {
                 let t2 = s;
             }
         }
-    } => Err(err) => assert_vir_error_msg(err, "The verifier does not yet support the following Rust feature: let expressions")
+    } => Err(err) => assert_rust_error_msg(err, "use of partially moved value: `s`")
 }
 
 test_verify_one_file_with_options! {
