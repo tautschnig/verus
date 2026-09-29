@@ -2143,3 +2143,117 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_vir_error_msg(err, "loop must have a decreases clause")
 }
+
+test_verify_one_file! {
+    #[test] test_break_with_value verus_code! {
+        use vstd::prelude::*;
+
+        // `loop { .. break v .. }` is lowered to a result local assigned at each break; the
+        // loop is not isolated, so what is known at the break reaches the result
+        fn find(v: &Vec<u32>, x: u32) -> (r: Option<usize>)
+            ensures r matches Some(i) ==> i < v@.len() && v@[i as int] == x,
+        {
+            let mut i: usize = 0;
+            let r = loop
+                invariant_except_break i <= v@.len(),
+                decreases v@.len() - i,
+            {
+                if i >= v.len() { break None; }
+                if v[i] == x { break Some(i); }
+                i += 1;
+            };
+            r
+        }
+
+        // labeled break out of a nested loop
+        fn nested() -> (r: u32)
+            ensures r == 7,
+        {
+            let r = 'outer: loop
+                decreases 1int,
+            {
+                let mut j: u32 = 0;
+                loop
+                    invariant j <= 3,
+                    decreases 10 - j,
+                {
+                    if j == 3 { break 'outer 7u32; }
+                    j += 1;
+                }
+            };
+            r
+        }
+
+        // a non-Copy value
+        fn build(n: usize) -> (r: Vec<u8>)
+            requires n < 100,
+            ensures r@.len() == n,
+        {
+            let mut v: Vec<u8> = Vec::new();
+            let r = loop
+                invariant v@.len() <= n,
+                decreases n - v@.len(),
+            {
+                if v.len() == n { break v; }
+                v.push(0);
+            };
+            r
+        }
+
+        fn wrong() -> (r: u32)
+            ensures r == 2, // FAILS
+        {
+            let r = loop decreases 1int { break 1u32; };
+            r
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file_with_options! {
+    #[test] test_let_chains ["--edition 2024"] => verus_code! {
+        use vstd::prelude::*;
+
+        fn f(a: Option<u32>, b: Option<u32>) -> (r: u32)
+            ensures
+                (a.is_some() && a->0 < 10 && b.is_some() && b->0 < 10) ==> r == a->0 + b->0,
+                !(a.is_some() && a->0 < 10 && b.is_some() && b->0 < 10) ==> r == 0,
+        {
+            if let Some(x) = a && x < 10 && let Some(y) = b && y < 10 { x + y } else { 0 }
+        }
+
+        // no else; the then-branch returns
+        fn ret(a: Option<u32>, b: Option<u32>) -> (r: u32)
+            ensures a.is_some() && b.is_some() ==> r == 1,
+        {
+            if let Some(_x) = a && let Some(_y) = b { return 1; }
+            0
+        }
+
+        // a later `let` matches a binding of an earlier one
+        fn nested(a: Option<Option<u32>>) -> (r: u32)
+            ensures (a.is_some() && a->0.is_some()) ==> r == a->0->0,
+        {
+            if let Some(inner) = a && let Some(x) = inner { x } else { 0 }
+        }
+
+        // in a `while` condition
+        fn w(v: &Vec<Option<u32>>) -> (r: usize)
+            ensures r <= v@.len(),
+        {
+            let mut i: usize = 0;
+            while i < v.len() && let Some(x) = v[i] && x < 10
+                invariant i <= v@.len(),
+                decreases v@.len() - i,
+            {
+                i += 1;
+            }
+            i
+        }
+
+        fn wrong(a: Option<u32>) -> (r: u32)
+            ensures r == 1, // FAILS
+        {
+            if let Some(x) = a && x > 5 { 1 } else { 2 }
+        }
+    } => Err(err) => assert_one_fails(err)
+}

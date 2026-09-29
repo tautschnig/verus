@@ -309,6 +309,7 @@ pub(crate) fn expr_post<'tcx>(
             }
         }
         ExprKind::Let { .. } => expr_let_post(cx, hir_expr, kind),
+        ExprKind::LogicalOp { op: LogicalOp::And, .. } => reassociate_let_chain(cx, kind),
         ExprKind::LoopMatch { .. } => {
             panic!("Verus Internal Error: LoopMatch not supported");
         }
@@ -756,6 +757,54 @@ fn arm_post<'tcx>(
 }
 
 /// Conjoin the given expressions (intended to be used with Let expressions)
+/// In a let chain `a && let P = e && ..`, `expr_let_post` has replaced each `let P = e` by
+/// `Scope(let P = e && let P_shadow = ..)`. As the right operand of `&&` that is not a `let`,
+/// and rustc's match checking and MIR building expect let chains to associate to the left,
+/// `((a && let P = e) && ..)`. Rotate: `a && Scope(x1 && x2 .. && xn)` becomes
+/// `((a && Scope(x1)) && x2) .. && xn`, keeping the let's scope on the let itself (the
+/// shadow lets bind erased ghost values and need no scope). `&&` is associative, and the
+/// bindings of each conjunct remain in scope for the conjuncts to its right.
+fn reassociate_let_chain<'tcx>(cx: &mut ThirBuildCx<'tcx>, kind: ExprKind<'tcx>) -> ExprKind<'tcx> {
+    let ExprKind::LogicalOp { op: LogicalOp::And, lhs, rhs } = kind else { return kind };
+    let ExprKind::Scope { region_scope, value, hir_id } = cx.thir.exprs[rhs].kind else {
+        return kind;
+    };
+    if !matches!(cx.thir.exprs[value].kind, ExprKind::LogicalOp { op: LogicalOp::And, .. }) {
+        return kind;
+    }
+    // flatten the left-associated chain under the scope: x1 && x2 && .. && xn
+    fn flatten<'tcx>(cx: &ThirBuildCx<'tcx>, e: ExprId, out: &mut Vec<ExprId>) {
+        match cx.thir.exprs[e].kind {
+            ExprKind::LogicalOp { op: LogicalOp::And, lhs, rhs } => {
+                flatten(cx, lhs, out);
+                out.push(rhs);
+            }
+            _ => out.push(e),
+        }
+    }
+    let mut parts = vec![];
+    flatten(cx, value, &mut parts);
+    // only rotate chains that start with a `let` (the shape `expr_let_post` produces)
+    if !matches!(cx.thir.exprs[parts[0]].kind, ExprKind::Let { .. }) {
+        return kind;
+    }
+    let bool_ty = cx.tcx.mk_ty_from_kind(TyKind::Bool);
+    let span = cx.thir.exprs[rhs].span;
+    let temp_scope_id = cx.thir.exprs[rhs].temp_scope_id;
+    let first = cx.thir.exprs.push(Expr {
+        temp_scope_id,
+        ty: bool_ty,
+        span,
+        kind: ExprKind::Scope { region_scope, value: parts[0], hir_id },
+    });
+    let mut acc = ExprKind::LogicalOp { op: LogicalOp::And, lhs, rhs: first };
+    for &p in parts.iter().skip(1) {
+        let l = cx.thir.exprs.push(Expr { temp_scope_id, ty: bool_ty, span, kind: acc });
+        acc = ExprKind::LogicalOp { op: LogicalOp::And, lhs: l, rhs: p };
+    }
+    acc
+}
+
 fn conjoin_exprs<'tcx>(
     cx: &mut ThirBuildCx<'tcx>,
     exprs: &[ExprId],

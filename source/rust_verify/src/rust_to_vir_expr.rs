@@ -2046,6 +2046,181 @@ pub(crate) fn expr_cast_enum_int_to_vir<'tcx>(
     return Ok(mk_expr(ExprX::Match(place_vir, Arc::new(vir_arms), false))?);
 }
 
+/// The conjuncts of a let chain `c1 && let P = e && c3 ..` (edition 2024), if `cond` is
+/// one: a left-nested `&&` tree with at least one `let` leaf.
+fn let_chain_conjuncts<'a, 'tcx>(cond: &'a Expr<'tcx>) -> Option<Vec<&'a Expr<'tcx>>> {
+    fn go<'a, 'tcx>(e: &'a Expr<'tcx>, out: &mut Vec<&'a Expr<'tcx>>) {
+        let e = e.peel_drop_temps();
+        match &e.kind {
+            ExprKind::Binary(op, l, r) if op.node == BinOpKind::And => {
+                go(l, out);
+                go(r, out);
+            }
+            _ => out.push(e),
+        }
+    }
+    let ExprKind::Binary(op, _, _) = &cond.kind else { return None };
+    if op.node != BinOpKind::And {
+        return None;
+    }
+    let mut out = Vec::new();
+    go(cond, &mut out);
+    if out.iter().any(|c| matches!(c.kind, ExprKind::Let(_))) { Some(out) } else { None }
+}
+
+/// `if c1 && let P2 = e2 && c3 { A } else { B }` (a let chain), lowered in VIR only to
+///
+///   { let %r; loop L {                       // one iteration, not isolated
+///       if c1 { match e2 { P2 => if c3 { %r = A; break L }, _ => {} } }
+///       %r = B; break L
+///   }; %r }
+///
+/// which evaluates the conjuncts left to right, stops at the first that fails, binds each
+/// `let`'s pattern for the rest of the chain and for `A`, and evaluates `B` once. The
+/// compiled code is rustc's own lowering of the chain, unchanged.
+fn let_chain_to_vir<'a, 'tcx>(
+    bctx: &BodyCtxt<'tcx>,
+    expr: &'a Expr<'tcx>,
+    conjuncts: &[&'a Expr<'tcx>],
+    lhs: &'a Expr<'tcx>,
+    rhs: Option<&'a Expr<'tcx>>,
+    typ: &Typ,
+) -> Result<ExprOrPlace, VirErr> {
+    if bctx.in_ghost {
+        unsupported_err!(expr.span, format!("let chains in ghost code"));
+    }
+    let unit = vir::ast_util::unit_typ();
+    let label = bctx.fresh_label(expr.hir_id, &None);
+    let name = vir::def::break_value_var(expr.hir_id.local_id.index());
+    let res_ty = bctx.types.node_type(expr.hir_id);
+    let generated = |id| bctx.ctxt.erasure_info.borrow_mut().hir_vir_ids.push((None, id));
+    let res_place = || {
+        let p = bctx.spanned_typed_new(expr.span, typ, PlaceX::Local(name.clone()));
+        generated(p.span.id);
+        p
+    };
+    // `{ %r = v; break L }`
+    let assign_break = |v: vir::ast::Expr, span: Span| -> vir::ast::Expr {
+        let assign = bctx.spanned_typed_new(
+            span,
+            &unit,
+            ExprX::Assign {
+                place: res_place(),
+                rhs: v,
+                op: None,
+                resolve: false,
+                typ: typ.clone(),
+            },
+        );
+        let brk = bctx.spanned_typed_new(
+            span,
+            &unit,
+            ExprX::BreakOrContinue { label: label.clone(), is_break: true },
+        );
+        bctx.spanned_typed_new(
+            span,
+            &unit,
+            ExprX::Block(Arc::new(vec![bctx.spanned_new(span, StmtX::Expr(assign))]), Some(brk)),
+        )
+    };
+    let empty =
+        |span: Span| bctx.spanned_typed_new(span, &unit, ExprX::Block(Arc::new(vec![]), None));
+
+    // innermost: the then-branch; built outward from the last conjunct
+    let mut inner = assign_break(expr_to_vir_consume(bctx, lhs)?, lhs.span);
+    for c in conjuncts.iter().rev() {
+        inner = match &c.kind {
+            ExprKind::Let(LetExpr { pat, init, .. }) => {
+                let place = expr_to_vir_place(bctx, init)?;
+                let place = simplify_place_by_cancelling(&place);
+                let pattern = pattern_to_vir(bctx, pat)?;
+                let tru =
+                    bctx.spanned_typed_new(c.span, &bool_typ(), ExprX::Const(Constant::Bool(true)));
+                let arm1 = bctx.spanned_new(
+                    c.span,
+                    ArmX { pattern: pattern.clone(), guard: tru.clone(), body: inner },
+                );
+                let wild = bctx.spanned_typed_new(c.span, &pattern.typ, PatternX::Wildcard);
+                generated(wild.span.id);
+                let arm2 = bctx
+                    .spanned_new(c.span, ArmX { pattern: wild, guard: tru, body: empty(c.span) });
+                bctx.spanned_typed_new(
+                    c.span,
+                    &unit,
+                    ExprX::Match(place, Arc::new(vec![arm1, arm2]), false),
+                )
+            }
+            _ => {
+                let cv = expr_to_vir_consume(bctx, c)?;
+                bctx.spanned_typed_new(c.span, &unit, ExprX::If(cv, inner, None))
+            }
+        };
+    }
+    let else_v = match rhs {
+        Some(r) => expr_to_vir_consume(bctx, r)?,
+        None => empty(expr.span),
+    };
+    let else_span = rhs.map(|r| r.span).unwrap_or(expr.span);
+    let tail = assign_break(else_v, else_span);
+    let body = bctx.spanned_typed_new(
+        expr.span,
+        &unit,
+        ExprX::Block(Arc::new(vec![bctx.spanned_new(expr.span, StmtX::Expr(inner))]), Some(tail)),
+    );
+    let int_typ = Arc::new(TypX::Int(vir::ast::IntRange::Int));
+    let one = bctx.spanned_typed_new(
+        expr.span,
+        &int_typ,
+        ExprX::Const(vir::ast_util::const_int_from_u128(1)),
+    );
+    generated(one.span.id);
+    let loop_e = bctx.spanned_typed_new(
+        expr.span,
+        &unit,
+        ExprX::Loop {
+            loop_isolation: false,
+            allow_complex_invariants: true,
+            is_for_loop: false,
+            assume_termination: false,
+            label,
+            cond: None,
+            body,
+            invs: Arc::new(vec![]),
+            decrease: Arc::new(vec![one]),
+            atomic_call: false,
+        },
+    );
+    let binding = vir::ast::PatternBinding {
+        name: name.clone(),
+        by_ref: vir::ast::ByRef::No,
+        typ: typ.clone(),
+        user_mut: None,
+        copy: bctx.is_copy(res_ty),
+    };
+    let pattern = bctx.spanned_typed_new(expr.span, typ, PatternX::Var(binding));
+    generated(pattern.span.id);
+    let decl = bctx.spanned_new(
+        expr.span,
+        StmtX::Decl {
+            pattern,
+            mode: Some((Mode::Exec, vir::ast::DeclProph::Default)),
+            init: None,
+            els: None,
+            assert_irrefutable: false,
+        },
+    );
+    let read = ExprOrPlace::Place(res_place()).consume(bctx, res_ty);
+    generated(read.span.id);
+    Ok(ExprOrPlace::Expr(bctx.spanned_typed_new(
+        expr.span,
+        typ,
+        ExprX::Block(
+            Arc::new(vec![decl, bctx.spanned_new(expr.span, StmtX::Expr(loop_e))]),
+            Some(read),
+        ),
+    )))
+}
+
 /// The value of an `if` condition that is a `cfg!(..)` literal, possibly combined with
 /// `&&`, `||`, `!` and parentheses, where every literal comes from a `cfg!` expansion and
 /// short-circuiting makes the whole condition static (`cfg!(x) && e` is static when
@@ -3208,6 +3383,9 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
         }
         ExprKind::If(cond, lhs, rhs) => {
             let cond = cond.peel_drop_temps();
+            if let Some(conjuncts) = let_chain_conjuncts(cond) {
+                return let_chain_to_vir(bctx, expr, &conjuncts, lhs, *rhs, &expr_typ()?);
+            }
             match cond.kind {
                 ExprKind::Let(_) => {
                     let (rhs_vir, rhs_span) = if let Some(rhs) = rhs {
@@ -3398,7 +3576,71 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
                     }
                 });
             }
+            let chain = let_chain_conjuncts(cond.peel_drop_temps());
             let (cond, body) = match &cond.peel_drop_temps().kind {
+                // `while c1 && let P = e && .. { body }`: each conjunct in turn, a failing one
+                // breaks out of the loop; bindings are in scope for the rest and for `body`
+                _ if chain.is_some() => {
+                    let body_ty = body.typ.clone();
+                    let brk = |span: Span| {
+                        bctx.spanned_typed_new(
+                            span,
+                            &body_ty,
+                            ExprX::BreakOrContinue { label: label.clone(), is_break: true },
+                        )
+                    };
+                    let mut inner = body;
+                    for c in chain.unwrap().iter().rev() {
+                        inner = match &c.kind {
+                            ExprKind::Let(LetExpr { pat, init, .. }) => {
+                                let place = expr_to_vir_place(bctx, init)?;
+                                let place = simplify_place_by_cancelling(&place);
+                                let pattern = pattern_to_vir(bctx, pat)?;
+                                let tru = bctx.spanned_typed_new(
+                                    c.span,
+                                    &bool_typ(),
+                                    ExprX::Const(Constant::Bool(true)),
+                                );
+                                let arm1 = bctx.spanned_new(
+                                    c.span,
+                                    ArmX {
+                                        pattern: pattern.clone(),
+                                        guard: tru.clone(),
+                                        body: inner,
+                                    },
+                                );
+                                let wild = bctx.spanned_typed_new(
+                                    c.span,
+                                    &pattern.typ,
+                                    PatternX::Wildcard,
+                                );
+                                bctx.ctxt
+                                    .erasure_info
+                                    .borrow_mut()
+                                    .hir_vir_ids
+                                    .push((None, wild.span.id));
+                                let arm2 = bctx.spanned_new(
+                                    c.span,
+                                    ArmX { pattern: wild, guard: tru, body: brk(c.span) },
+                                );
+                                bctx.spanned_typed_new(
+                                    c.span,
+                                    &body_ty,
+                                    ExprX::Match(place, Arc::new(vec![arm1, arm2]), false),
+                                )
+                            }
+                            _ => {
+                                let cv = expr_to_vir_consume(bctx, c)?;
+                                bctx.spanned_typed_new(
+                                    c.span,
+                                    &body_ty,
+                                    ExprX::If(cv, inner, Some(brk(c.span))),
+                                )
+                            }
+                        };
+                    }
+                    (None, inner)
+                }
                 ExprKind::Let(_) => {
                     let body_ty = body.typ.clone();
                     let wildcard_body = bctx.spanned_typed_new(
