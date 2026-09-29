@@ -1413,27 +1413,68 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
-    #[test] unit_struct_as_fn_not_supported verus_code! {
+    #[test] unit_struct_as_fn verus_code! {
+        use vstd::prelude::*;
         struct A();
 
         fn test()
         {
             let a = A;
+            let x = a();
         }
-    } => Err(err) => assert_vir_error_msg(err, "using a datatype constructor as a function value")
+
+        impl A {
+            fn test2() -> (r: A)
+            {
+                let a = Self;
+                a()
+            }
+        }
+    } => Ok(())
 }
 
 test_verify_one_file! {
-    #[test] unit_struct_as_fn_not_supported_self_ctor verus_code! {
-        struct A();
+    // A constructor used as a function value is the closure |x..| Ctor(x..), with
+    // ensures ret == Ctor(x..)
+    #[test] ctor_as_fn_value verus_code! {
+        use vstd::prelude::*;
+        enum Meta { List(u32), Word }
+        struct W(u64, bool);
+        struct G<T>(T);
 
-        impl A {
-            fn test()
-            {
-                let a = Self;
-            }
+        fn a(o: Option<u32>) -> (r: Option<Meta>)
+            ensures
+                o.is_some() ==> r == Some(Meta::List(o.unwrap())),
+                o.is_none() ==> r.is_none(),
+        {
+            o.map(Meta::List)
         }
-    } => Err(err) => assert_vir_error_msg(err, "using a datatype constructor as a function value")
+
+        fn two(a: Option<u32>, b: Option<bool>) -> (r: (Option<Option<u32>>, Option<Option<bool>>))
+            ensures
+                a.is_some() ==> r.0 == Some(Some(a.unwrap())),
+                b.is_some() ==> r.1 == Some(Some(b.unwrap())),
+        {
+            (a.map(Some), b.map(Some))
+        }
+
+        fn c<F: Fn(u64, bool) -> W>(f: F) -> (r: W)
+            requires forall|x: u64, y: bool| f.requires((x, y)),
+            ensures f.ensures((1u64, true), r),
+        {
+            f(1, true)
+        }
+
+        fn d() -> (r: W) ensures r.0 == 1 && r.1 { c(W) }
+
+        fn e<T>(x: T) -> (r: G<T>) ensures r.0 == x { let f = G; f(x) }
+
+        fn wrong(o: Option<u32>) -> (r: Option<Meta>)
+            ensures r.is_none(), // FAILS
+        {
+            o.map(Meta::List)
+        }
+    } => Err(err) => assert_one_fails(err)
 }
 
 test_verify_one_file_with_options! {

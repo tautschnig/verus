@@ -617,6 +617,92 @@ pub(crate) fn get_fn_path<'tcx>(
     }
 }
 
+/// A tuple-struct or tuple-variant constructor used as a function value, e.g. the `Some` in
+/// `o.map(Some)`: the closure `|x0, .., xn| Ctor(x0, .., xn)` with
+/// `ensures ret == Ctor(x0, .., xn)`. Its VIR type is the matching `AnonymousClosure`
+/// (rust_to_vir_base, `ctor_closure_id`), so the callee's `F: Fn..` bound sees this closure's
+/// `call_ensures`. The closure is exactly the constructor, so nothing is assumed.
+fn ctor_fn_value_to_vir<'tcx>(
+    bctx: &BodyCtxt<'tcx>,
+    expr: &Expr<'tcx>,
+    ctor: crate::rust_to_vir_ctor::Ctor,
+) -> Result<vir::ast::Expr, VirErr> {
+    let tcx = bctx.ctxt.tcx;
+    let span = expr.span;
+    let fn_ty = bctx.types.node_type(expr.hir_id);
+    let TyKind::FnDef(ctor_def_id, args) = fn_ty.kind() else {
+        crate::internal_err!(span, "constructor value without a FnDef type");
+    };
+    let closure_typ = bctx.mid_ty_to_vir(span, &fn_ty)?;
+    let sig = tcx.fn_sig(*ctor_def_id).instantiate(tcx, *args).skip_binder();
+    let ret_ty = sig.output();
+    let ret_typ = bctx.mid_ty_to_vir(span, &ret_ty)?;
+    let variant_name = str_ident(&ctor.variant_def.ident(tcx).as_str());
+    let vir_path = bctx.ctxt.def_id_to_vir_path(ctor.adt_def_id);
+    let disamb = expr.hir_id.local_id.index();
+
+    let mut params: Vec<VarBinder<Typ>> = Vec::new();
+    let mut body_fields: Vec<vir::ast::Binder<vir::ast::Expr>> = Vec::new();
+    let mut spec_fields: Vec<vir::ast::Binder<vir::ast::Expr>> = Vec::new();
+    for (i, in_ty) in sig.inputs().iter().enumerate() {
+        let typ = bctx.mid_ty_to_vir(span, in_ty)?;
+        let name = str_unique_var(
+            &format!("%ctor_arg{}", i),
+            vir::ast::VarIdentDisambiguate::RustcId(disamb),
+        );
+        params.push(Arc::new(VarBinderX { name: name.clone(), a: typ.clone() }));
+        let place = bctx.spanned_typed_new(span, &typ, PlaceX::Local(name.clone()));
+        let read = ExprOrPlace::Place(place).consume(bctx, *in_ty);
+        body_fields.push(ident_binder(&positional_field_ident(i), &read));
+        let var = bctx.spanned_typed_new(span, &typ, ExprX::Var(name));
+        spec_fields.push(ident_binder(&positional_field_ident(i), &var));
+    }
+    let mk_ctor = |fields: Vec<vir::ast::Binder<vir::ast::Expr>>| {
+        bctx.spanned_typed_new(
+            span,
+            &ret_typ,
+            ExprX::Ctor(Dt::Path(vir_path.clone()), variant_name.clone(), Arc::new(fields), None),
+        )
+    };
+    let body = mk_ctor(body_fields);
+    let ret_name = str_unique_var("%ctor_ret", vir::ast::VarIdentDisambiguate::RustcId(disamb));
+    let ret_var = bctx.spanned_typed_new(span, &ret_typ, ExprX::Var(ret_name.clone()));
+    let ens = bctx.spanned_typed_new(
+        span,
+        &vir::ast_util::bool_typ(),
+        ExprX::Binary(vir::ast::BinaryOp::Eq(Mode::Spec), ret_var, mk_ctor(spec_fields)),
+    );
+    let x = ExprX::NonSpecClosure {
+        params: Arc::new(params),
+        proof_fn_modes: None,
+        body,
+        requires: Arc::new(vec![]),
+        ensures: Arc::new(vec![ens]),
+        ret: Arc::new(VarBinderX { name: ret_name, a: ret_typ }),
+        external_spec: None, // filled in by ast_simplify
+    };
+    let e = bctx.spanned_typed_new(span, &closure_typ, x);
+    // The generated nodes inside the closure have no source HIR node.
+    let _ = vir::ast_visitor::ast_visitor_check::<(), _, _, _, _, _, _>(
+        &e,
+        &mut (),
+        &mut |_, _, ex: &vir::ast::Expr| {
+            if ex.span.id != e.span.id {
+                bctx.ctxt.erasure_info.borrow_mut().hir_vir_ids.push((None, ex.span.id));
+            }
+            Ok(())
+        },
+        &mut |_, _, _stmt| Ok(()),
+        &mut |_, _, _pat| Ok(()),
+        &mut |_, _, _typ, _span| Ok(()),
+        &mut |_, _, place| {
+            bctx.ctxt.erasure_info.borrow_mut().hir_vir_ids.push((None, place.span.id));
+            Ok(())
+        },
+    );
+    Ok(e)
+}
+
 pub(crate) fn expr_tuple_datatype_ctor_to_vir<'tcx>(
     bctx: &BodyCtxt<'tcx>,
     expr: &Expr<'tcx>,
@@ -3239,10 +3325,13 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
                 },
                 (_, Some((ctor, ctor_kind))) => {
                     if ctor_kind != CtorKind::Const {
-                        unsupported_err!(
-                            expr.span,
-                            "using a datatype constructor as a function value"
-                        );
+                        if bctx.in_ghost {
+                            unsupported_err!(
+                                expr.span,
+                                "using a datatype constructor as a function value in ghost code"
+                            );
+                        }
+                        return Ok(ExprOrPlace::Expr(ctor_fn_value_to_vir(bctx, expr, ctor)?));
                     }
                     Ok(ExprOrPlace::Expr(expr_tuple_datatype_ctor_to_vir(
                         bctx,

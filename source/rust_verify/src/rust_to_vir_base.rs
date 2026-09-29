@@ -504,6 +504,24 @@ fn coroutine_body_awaits<'tcx>(tcx: TyCtxt<'tcx>, coroutine_id: DefId) -> bool {
     v.found
 }
 
+thread_local! {
+    static CTOR_CLOSURE_IDS: std::cell::RefCell<HashMap<(DefId, DefId, String), usize>> =
+        std::cell::RefCell::new(HashMap::new());
+}
+
+/// The `AnonymousClosure` id of a constructor used as a function value inside the item
+/// `owner`, at the generic arguments `args` (printed). VIR closure types belong to one
+/// enclosing function and have fixed argument and result types, so the id is per
+/// (constructor, owner, arguments). Ids of source closures are local def indices (< 2^32); these start
+/// at 2^62, so the two cannot collide.
+pub(crate) fn ctor_closure_id(ctor: DefId, owner: DefId, args: String) -> usize {
+    CTOR_CLOSURE_IDS.with(|m| {
+        let mut m = m.borrow_mut();
+        let next = (1usize << 62) + m.len();
+        *m.entry((ctor, owner, args)).or_insert(next)
+    })
+}
+
 pub(crate) fn get_impl_paths_for_clauses<'tcx>(
     tcx: TyCtxt<'tcx>,
     verus_items: &crate::verus_items::VerusItems,
@@ -647,6 +665,15 @@ pub(crate) fn get_impl_paths_for_clauses<'tcx>(
                             {
                                 // Handle the trait bound is `FnDef(f) : FnOnce(...)`
                                 match trait_args.into_type_list(tcx)[0].kind() {
+                                    TyKind::FnDef(fn_def_id, _)
+                                        if matches!(
+                                            tcx.def_kind(*fn_def_id),
+                                            rustc_hir::def::DefKind::Ctor(..)
+                                        ) =>
+                                    {
+                                        // a constructor value is a closure in VIR (see the
+                                        // `FnDef` case of mid_ty_to_vir): no impl path
+                                    }
                                     TyKind::FnDef(fn_def_id, fn_node_substs) => {
                                         let fn_path = def_id_to_vir_path(
                                             tcx,
@@ -1451,6 +1478,32 @@ pub(crate) fn mid_ty_to_vir_ghost<'tcx>(
                     unsupported_err!(span, "opaque type")
                 }
             }
+        }
+        TyKind::FnDef(def_id, args)
+            if matches!(
+                tcx.def_kind(*def_id),
+                rustc_hir::def::DefKind::Ctor(_, rustc_hir::def::CtorKind::Fn)
+            ) =>
+        {
+            // A tuple-struct or tuple-variant constructor used as a function value
+            // (`.map(Some)`, `.map(Meta::List)`) is lowered to the closure
+            // `|x0, .., xn| Ctor(x0, .., xn)` (rust_to_vir_expr, `ctor_fn_value_to_vir`); its
+            // type is that closure's type, keyed by `ctor_closure_id`.
+            let sig = tcx.fn_sig(*def_id).instantiate(tcx, *args).skip_binder();
+            let mut param_typs: Vec<Typ> = Vec::new();
+            for t in sig.inputs().iter() {
+                param_typs.push(t_rec(t)?.0);
+            }
+            let ret = t_rec(&sig.output())?.0;
+            (
+                Arc::new(TypX::AnonymousClosure(
+                    Arc::new(param_typs),
+                    ret,
+                    vir::ast::ClosureKind::Fn,
+                    ctor_closure_id(*def_id, param_env_src, format!("{:?}", args)),
+                )),
+                false,
+            )
         }
         TyKind::FnDef(def_id, args) => {
             let resolved = if tcx.trait_of_assoc(*def_id).is_none() {
