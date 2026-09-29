@@ -1741,12 +1741,22 @@ pub(crate) fn expr_to_vir_with_adjustments<'tcx>(
         Adjust::GenericReborrow(_) => {
             unsupported_err!(expr.span, "User-defined Reborrow implementations")
         }
-        Adjust::Borrow(AutoBorrow::RawPtr(_)) => {
-            // Despite the name 'borrow', the docs seem to indicate this is a dereference
-            unsupported_err!(
+        Adjust::Borrow(AutoBorrow::RawPtr(mutbl)) => {
+            // `r as *const T`, `let p: *const T = r`: rustc derefs the reference and takes a
+            // raw borrow of the place (`&raw const *r`). Model it as a borrow of the place
+            // passed to `vstd::raw_ptr::{ref_to_const_ptr, mut_ref_to_mut_ptr}`: an
+            // unconstrained pointer with no permission (verified code cannot dereference it).
+            let place = expr_to_vir_with_adjustments(bctx, expr, adjustments, adjustment_idx - 1)?
+                .to_place(bctx, expr.span, get_inner_ty())?;
+            let ptr_typ = bctx.mid_ty_to_vir(expr.span, &adjustment.target)?;
+            Ok(ExprOrPlace::Expr(raw_borrow_to_vir(
+                bctx,
                 expr.span,
-                "dereferencing a pointer (here the dereference is implicit)"
-            )
+                &place,
+                get_inner_ty(),
+                *mutbl == rustc_ast::Mutability::Mut,
+                &ptr_typ,
+            )?))
         }
         Adjust::Pointer(PointerCoercion::Unsize) => {
             let ty1 = get_inner_ty();
@@ -2809,8 +2819,19 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
             let place = expr_to_vir_place(bctx, e)?;
             Ok(ExprOrPlace::Expr(borrow_mut_vir(bctx, expr.span, &place, AllowTwoPhase::No)))
         }
-        ExprKind::AddrOf(BorrowKind::Raw, _, _) => {
-            unsupported_err!(expr.span, format!("raw borrows"))
+        ExprKind::AddrOf(BorrowKind::Raw, mutbl, e) => {
+            // `&raw const place` / `&raw mut place`: as the RawPtr adjustment above
+            let place = expr_to_vir_place(bctx, e)?;
+            let place = simplify_place_by_cancelling(&place);
+            let ptr_typ = expr_typ()?;
+            Ok(ExprOrPlace::Expr(raw_borrow_to_vir(
+                bctx,
+                expr.span,
+                &place,
+                bctx.types.expr_ty_adjusted(e),
+                *mutbl == rustc_ast::Mutability::Mut,
+                &ptr_typ,
+            )?))
         }
         ExprKind::OffsetOf(_container, _fields) => {
             unsupported_err!(expr.span, format!("offset_of!()"))
@@ -4913,6 +4934,19 @@ fn is_ptr_cast<'tcx>(
             }
             return Ok(None);
         }
+        (_ty1, TyKind::RawPtr(ty2, _))
+            if matches!(src.kind(), TyKind::Uint(rustc_middle::ty::UintTy::Usize))
+                && ty2.is_sized(
+                    bctx.ctxt.tcx,
+                    TypingEnv::post_analysis(bctx.ctxt.tcx, bctx.fun_id),
+                ) =>
+        {
+            // `a as *const T` for `a: usize` (other integer types are first cast to usize by
+            // the user; rustc allows only usize-sized integers here without `as usize`)
+            let dst_ty = bctx.mid_ty_to_vir(span, ty2)?;
+            let fun = vir::fun!(CrateId::Vstd => "raw_ptr", "cast_usize_to_ptr");
+            return Ok(Some(PtrCastKind::Complex(fun, Arc::new(vec![dst_ty]), false)));
+        }
         (TyKind::RawPtr(ty1, _), _ty2)
             if crate::rust_to_vir_base::is_integer_ty(&bctx.ctxt.verus_items, &dst) =>
         {
@@ -4926,6 +4960,50 @@ fn is_ptr_cast<'tcx>(
         }
         _ => Ok(None),
     }
+}
+
+/// A raw pointer taken from a place, `&raw const place` / `&raw mut place`: a (mutable)
+/// borrow of the place passed to `vstd::raw_ptr::ref_to_const_ptr` / `mut_ref_to_mut_ptr`.
+fn raw_borrow_to_vir<'tcx>(
+    bctx: &BodyCtxt<'tcx>,
+    span: Span,
+    place: &Place,
+    pointee_ty: rustc_middle::ty::Ty<'tcx>,
+    is_mut: bool,
+    ptr_typ: &Typ,
+) -> Result<vir::ast::Expr, VirErr> {
+    if bctx.in_ghost {
+        unsupported_err!(span, "raw borrows in ghost code");
+    }
+    if !pointee_ty.is_sized(bctx.ctxt.tcx, TypingEnv::post_analysis(bctx.ctxt.tcx, bctx.fun_id)) {
+        unsupported_err!(span, "raw borrows of unsized places (slices, str, dyn)");
+    }
+    let (arg, fun) = if is_mut {
+        (
+            borrow_mut_vir(bctx, span, place, AllowTwoPhase::No),
+            vir::fun!(CrateId::Vstd => "raw_ptr", "mut_ref_to_mut_ptr"),
+        )
+    } else {
+        (
+            ExprOrPlace::Place(place.clone()).immut_bor(bctx, span, pointee_ty)?,
+            vir::fun!(CrateId::Vstd => "raw_ptr", "ref_to_const_ptr"),
+        )
+    };
+    let pointee = bctx.mid_ty_to_vir(span, &pointee_ty)?;
+    let call_target = CallTarget::Fun(
+        vir::ast::CallTargetKind::Static,
+        fun,
+        Arc::new(vec![pointee]),
+        Arc::new(vec![]),
+        vir::ast::CallTargetAttrs {
+            autospec: AutospecUsage::Final,
+            const_var: false,
+            assume_external_allowed: false,
+        },
+    );
+    let x =
+        ExprX::Call { target: call_target, args: Arc::new(vec![arg]), post_args: None, body: None };
+    Ok(bctx.spanned_typed_new(span, ptr_typ, x))
 }
 
 pub(crate) fn maybe_do_ptr_cast<'tcx>(

@@ -880,4 +880,18 @@ pub assume_specification<'a, T>[ <[T]>::chunks ](s: &'a [T], chunk_size: usize) 
         IteratorSpec::decrease(&iter) is Some,
 ;
 
+// `as_ptr` / `as_mut_ptr`: a raw pointer to the first element; nothing is known about it and
+// no permission comes with it (as for `r as *const T`, see `raw_ptr::ref_to_const_ptr`).
+pub assume_specification<T>[ <[T]>::as_ptr ](s: &[T]) -> *const T
+    opens_invariants none
+    no_unwind
+;
+
+pub assume_specification<T>[ <[T]>::as_mut_ptr ](s: &mut [T]) -> *mut T
+    ensures
+        final(s)@ == old(s)@,
+    opens_invariants none
+    no_unwind
+;
+
 } // verus!

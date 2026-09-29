@@ -2527,3 +2527,55 @@ test_verify_one_file! {
     } => Err(err) => assert_one_fails(err)
 }
 
+test_verify_one_file! {
+    #[test] test_raw_pointers_from_references verus_code! {
+        use vstd::prelude::*;
+        use vstd::raw_ptr::*;
+
+        // reference -> raw pointer, in every surface form; the pointer carries no permission
+        fn a(x: &u32) -> *const u32 { x as *const u32 }
+        fn b(x: u32) -> *const u32 { &x as *const u32 }
+        fn c(x: &u32) -> *const u32 { let p: *const u32 = x; p }
+        fn d(x: &u32) -> *const u32 { &raw const *x }
+
+        // the conversion from `&mut` does not change the referent
+        fn e(x: &mut u32) -> (p: *mut u32)
+            ensures *final(x) == *old(x),
+        {
+            x as *mut u32
+        }
+
+        // integer -> pointer keeps the address
+        fn f(addr: usize) -> (p: *const u32)
+            ensures p@.addr == addr,
+        {
+            addr as *const u32
+        }
+
+        fn g(v: &mut Vec<u8>)
+            requires old(v)@.len() == 2,
+        {
+            let p = v.as_mut_ptr();
+            let q = v.as_ptr();
+            assert(v@.len() == 2);
+        }
+
+        fn wrong(x: &mut u32)
+            requires *old(x) == 1,
+        {
+            let p = x as *mut u32;
+            assert(*x == 2); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    // a pointer obtained from a reference cannot be dereferenced without a permission
+    #[test] test_raw_pointer_from_reference_no_deref verus_code! {
+        use vstd::prelude::*;
+        fn f(x: &u32) -> u32 {
+            let p = x as *const u32;
+            unsafe { *p }
+        }
+    } => Err(err) => assert_vir_error_msg(err, "dereferencing a raw pointer")
+}

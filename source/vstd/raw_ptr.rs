@@ -452,6 +452,61 @@ pub fn cast_ptr_to_thin_ptr<T: ?Sized, U: Sized>(ptr: *mut T) -> (result: *mut U
     ptr as *mut U
 }
 
+/// `a as *const T` / `a as *mut T` for an integer `a`: a pointer with address `a` and
+/// an unknown provenance (Rust's `with_exposed_provenance` semantics). No permission comes
+/// with it. Don't call this directly; use an `as`-cast.
+pub uninterp spec fn spec_cast_usize_to_ptr_provenance<T>(a: usize) -> Provenance;
+
+pub open spec fn spec_cast_usize_to_ptr<T>(a: usize) -> *mut T {
+    ptr_mut_from_data(PtrData::<T> {
+        addr: a,
+        provenance: spec_cast_usize_to_ptr_provenance::<T>(a),
+        metadata: (),
+    })
+}
+
+#[verifier::external_body]
+#[cfg_attr(verus_keep_ghost, rustc_diagnostic_item = "verus::vstd::raw_ptr::cast_usize_to_ptr")]
+#[verifier::when_used_as_spec(spec_cast_usize_to_ptr)]
+pub fn cast_usize_to_ptr<T>(a: usize) -> (result: *mut T)
+    ensures
+        result == spec_cast_usize_to_ptr::<T>(a),
+    opens_invariants none
+    no_unwind
+{
+    a as *mut T
+}
+
+/// A raw pointer taken from a shared reference (`r as *const T`, `let p: *const T = r`,
+/// `&raw const *r`). Don't call this directly; Verus inserts it for those conversions.
+///
+/// Nothing is known about the pointer (address, provenance), and no permission comes with
+/// it: verified code cannot dereference it (that needs a `PointsTo`), so an unconstrained
+/// value is a sound model. What unverified code does with the pointer is the unverified
+/// boundary, as for any value passed to it.
+#[verifier::external_body]
+#[cfg_attr(verus_keep_ghost, rustc_diagnostic_item = "verus::vstd::raw_ptr::ref_to_const_ptr")]
+pub fn ref_to_const_ptr<T>(r: &T) -> (p: *const T)
+    opens_invariants none
+    no_unwind
+{
+    r as *const T
+}
+
+/// A raw pointer taken from a mutable reference (`r as *mut T`, `&raw mut *r`). The
+/// conversion itself does not write (`*final(r) == *old(r)`); nothing is known about the
+/// pointer and no permission comes with it (see `ref_to_const_ptr`).
+#[verifier::external_body]
+#[cfg_attr(verus_keep_ghost, rustc_diagnostic_item = "verus::vstd::raw_ptr::mut_ref_to_mut_ptr")]
+pub fn mut_ref_to_mut_ptr<T>(r: &mut T) -> (p: *mut T)
+    ensures
+        *final(r) == *old(r),
+    opens_invariants none
+    no_unwind
+{
+    r as *mut T
+}
+
 /// Cast a pointer to an array of length `N` to a slice pointer.
 /// Address and provenance are preserved; metadata has length `N`.
 pub open spec fn spec_cast_array_ptr_to_slice_ptr<T, const N: usize>(ptr: *mut [T; N]) -> *mut [T] {

@@ -351,11 +351,24 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
-    #[test] not_supported_int_to_ptr_cast verus_code! {
+    // `usize as *mut T` is modelled by `vstd::raw_ptr::cast_usize_to_ptr` (address kept,
+    // provenance unknown); without vstd the model is absent
+    #[test] int_to_ptr_cast_needs_vstd verus_code! {
         fn test(x: usize) {
             let y = x as *mut u8;
         }
-    } => Err(err) => assert_vir_error_msg(err, "Verus does not support this cast")
+    } => Err(err) => assert_vir_error_msg(err, "cast_usize_to_ptr` is not supported")
+}
+
+test_verify_one_file! {
+    #[test] int_to_ptr_cast verus_code! {
+        use vstd::prelude::*;
+        use vstd::raw_ptr::*;
+        fn test(x: usize) {
+            let y = x as *mut u8;
+            assert(y@.addr == x);
+        }
+    } => Ok(())
 }
 
 test_verify_one_file! {
@@ -370,15 +383,15 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
-    // Ensure that diagnostic is emitted rather than an internal error
-    #[test] raw_borrow_not_supported_in_verified_code verus_code! {
+    // raw borrows are accepted in verified code (the pointer carries no permission)
+    #[test] raw_borrow_in_verified_code verus_code! {
         use vstd::prelude::*;
 
         fn raw_borrow(n: &u64) -> impl Sized {
             let _x = &raw const n;
             42
         }
-    } => Err(err) => assert_vir_error_msg(err, "raw borrows")
+    } => Ok(())
 }
 
 test_verify_one_file! {

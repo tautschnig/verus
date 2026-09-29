@@ -557,4 +557,17 @@ pub axiom fn tracked_borrow_mut_slice<T, A: Allocator>(tracked vec: &mut Vec<T, 
         (*t).len() == final(t).len(),
         final(vec)@ == final(t)@;
 
+
+pub assume_specification<T, A: Allocator>[ Vec::<T, A>::as_ptr ](v: &Vec<T, A>) -> *const T
+    opens_invariants none
+    no_unwind
+;
+
+pub assume_specification<T, A: Allocator>[ Vec::<T, A>::as_mut_ptr ](v: &mut Vec<T, A>) -> *mut T
+    ensures
+        final(v)@ == old(v)@,
+    opens_invariants none
+    no_unwind
+;
+
 } // verus!
