@@ -2579,3 +2579,50 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_vir_error_msg(err, "dereferencing a raw pointer")
 }
+
+test_verify_one_file! {
+    #[test] test_cell_refcell_mutex_accepted verus_code! {
+        use vstd::prelude::*;
+        use std::cell::{Cell, RefCell};
+        use std::sync::Mutex;
+
+        fn cell() -> u32 {
+            let c = Cell::new(1u32);
+            c.set(2);
+            let old = c.replace(3);
+            c.get()
+        }
+
+        fn refcell() -> u32 {
+            let c = RefCell::new(1u32);
+            {
+                let mut b = c.borrow_mut();
+                *b = 5;
+            }
+            let v = *c.borrow();
+            v
+        }
+
+        fn mutex() -> u32 {
+            let m = Mutex::new(1u32);
+            let v = match m.lock() {
+                Ok(g) => *g,
+                Err(e) => *e.into_inner(),
+            };
+            v
+        }
+
+        // contents are not modelled: a cell may be changed through any shared reference
+        fn cell_contents_unknown() {
+            let c = Cell::new(1u32);
+            let v = c.get();
+            assert(v == 1); // FAILS
+        }
+
+        // a lock may be poisoned
+        fn lock_may_fail() {
+            let m = Mutex::new(1u32);
+            let g = m.lock().unwrap(); // FAILS
+        }
+    } => Err(err) => assert_fails(err, 2)
+}

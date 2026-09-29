@@ -43,6 +43,8 @@ pub mod vecdeque;
 #[cfg(feature = "alloc")]
 pub mod smart_ptrs;
 
+pub mod cell;
+
 #[cfg(feature = "std")]
 pub mod thread;
 
