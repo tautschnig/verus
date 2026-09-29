@@ -357,6 +357,9 @@ pub enum StmX {
         ///
         /// This is only used when pre_stms is non-empty.
         pre_modified_params_excl: Option<Arc<crate::sst_vars::HavocSet>>,
+        /// The body runs exactly once (see `ast::ExprX::Loop::one_shot`): encoded as a
+        /// breakable block from the entry state, without havocs or invariants.
+        one_shot: bool,
     },
     /// Atomic invariant opening for concurrent verification
     OpenInvariant(Stm),

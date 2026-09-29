@@ -2257,3 +2257,24 @@ test_verify_one_file_with_options! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file_with_options! {
+    // the `if` of a let chain keeps the entry state of variables assigned in its branches
+    #[test] test_let_chain_entry_state ["--edition 2024"] => verus_code! {
+        use vstd::prelude::*;
+        fn f(o: Option<u32>, c: bool) -> (r: u32)
+            ensures r == 0 || r == 5, (o.is_none() || !c) ==> r == 0,
+        {
+            let mut n = 0u32;
+            if let Some(x) = o && c { n = 5; }
+            n
+        }
+        fn g(o: Option<u32>, c: bool) -> (r: u32)
+            ensures r == 0, // FAILS
+        {
+            let mut n = 0u32;
+            if let Some(x) = o && c { n = 5; }
+            n
+        }
+    } => Err(err) => assert_one_fails(err)
+}

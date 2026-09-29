@@ -672,6 +672,30 @@ fn loop_has_breaks(loop_label: &Label, expr: &Expr) -> (usize, usize) {
     (num_breaks, num_isolated_breaks)
 }
 
+/// Is `body` a (nested) block whose last expression is `break loop_label`? Then no path
+/// completes the body normally (every path breaks, returns, or diverges).
+fn body_ends_with_break(loop_label: &Label, body: &Expr) -> bool {
+    match &body.x {
+        ExprX::Block(_, Some(tail)) => body_ends_with_break(loop_label, tail),
+        ExprX::BreakOrContinue { label, is_break: true } => label == loop_label,
+        _ => false,
+    }
+}
+
+/// Does `expr` contain a `continue` to the loop `loop_label`?
+fn loop_has_continue(loop_label: &Label, expr: &Expr) -> bool {
+    let mut found = false;
+    let _ = crate::ast_visitor::expr_visitor_check(expr, &mut |_scope_map, e: &Expr| {
+        if let ExprX::BreakOrContinue { label, is_break: false } = &e.x {
+            if label == loop_label {
+                found = true;
+            }
+        }
+        Ok::<(), VirErr>(())
+    });
+    found
+}
+
 /// Determine if it's possible for control flow to reach the statement after the loop exit.
 /// To be conservative, we need to answer 'yes' (true) if we can't tell.
 pub fn can_control_flow_reach_after_loop(expr: &Expr) -> bool {
@@ -2692,6 +2716,7 @@ pub(crate) fn expr_to_stm_opt(
             invs,
             decrease,
             atomic_call,
+            one_shot,
         } => {
             let is_for_loop = *is_for_loop;
             let produces_value =
@@ -2839,6 +2864,35 @@ pub(crate) fn expr_to_stm_opt(
                 assert!(removed.is_some());
             }
             state.branch_bool_var = None;
+            if *one_shot {
+                // Encoded without havocs (sst_to_air): the body must run exactly once, so it
+                // must not `continue`, must not be able to complete normally (every path
+                // leaves it), and there is nothing to iterate over (no condition, invariants
+                // or decreases).
+                let why = if cond.is_some() {
+                    Some("condition")
+                } else if !invs.is_empty() {
+                    Some("invariants")
+                } else if !decrease.iter().all(|d| matches!(d.x, ExprX::Const(_))) {
+                    Some("decreases")
+                } else if loop_isolation {
+                    Some("isolation")
+                } else if !body_ends_with_break(label, body) {
+                    Some("normal completion")
+                } else if loop_has_continue(label, body) {
+                    Some("continue")
+                } else {
+                    None
+                };
+                if let Some(why) = why {
+                    return Err(error(
+                        &expr.span,
+                        format!(
+                            "Verus internal error: one_shot loop is not of the expected form ({why})"
+                        ),
+                    ));
+                }
+            }
 
             let mut check_recommends: Vec<Stm> = Vec::new();
             let mut invs1: Vec<crate::sst::LoopInv> = Vec::new();
@@ -2922,6 +2976,7 @@ pub(crate) fn expr_to_stm_opt(
                     modified_vars: None,
                     pre_modified_params_incl: None,
                     pre_modified_params_excl: None,
+                    one_shot: *one_shot,
                 },
             );
 

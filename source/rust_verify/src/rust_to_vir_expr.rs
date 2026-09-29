@@ -2284,6 +2284,7 @@ fn let_chain_to_vir<'a, 'tcx>(
             invs: Arc::new(vec![]),
             decrease: Arc::new(vec![one]),
             atomic_call: false,
+            one_shot: true,
         },
     );
     let binding = vir::ast::PatternBinding {
@@ -3632,6 +3633,7 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
                     //invs,
                     decrease,
                     atomic_call: header.atomic_call_loop,
+                    one_shot: false,
                 },
             )))
         }
@@ -3816,6 +3818,7 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
                     invs: header.loop_invariants(),
                     decrease: header.decrease,
                     atomic_call: header.atomic_call_loop,
+                    one_shot: false,
                 },
             )))
         }

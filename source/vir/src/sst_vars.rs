@@ -409,6 +409,7 @@ fn stm_assign(
             au_branch_bool,
             pre_modified_params_incl,
             pre_modified_params_excl,
+            one_shot,
         } => {
             let pre_stms = stms_assign(assign_map, declared, assigned, modified, pre_stms);
 
@@ -450,6 +451,7 @@ fn stm_assign(
                 au_branch_bool: au_branch_bool.clone(),
                 pre_modified_params_incl: pre_modified_params_incl.clone(),
                 pre_modified_params_excl: pre_modified_params_excl.clone(),
+                one_shot: *one_shot,
             };
             Spanned::new(stm.span.clone(), loop_x)
         }
@@ -577,6 +579,7 @@ fn stm_mutations(param_typs: &[(VarIdent, Typ)], mutations: &mut HavocSet, stm: 
             modified_vars,
             pre_modified_params_incl,
             pre_modified_params_excl,
+            one_shot,
             au_branch_bool,
         } => {
             assert!(pre_modified_params_incl.is_none());
@@ -613,6 +616,7 @@ fn stm_mutations(param_typs: &[(VarIdent, Typ)], mutations: &mut HavocSet, stm: 
                 modified_vars: modified_vars.clone(),
                 pre_modified_params_incl: Some(Arc::new(pre_modified_params_incl)),
                 pre_modified_params_excl: Some(Arc::new(pre_modified_params_excl)),
+                one_shot: *one_shot,
                 au_branch_bool: au_branch_bool.clone(),
             };
             stm.new_x(loopx)

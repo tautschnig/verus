@@ -2954,6 +2954,7 @@ fn loop_to_stmts(
         au_branch_bool,
         pre_modified_params_incl,
         pre_modified_params_excl,
+        one_shot,
     } = &stm.x
     else {
         unreachable!()
@@ -3083,7 +3084,11 @@ fn loop_to_stmts(
     let mut air_body: Vec<Stmt> = state.static_prelude.clone();
     if !loop_isolation {
         air_body.push(Arc::new(StmtX::Snapshot(snapshot_ident(SNAPSHOT_LOOP))));
-        modified_vars.emit_havocs(ctx, SNAPSHOT_LOOP, &mut air_body);
+        // A one-shot loop's body runs exactly once from the entry state (checked in
+        // ast_to_sst: no continue, no normal completion), so nothing is havocked.
+        if !*one_shot {
+            modified_vars.emit_havocs(ctx, SNAPSHOT_LOOP, &mut air_body);
+        }
     }
 
     let mut local = state.local_shared.clone();

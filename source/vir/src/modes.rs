@@ -2836,6 +2836,7 @@ fn check_expr(
             label: _,
             assume_termination: _,
             atomic_call: _,
+            one_shot: _,
         } => {
             // We could also allow this for proof, if we check it for termination
             if ctxt.check_ghost_blocks && typing.block_ghostness != Ghost::Exec {

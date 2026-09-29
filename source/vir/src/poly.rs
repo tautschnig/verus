@@ -1013,6 +1013,7 @@ fn visit_stm(ctx: &Ctx, state: &mut State, stm: &Stm) -> Stm {
             modified_vars,
             au_branch_bool,
             pre_modified_params_excl,
+            one_shot,
             pre_modified_params_incl,
         } => {
             let pre_stms = visit_stms(ctx, state, pre_stms);
@@ -1041,6 +1042,7 @@ fn visit_stm(ctx: &Ctx, state: &mut State, stm: &Stm) -> Stm {
                 modified_vars: modified_vars.clone(),
                 au_branch_bool,
                 pre_modified_params_excl: pre_modified_params_excl.clone(),
+                one_shot: *one_shot,
                 pre_modified_params_incl: pre_modified_params_incl.clone(),
             })
         }

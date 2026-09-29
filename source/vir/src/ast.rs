@@ -1247,6 +1247,11 @@ pub enum ExprX {
         invs: LoopInvariants,
         decrease: Exprs,
         atomic_call: bool,
+        /// The loop runs its body exactly once: no `continue` targets it and every path
+        /// through the body leaves it. Used for front-end lowerings that need a `break`
+        /// target (labeled blocks, let chains): the body is checked from the entry state, as
+        /// straight-line code, without havocking modified variables or invariants.
+        one_shot: bool,
     },
     /// Open invariant
     OpenInvariant(Expr, VarBinder<Typ>, Expr, InvAtomicity),
