@@ -2923,6 +2923,18 @@ pub(crate) fn predicates_match<'tcx>(
     preds1: &Vec<Clause<'tcx>>,
     preds2: &Vec<Clause<'tcx>>,
 ) -> bool {
+    // Outlives bounds (`T: 'a`, `'a: 'b`) are ignored: VIR erases lifetimes, and lifetime
+    // correctness is checked by rustc on the external function itself. A proxy may need
+    // one to make an impl lifetime early-bound (`impl Deref for Ref<'_, T>`).
+    let is_outlives = |c: &Clause<'tcx>| {
+        matches!(
+            c.kind().skip_binder(),
+            rustc_middle::ty::ClauseKind::TypeOutlives(_)
+                | rustc_middle::ty::ClauseKind::RegionOutlives(_)
+        )
+    };
+    let preds1: Vec<Clause<'tcx>> = preds1.iter().filter(|c| !is_outlives(c)).cloned().collect();
+    let preds2: Vec<Clause<'tcx>> = preds2.iter().filter(|c| !is_outlives(c)).cloned().collect();
     if preds1.len() != preds2.len() {
         return false;
     }
