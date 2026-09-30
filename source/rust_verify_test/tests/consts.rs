@@ -88,8 +88,12 @@ test_verify_one_file! {
 test_verify_one_file! {
     #[test] test1_fails5 verus_code! {
         const fn f() -> u64 { 1 }
+        // not spec-compatible, so an `exec const`; `f` has no ensures, so `1 + f()` may overflow
         const S: u64 = 1 + f();
-    } => Err(err) => assert_vir_error_msg(err, "cannot call function `test_crate::f` with mode exec")
+    } => Err(err) => {
+        assert_eq!(err.errors.len(), 1);
+        assert!(err.errors[0].message.contains("possible arithmetic underflow/overflow"));
+    }
 }
 
 test_verify_one_file! {
@@ -250,8 +254,9 @@ test_verify_one_file! {
     #[test] reference_static_from_dual_mode_const_unsupported verus_code! {
         exec static E: u64 = 0;
 
+        // not spec-compatible, so an `exec const` without ensures
         const s: u64 = E;
-    } => Err(e) => assert_vir_error_msg(e, "cannot read static with mode exec")
+    } => Ok(())
 }
 
 test_verify_one_file! {
@@ -753,5 +758,51 @@ test_verify_one_file! {
     #[test] test_dual_const_plain_exec_call_rejected verus_code! {
         const fn ex() -> usize { 3 }
         const A: usize = ex();
-    } => Err(err) => assert_vir_error_msg(err, "cannot call function `test_crate::ex` with mode exec")
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    // A dual-use const whose body is not spec-compatible is an `exec const` without
+    // ensures; a dual const that reads it follows
+    #[test] test_dual_const_downgraded_to_exec verus_code! {
+        use vstd::prelude::*;
+        const fn ex() -> u64 { 3 }
+        const E: u64 = ex();
+        const F: u64 = E;
+        const CHARSET: &[u8] = b"ABCDEF";
+        const PLAIN: u32 = 3;
+        fn f() -> u64 {
+            assert(PLAIN == 3); // a spec-compatible const keeps its value
+            let x = F;
+            let y = E;
+            let c = CHARSET;
+            assert(x == 3); // FAILS
+            x
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    #[test] test_dual_const_downgraded_not_spec verus_code! {
+        use vstd::prelude::*;
+        const fn ex() -> u64 { 3 }
+        const E: u64 = ex();
+        proof fn p() { assert(E == 3); }
+    } => Err(err) => assert_vir_error_msg(err, "cannot read const with mode exec")
+}
+
+test_verify_one_file! {
+    // an elided lifetime in a const or static type means 'static (the dual-use const's
+    // proxy function would otherwise have an elided lifetime in its return type)
+    #[test] test_const_elided_static_lifetime verus_code! {
+        use vstd::prelude::*;
+        pub const NAME: &str = "x";
+        const NAMES: &[&str] = &["a", "b"];
+        static S: &str = "s";
+        fn id(x: &u8) -> &u8 { x }
+        const F: fn(&u8) -> &u8 = id;
+        struct T;
+        impl T { const K: &str = "k"; }
+        fn f() -> &'static str { NAME }
+    } => Ok(())
 }

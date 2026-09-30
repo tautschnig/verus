@@ -4106,6 +4106,64 @@ pub fn check_crate(krate: &Krate) -> Result<(Krate, ErasureModes), Vec<VirErr>> 
 
     let mut kratex = (**krate).clone();
     let rtypes = ResolutionTypes::new(&ctxt.datatypes);
+
+    // An unannotated `const` is dual-use: a spec function whose body is also the exec value.
+    // That needs a spec-compatible body. When the body is not (it calls an exec function,
+    // e.g. float arithmetic, `ptr::null_mut()`, a byte-string-to-slice coercion), the const is
+    // treated as `exec const` without `ensures`, the only mode it can have: its value is then
+    // unknown to spec code, and using it in spec code is a mode error. This only accepts
+    // consts that were rejected before; erasure is unchanged (dual and exec consts both keep
+    // their exec body). Repeated to a fixpoint, since a dual const that uses a downgraded one
+    // becomes exec in turn.
+    loop {
+        let mut changed = false;
+        for function in kratex.functions.iter_mut() {
+            // (associated consts of traits and trait impls keep the trait's mode discipline)
+            let is_dual_const = matches!(function.x.item_kind, ItemKind::Const)
+                && matches!(function.x.kind, crate::ast::FunctionKind::Static)
+                && function.x.mode == Mode::Spec
+                && function.x.ret.x.mode == Mode::Exec
+                && function.x.body.is_some();
+            if !is_dual_const {
+                continue;
+            }
+            ctxt.check_ghost_blocks = function.x.attrs.uses_ghost_blocks;
+            ctxt.fun_mode = function.x.mode;
+            let mut state = State {
+                vars: ScopeMap::new(),
+                in_forall_stmt: false,
+                in_proof_in_spec: false,
+                block_ghostness: Ghost::Exec,
+                ret_mode: None,
+                atomic_insts: None,
+                in_pure: false,
+                in_assert_query: None,
+            };
+            let mut typing = Typing::new(&mut state);
+            let mut scratch = Record {
+                erasure_modes: ErasureModes { var_modes: vec![], ctor_modes: vec![] },
+                type_inv_info: TypeInvInfo { ctor_needs_check: HashMap::new() },
+                read_kind_finals: HashMap::new(),
+                var_modes: HashMap::new(),
+                temporary_modes: HashMap::new(),
+                infer_spec_for_implicit_reborrows: None,
+                mut_bor_place_modes: HashMap::new(),
+                assert_irrefutable: HashSet::new(),
+            };
+            let mut trial = function.clone();
+            if check_function(&ctxt, &mut scratch, &mut typing, &mut trial, &rtypes).is_err() {
+                let mut fx = function.x.clone();
+                fx.mode = Mode::Exec;
+                *function = function.new_x(fx);
+                ctxt.funs.insert(function.x.name.clone(), function.clone());
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
     let mut errors = vec![];
     for function in kratex.functions.iter_mut() {
         ctxt.check_ghost_blocks = function.x.attrs.uses_ghost_blocks;
