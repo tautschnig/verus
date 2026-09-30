@@ -1086,3 +1086,29 @@ fn mem_slice_ptr_specs_hold() {
     assert!(p.is_null() == (p.addr() == 0));
 }
 
+/// vstd `iter.rs`: `cloned()` yields a clone of each referenced item, in order; a fresh
+/// `peekable()` yields the inner sequence, and `peek` returns the next item without
+/// consuming it.
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(5)]
+fn cloned_peekable_specs_hold() {
+    let a: [u8; 3] = kani::any();
+    let mut n = 0usize;
+    for x in a.iter().cloned() {
+        assert!(x == a[n]);
+        n += 1;
+    }
+    assert!(n == 3);
+    let mut p = a.iter().peekable();
+    for k in 0..3 {
+        let q = p.peek().map(|r| **r);
+        assert!(q == Some(a[k]));
+        let q2 = p.peek().map(|r| **r);
+        assert!(q2 == Some(a[k]));
+        assert!(p.next() == Some(&a[k]));
+    }
+    assert!(p.peek().is_none());
+    assert!(p.next().is_none());
+}
+

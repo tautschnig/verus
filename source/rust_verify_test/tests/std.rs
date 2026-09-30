@@ -2863,3 +2863,33 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] test_iter_cloned_peekable verus_code! {
+        use vstd::prelude::*;
+        broadcast use vstd::std_specs::iter::group_iter_axioms;
+        fn a(v: &Vec<u32>) -> (r: Vec<u32>) ensures r@ == v@ {
+            let r: Vec<u32> = v.iter().cloned().collect();
+            r
+        }
+        fn b(v: &Vec<u32>) -> (r: Option<u32>)
+            ensures v@.len() > 0 ==> r == Some(v@[0]), v@.len() == 0 ==> r is None,
+        {
+            let mut p = v.iter().peekable();
+            let x = p.peek();
+            match x { Some(y) => Some(**y), None => None }
+        }
+        fn c(v: &Vec<u32>) {
+            let mut p = v.iter().peekable();
+            let _ = p.peek();
+            let n = p.next();
+            assert(v@.len() > 0 ==> n == Some(&v@[0]));
+        }
+        fn wrong(v: &Vec<u32>) {
+            let mut p = v.iter().peekable();
+            let x = p.peek();
+            assert(x is Some); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+

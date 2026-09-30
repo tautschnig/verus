@@ -3,7 +3,7 @@ use super::super::seq::{
     group_seq_lemmas, lemma_seq_empty, lemma_seq_subrange_index, lemma_seq_subrange_len,
 };
 use core::iter::{
-    Chain, Copied, Enumerate, Filter, FlatMap, FromIterator, Iterator, Rev, Skip, StepBy, Take, Zip,
+    Chain, Cloned, Copied, Enumerate, Filter, Peekable, FlatMap, FromIterator, Iterator, Rev, Skip, StepBy, Take, Zip,
 };
 
 use verus as verus_skip_verusfmt;
@@ -167,12 +167,28 @@ pub trait ExIterator {
 
     // We can't provide the ensures directly here, since Rust doesn't think that Copied<Self> is an iterator
     #[verifier::impls_cannot_extend_spec]
+    fn cloned<'a, T>(self) -> (r: Cloned<Self>)
+        where
+            Self: Sized + Iterator<Item = &'a T>,
+            T: 'a + Clone,
+        ensures
+            self.obeys_prophetic_iter_laws() ==> cloned_post::<T, Self>(self, r),
+    ;
+
+    #[verifier::impls_cannot_extend_spec]
     fn copied<'a, T>(self) -> (r: Copied<Self>)
         where
             Self: Sized + Iterator<Item = &'a T>,
             T: 'a + Copy,
         ensures
             self.obeys_prophetic_iter_laws() ==> copied_post::<T, Self>(self, r),
+    ;
+
+    #[verifier::impls_cannot_extend_spec]
+    fn peekable(self) -> (r: Peekable<Self>)
+        where Self: Sized + Iterator,
+        ensures
+            self.obeys_prophetic_iter_laws() ==> peekable_post(self, r),
     ;
 
     fn filter<P>(self, predicate: P) -> (r: core::iter::Filter<Self, P>)
@@ -826,6 +842,108 @@ impl <'a, I, T: 'a> DoubleEndedIteratorSpecImpl for Copied<I>
 }
 
 /********************************************************************************
+ * Definitions for `cloned()`
+ ********************************************************************************/
+#[verifier::external_body]
+#[verifier::external_type_specification]
+#[verifier::reject_recursive_types(I)]
+pub struct ExCloned<I>(Cloned<I>);
+
+pub uninterp spec fn cloned_iter<I>(c: Cloned<I>) -> I;
+
+pub uninterp spec fn cloned_post<T, I>(i: I, c: Cloned<I>) -> bool;
+
+/// `cloned()` yields `x.clone()` for each `&x` of the inner iterator: its `remaining` has the
+/// inner iterator's length, and each element is a clone (`cloned`) of the referenced item.
+pub broadcast axiom fn cloned_postcondition<'a, I, T: 'a>(i: I, r: Cloned<I>)
+    where
+        I: IteratorSpec<Item = &'a T>,
+        T: Clone,
+    requires
+        i.obeys_prophetic_iter_laws(),
+        #[trigger] cloned_post::<T, I>(i, r),
+    ensures
+        IteratorSpec::remaining(&r).len() == i.remaining().len(),
+        forall|k: int| 0 <= k < i.remaining().len() ==>
+            crate::pervasive::cloned(*i.remaining()[k], #[trigger] IteratorSpec::remaining(&r)[k]),
+        cloned_iter(r) == i,
+        IteratorSpec::will_return_none(&r) <==> i.will_return_none(),
+        IteratorSpec::decrease(&r) is Some == i.decrease() is Some,
+;
+
+impl <'a, I, T: 'a> IteratorSpecImpl for Cloned<I>
+    where I: Iterator<Item = &'a T>, T: Clone {
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool {
+        cloned_iter(*self).obeys_prophetic_iter_laws()
+    }
+
+    #[verifier::prophetic]
+    uninterp spec fn remaining(&self) -> Seq<T>;
+
+    #[verifier::prophetic]
+    uninterp spec fn will_return_none(&self) -> bool;
+
+    uninterp spec fn decrease(&self) -> Option<nat>;
+
+    uninterp spec fn peek(&self, index: int) -> Option<T>;
+}
+
+/********************************************************************************
+ * Definitions for `peekable()`
+ ********************************************************************************/
+#[verifier::external_body]
+#[verifier::external_type_specification]
+#[verifier::reject_recursive_types(I)]
+pub struct ExPeekable<I: Iterator>(Peekable<I>);
+
+pub uninterp spec fn peekable_post<I: Iterator>(i: I, r: Peekable<I>) -> bool;
+
+/// A fresh `Peekable` yields exactly what the inner iterator would.
+pub broadcast axiom fn peekable_postcondition<I: IteratorSpec>(i: I, r: Peekable<I>)
+    requires
+        i.obeys_prophetic_iter_laws(),
+        #[trigger] peekable_post(i, r),
+    ensures
+        IteratorSpec::obeys_prophetic_iter_laws(&r),
+        IteratorSpec::remaining(&r) == i.remaining(),
+        IteratorSpec::will_return_none(&r) <==> i.will_return_none(),
+        IteratorSpec::decrease(&r) is Some == i.decrease() is Some,
+;
+
+/// `peek` returns (a reference to) the next item without consuming it: the sequence still to
+/// be returned is unchanged. (The inner iterator may be advanced into the peek buffer, which
+/// is not observable through `Peekable`'s interface.)
+pub assume_specification<'a, I: Iterator>[ Peekable::<I>::peek ](p: &'a mut Peekable<I>) -> (r: Option<&'a I::Item>)
+    ensures
+        IteratorSpec::obeys_prophetic_iter_laws(&*old(p)) ==> {
+            &&& IteratorSpec::obeys_prophetic_iter_laws(&*final(p))
+            &&& IteratorSpec::remaining(&*final(p)) == IteratorSpec::remaining(&*old(p))
+            &&& IteratorSpec::will_return_none(&*final(p)) == IteratorSpec::will_return_none(&*old(p))
+            &&& IteratorSpec::decrease(&*final(p)) == IteratorSpec::decrease(&*old(p))
+            &&& (if IteratorSpec::remaining(&*old(p)).len() > 0 {
+                    r == Some(&IteratorSpec::remaining(&*old(p))[0])
+                } else {
+                    r is None
+                })
+        },
+;
+
+impl <I> IteratorSpecImpl for Peekable<I>
+    where I: Iterator + IteratorSpec {
+    uninterp spec fn obeys_prophetic_iter_laws(&self) -> bool;
+
+    #[verifier::prophetic]
+    uninterp spec fn remaining(&self) -> Seq<Self::Item>;
+
+    #[verifier::prophetic]
+    uninterp spec fn will_return_none(&self) -> bool;
+
+    uninterp spec fn decrease(&self) -> Option<nat>;
+
+    uninterp spec fn peek(&self, index: int) -> Option<Self::Item>;
+}
+
+/********************************************************************************
  * Definitions for `enumerate()`
  ********************************************************************************/
 #[verifier::external_body]
@@ -1465,6 +1583,8 @@ pub broadcast group group_iter_axioms {
     take_postcondition,
     skip_postcondition,
     copied_postcondition,
+    cloned_postcondition,
+    peekable_postcondition,
     enumerate_postcondition,
     step_by_postcondition,
     flat_map_postcondition,
