@@ -644,7 +644,29 @@ fn simplify_one_expr(
                 };
                 Ok(if_expr)
             } else {
-                Err(error(&expr.span, "not yet implemented: zero-arm match expressions"))
+                // A zero-arm match is on an uninhabited exec or proof value (mode checking
+                // rejects it on spec values, which are treated as inhabited): the point is
+                // unreachable: `assume(false)`, then an arbitrary value of the match's type.
+                let assume = SpannedTyped::new(
+                    &expr.span,
+                    &unit_typ(),
+                    ExprX::AssertAssume {
+                        is_assume: true,
+                        expr: SpannedTyped::new(
+                            &expr.span,
+                            &Arc::new(TypX::Bool),
+                            ExprX::Const(Constant::Bool(false)),
+                        ),
+                        msg: None,
+                    },
+                );
+                let stmts = vec![Spanned::new(expr.span.clone(), StmtX::Expr(assume))];
+                let tail = SpannedTyped::new(&expr.span, &expr.typ, ExprX::Nondeterministic);
+                Ok(SpannedTyped::new(
+                    &expr.span,
+                    &expr.typ,
+                    ExprX::Block(Arc::new([temp_decl, stmts].concat()), Some(tail)),
+                ))
             }
         }
         ExprX::Ghost { alloc_wrapper: _, tracked: _, expr: expr1 } => Ok(expr1.clone()),

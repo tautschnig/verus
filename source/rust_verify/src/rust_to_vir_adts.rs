@@ -266,7 +266,21 @@ pub(crate) fn check_item_enum<'tcx>(
         total_vis = total_vis2;
         variants.push(variant);
     }
-    let transparency = if vattrs.external_body {
+    // An enum with no variants (`enum Void {}`) is uninhabited, but an SMT datatype must have a
+    // constructor. It is encoded like an `external_body` type: opaque, with one hidden
+    // variant that no code can construct. Spec code treats every type as inhabited (and
+    // mode checking rejects a zero-arm `match` on a spec value), so the extra SMT value is
+    // unobservable; exec and proof values of the type cannot exist.
+    let is_empty_enum = variants.is_empty();
+    if is_empty_enum {
+        let name = path.segments.last().expect("unexpected enum path");
+        variants.push(Variant {
+            name: name.clone(),
+            fields: Arc::new(vec![]),
+            ctor_style: CtorPrintStyle::Braces,
+        });
+    }
+    let transparency = if vattrs.external_body || is_empty_enum {
         DatatypeTransparency::Never
     } else {
         DatatypeTransparency::WhenVisible(total_vis)

@@ -228,10 +228,29 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
-    #[test] test_no_empty_enums verus_code! {
+    // an empty enum is uninhabited: encoded as an opaque type; a zero-arm match on an exec
+    // value is unreachable, on a spec value it is rejected (spec types are inhabited)
+    #[test] test_empty_enums verus_code! {
+        use vstd::prelude::*;
         enum Empty {
         }
-    } => Err(err) => assert_vir_error_msg(err, "datatype must have at least one non-recursive variant")
+        fn f(v: Empty) -> u32 { match v {} }
+        fn g(r: Result<u32, Empty>) -> (x: u32) ensures r is Ok ==> x == r->Ok_0 {
+            match r { Ok(x) => x, Err(e) => match e {} }
+        }
+        proof fn p(tracked v: Empty) ensures false { match v {} }
+        fn no_false(r: Result<u32, Empty>) {
+            assert(r is Ok); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    #[test] test_empty_enum_spec_match_rejected verus_code! {
+        enum Empty {
+        }
+        spec fn s(v: Empty) -> int { match v {} }
+    } => Err(err) => assert_vir_error_msg(err, "match must have at least one arm")
 }
 
 test_verify_one_file! {

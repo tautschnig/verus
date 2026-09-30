@@ -775,7 +775,7 @@ test_verify_one_file_with_options! {
 
             *y_ref = 20;
         }
-    } => Err(err) => assert_vir_error_msg(err, "not yet implemented: zero-arm match expressions")
+    } => Ok(())
 }
 
 test_verify_one_file_with_options! {
