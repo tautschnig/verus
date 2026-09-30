@@ -2764,3 +2764,27 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] test_iter_enumerate verus_code! {
+        use vstd::prelude::*;
+        broadcast use vstd::std_specs::iter::group_iter_axioms;
+        fn f(v: &Vec<u32>) -> (r: usize) ensures r <= v.len() {
+            let mut last = 0usize;
+            for (i, x) in v.iter().enumerate()
+                invariant last <= v.len(),
+            {
+                assert(i < v.len());
+                assert(*x == v@[i as int]);
+                last = i + 1;
+            }
+            last
+        }
+        fn wrong(v: &Vec<u32>) {
+            for (i, x) in v.iter().enumerate() {
+                assert(i == 0); // FAILS
+            }
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+

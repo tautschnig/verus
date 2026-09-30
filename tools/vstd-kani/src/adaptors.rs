@@ -1033,3 +1033,19 @@ fn option_result_combinator_specs_hold() {
     match res { Err(_) => assert!(r == d), Ok(x) => assert!(r == f(x)) }
 }
 
+/// vstd `std_specs/iter.rs`: `enumerate()`'s `remaining` is the inner iterator's with each
+/// item paired with its position: `i.remaining().map(|k, x| (k as usize, x))`.
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(5)]
+fn enumerate_spec_holds() {
+    let a: [u8; 3] = kani::any();
+    let mut n = 0usize;
+    for (k, x) in a.iter().enumerate() {
+        assert!(k == n);
+        assert!(*x == a[n]);
+        n += 1;
+    }
+    assert!(n == 3);
+}
+

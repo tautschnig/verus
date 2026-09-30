@@ -3,7 +3,7 @@ use super::super::seq::{
     group_seq_lemmas, lemma_seq_empty, lemma_seq_subrange_index, lemma_seq_subrange_len,
 };
 use core::iter::{
-    Chain, Copied, Filter, FlatMap, FromIterator, Iterator, Rev, Skip, StepBy, Take, Zip,
+    Chain, Copied, Enumerate, Filter, FlatMap, FromIterator, Iterator, Rev, Skip, StepBy, Take, Zip,
 };
 
 use verus as verus_skip_verusfmt;
@@ -360,6 +360,13 @@ pub trait ExIterator {
         where Self: Sized,
         ensures
             self.obeys_prophetic_iter_laws() ==> take_post(self, n, t),
+    ;
+
+    #[verifier::impls_cannot_extend_spec]
+    fn enumerate(self) -> (r: Enumerate<Self>)
+        where Self: Sized,
+        ensures
+            self.obeys_prophetic_iter_laws() ==> enumerate_post(self, r),
     ;
 
     #[verifier::impls_cannot_extend_spec]
@@ -813,6 +820,60 @@ impl <'a, I, T: 'a> DoubleEndedIteratorSpecImpl for Copied<I>
     open spec fn peek_back(&self, index: int) -> Option<T> {
         match copied_iter(*self).peek_back(index) {
             Some(p) => Some(*p),
+            None => None,
+        }
+    }
+}
+
+/********************************************************************************
+ * Definitions for `enumerate()`
+ ********************************************************************************/
+#[verifier::external_body]
+#[verifier::external_type_specification]
+#[verifier::reject_recursive_types(I)]
+pub struct ExEnumerate<I>(Enumerate<I>);
+
+// Ghost accessor for the inner iterator
+pub uninterp spec fn enumerate_iter<I>(e: Enumerate<I>) -> I;
+
+// Ghost accessor for the index of the next item
+pub uninterp spec fn enumerate_count<I>(e: Enumerate<I>) -> usize;
+
+pub uninterp spec fn enumerate_post<I>(i: I, e: Enumerate<I>) -> bool;
+
+/// `enumerate()` pairs each item with its index, counting from 0. std's counter is a
+/// `usize` incremented without overflow checks in a release std (the documentation says it
+/// "either produces the wrong result or panics"), so the index is the position truncated to
+/// `usize`; a sequence cannot be longer than that in practice.
+pub broadcast axiom fn enumerate_postcondition<I: IteratorSpec>(i: I, r: Enumerate<I>)
+    requires
+        i.obeys_prophetic_iter_laws(),
+        #[trigger] enumerate_post(i, r),
+    ensures
+        IteratorSpec::remaining(&r) == i.remaining().map(|k: int, x: I::Item| (k as usize, x)),
+        enumerate_iter(r) == i,
+        enumerate_count(r) == 0,
+        IteratorSpec::will_return_none(&r) <==> i.will_return_none(),
+        IteratorSpec::decrease(&r) is Some == i.decrease() is Some,
+;
+
+impl <I> IteratorSpecImpl for Enumerate<I>
+    where I: Iterator {
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool {
+        enumerate_iter(*self).obeys_prophetic_iter_laws()
+    }
+
+    #[verifier::prophetic]
+    uninterp spec fn remaining(&self) -> Seq<Self::Item>;
+
+    #[verifier::prophetic]
+    uninterp spec fn will_return_none(&self) -> bool;
+
+    uninterp spec fn decrease(&self) -> Option<nat>;
+
+    open spec fn peek(&self, index: int) -> Option<Self::Item> {
+        match enumerate_iter(*self).peek(index) {
+            Some(x) => Some(((enumerate_count(*self) + index) as usize, x)),
             None => None,
         }
     }
@@ -1404,6 +1465,7 @@ pub broadcast group group_iter_axioms {
     take_postcondition,
     skip_postcondition,
     copied_postcondition,
+    enumerate_postcondition,
     step_by_postcondition,
     flat_map_postcondition,
     chain_postcondition,
