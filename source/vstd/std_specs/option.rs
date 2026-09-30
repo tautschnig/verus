@@ -450,4 +450,106 @@ pub assume_specification<T>[ Option::get_or_insert ](option: &mut Option<T>, val
         *final(option) == Some(*final(res)),
 ;
 
+
+pub assume_specification<T, U, F: FnOnce(T) -> U>[ Option::<T>::map_or ](
+    option: Option<T>,
+    default: U,
+    f: F,
+) -> (res: U)
+    requires
+        option.is_some() ==> f.requires((option.unwrap(),)),
+    ensures
+        option.is_none() ==> res == default,
+        option.is_some() ==> f.ensures((option.unwrap(),), res),
+;
+
+pub assume_specification<T, U, D: FnOnce() -> U, F: FnOnce(T) -> U>[ Option::<T>::map_or_else ](
+    option: Option<T>,
+    default: D,
+    f: F,
+) -> (res: U)
+    requires
+        option.is_none() ==> default.requires(()),
+        option.is_some() ==> f.requires((option.unwrap(),)),
+    ensures
+        option.is_none() ==> default.ensures((), res),
+        option.is_some() ==> f.ensures((option.unwrap(),), res),
+;
+
+pub assume_specification<T, F: FnOnce() -> Option<T>>[ Option::<T>::or_else ](
+    option: Option<T>,
+    f: F,
+) -> (res: Option<T>)
+    requires
+        option.is_none() ==> f.requires(()),
+    ensures
+        option.is_some() ==> res == option,
+        option.is_none() ==> f.ensures((), res),
+;
+
+pub assume_specification<T, P: FnOnce(&T) -> bool>[ Option::<T>::filter ](
+    option: Option<T>,
+    predicate: P,
+) -> (res: Option<T>)
+    requires
+        option.is_some() ==> predicate.requires((&option.unwrap(),)),
+    ensures
+        option.is_none() ==> res.is_none(),
+        option.is_some() ==> (res == option || res.is_none()),
+        option.is_some() ==> (res.is_some() <==> predicate.ensures((&option.unwrap(),), true)),
+;
+
+pub assume_specification<T, F: FnOnce(T) -> bool>[ Option::<T>::is_some_and ](
+    option: Option<T>,
+    f: F,
+) -> (res: bool)
+    requires
+        option.is_some() ==> f.requires((option.unwrap(),)),
+    ensures
+        option.is_none() ==> !res,
+        option.is_some() ==> f.ensures((option.unwrap(),), res),
+;
+
+pub assume_specification<T, F: FnOnce(T) -> bool>[ Option::<T>::is_none_or ](
+    option: Option<T>,
+    f: F,
+) -> (res: bool)
+    requires
+        option.is_some() ==> f.requires((option.unwrap(),)),
+    ensures
+        option.is_none() ==> res,
+        option.is_some() ==> f.ensures((option.unwrap(),), res),
+;
+
+pub assume_specification<T>[ Option::<T>::unwrap_unchecked ](option: Option<T>) -> (res: T)
+    requires
+        option.is_some(),
+    ensures
+        res == option.unwrap(),
+;
+
+pub assume_specification<'a, T: Copy>[ Option::<&'a T>::copied ](opt: Option<&'a T>) -> (res: Option<T>)
+    ensures
+        opt.is_none() ==> res.is_none(),
+        opt.is_some() ==> res == Some(*opt.unwrap()),
+;
+
+pub assume_specification<T: core::ops::Deref>[ Option::<T>::as_deref ](option: &Option<T>) -> (res: Option<&<T as core::ops::Deref>::Target>)
+    ensures
+        option.is_none() ==> res.is_none(),
+        option.is_some() ==> res.is_some() && call_ensures(T::deref, (&option.unwrap(),), res.unwrap()),
+;
+
+pub assume_specification<T, F: FnOnce() -> T>[ Option::<T>::get_or_insert_with ](
+    option: &mut Option<T>,
+    f: F,
+) -> (res: &mut T)
+    requires
+        old(option).is_none() ==> f.requires(()),
+    ensures
+        old(option).is_some() ==> *res == old(option).unwrap(),
+        old(option).is_none() ==> f.ensures((), *res),
+        *final(option) == Some(*final(res)),
+;
+
 } // verus!

@@ -281,4 +281,71 @@ pub assume_specification<T, E>[ Result::<T, E>::err ](result: Result<T, E>) -> (
     no_unwind
 ;
 
+
+pub assume_specification<T, E, U, F: FnOnce(T) -> Result<U, E>>[ Result::<T, E>::and_then ](
+    result: Result<T, E>,
+    op: F,
+) -> (res: Result<U, E>)
+    requires
+        result.is_ok() ==> op.requires((result->Ok_0,)),
+    ensures
+        result.is_err() ==> res == Err::<U, E>(result->Err_0),
+        result.is_ok() ==> op.ensures((result->Ok_0,), res),
+;
+
+pub assume_specification<T, E, F, O: FnOnce(E) -> Result<T, F>>[ Result::<T, E>::or_else ](
+    result: Result<T, E>,
+    op: O,
+) -> (res: Result<T, F>)
+    requires
+        result.is_err() ==> op.requires((result->Err_0,)),
+    ensures
+        result.is_ok() ==> res == Ok::<T, F>(result->Ok_0),
+        result.is_err() ==> op.ensures((result->Err_0,), res),
+;
+
+pub assume_specification<T, E>[ Result::<T, E>::unwrap_or ](result: Result<T, E>, default: T) -> (res: T)
+    ensures
+        result.is_ok() ==> res == result->Ok_0,
+        result.is_err() ==> res == default,
+;
+
+pub assume_specification<T, E, F: FnOnce(E) -> T>[ Result::<T, E>::unwrap_or_else ](
+    result: Result<T, E>,
+    op: F,
+) -> (res: T)
+    requires
+        result.is_err() ==> op.requires((result->Err_0,)),
+    ensures
+        result.is_ok() ==> res == result->Ok_0,
+        result.is_err() ==> op.ensures((result->Err_0,), res),
+;
+
+pub assume_specification<T: core::default::Default, E>[ Result::<T, E>::unwrap_or_default ](
+    result: Result<T, E>,
+) -> (res: T)
+    ensures
+        result.is_ok() ==> res == result->Ok_0,
+        result.is_err() ==> T::default.ensures((), res),
+;
+
+pub assume_specification<T, E, U, F: FnOnce(T) -> U>[ Result::<T, E>::map_or ](
+    result: Result<T, E>,
+    default: U,
+    f: F,
+) -> (res: U)
+    requires
+        result.is_ok() ==> f.requires((result->Ok_0,)),
+    ensures
+        result.is_err() ==> res == default,
+        result.is_ok() ==> f.ensures((result->Ok_0,), res),
+;
+
+pub assume_specification<T, E>[ Result::<T, E>::unwrap_unchecked ](result: Result<T, E>) -> (res: T)
+    requires
+        result.is_ok(),
+    ensures
+        res == result->Ok_0,
+;
+
 } // verus!

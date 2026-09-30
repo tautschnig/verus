@@ -970,3 +970,66 @@ fn slice_fill_spec_holds() {
     assert!(s.len() == 3);
     assert!(s[0] == v && s[1] == v && s[2] == v);
 }
+
+/// vstd `std_specs/option.rs` / `result.rs`: combinator specifications. The closure
+/// stands for an arbitrary `f`: its ensures (`f.ensures(args, r)`) is `r == f(args)`, and
+/// each assertion restates the vstd ensures under that reading.
+#[cfg(kani)]
+#[kani::proof]
+fn option_result_combinator_specs_hold() {
+    let o: Option<u8> = kani::any();
+    let d: u8 = kani::any();
+    let k: u8 = kani::any();
+    let f = |x: u8| x.wrapping_mul(3) ^ k;
+    // map_or
+    let r = o.map_or(d, f);
+    if o.is_none() { assert!(r == d) } else { assert!(r == f(o.unwrap())) }
+    // map_or_else
+    let r = o.map_or_else(|| d, f);
+    if o.is_none() { assert!(r == d) } else { assert!(r == f(o.unwrap())) }
+    // or_else
+    let alt: Option<u8> = kani::any();
+    let r = o.or_else(|| alt);
+    if o.is_some() { assert!(r == o) } else { assert!(r == alt) }
+    // filter
+    let p = |x: &u8| (*x ^ k) & 1 == 0;
+    let r = o.filter(p);
+    if o.is_none() { assert!(r.is_none()) } else {
+        assert!(r == o || r.is_none());
+        assert!(r.is_some() == p(&o.unwrap()));
+    }
+    // is_some_and / is_none_or
+    let q = |x: u8| x > k;
+    let r = o.is_some_and(q);
+    if o.is_none() { assert!(!r) } else { assert!(r == q(o.unwrap())) }
+    let r = o.is_none_or(q);
+    if o.is_none() { assert!(r) } else { assert!(r == q(o.unwrap())) }
+    // copied
+    let b: u8 = kani::any();
+    let ro: Option<&u8> = if kani::any() { Some(&b) } else { None };
+    let r = ro.copied();
+    if ro.is_none() { assert!(r.is_none()) } else { assert!(r == Some(*ro.unwrap())) }
+    // get_or_insert_with
+    let mut m = o;
+    let v = *m.get_or_insert_with(|| d);
+    if o.is_some() { assert!(v == o.unwrap()) } else { assert!(v == d) }
+    assert!(m == Some(v));
+    // Result
+    let res: Result<u8, u16> = if kani::any() { Ok(kani::any()) } else { Err(kani::any()) };
+    let g = |x: u8| -> Result<u32, u16> { if x > k { Ok(x as u32 + 1) } else { Err(x as u16) } };
+    let r = res.and_then(g);
+    match res { Err(e) => assert!(r == Err(e)), Ok(x) => assert!(r == g(x)) }
+    let h = |e: u16| -> Result<u8, u32> { if e > 5 { Ok(e as u8) } else { Err(e as u32) } };
+    let r = res.or_else(h);
+    match res { Ok(x) => assert!(r == Ok(x)), Err(e) => assert!(r == h(e)) }
+    let r = res.unwrap_or(d);
+    match res { Ok(x) => assert!(r == x), Err(_) => assert!(r == d) }
+    let u = |e: u16| e as u8;
+    let r = res.unwrap_or_else(u);
+    match res { Ok(x) => assert!(r == x), Err(e) => assert!(r == u(e)) }
+    let r = res.unwrap_or_default();
+    match res { Ok(x) => assert!(r == x), Err(_) => assert!(r == 0) }
+    let r = res.map_or(d, f);
+    match res { Err(_) => assert!(r == d), Ok(x) => assert!(r == f(x)) }
+}
+

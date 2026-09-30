@@ -2739,3 +2739,28 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] test_option_result_combinators verus_code! {
+        use vstd::prelude::*;
+        fn a(o: Option<u32>) -> (r: u32) ensures o.is_none() ==> r == 7, o.is_some() && o.unwrap() < 10 ==> r == o.unwrap() + 1 {
+            o.map_or(7, |x: u32| -> (y: u32) ensures x < 10 ==> y == x + 1 { if x < 10 { x + 1 } else { 0 } })
+        }
+        fn b(o: Option<u32>) -> (r: Option<u32>) ensures o.is_some() ==> r == o, o.is_none() ==> r == Some(3u32) { o.or_else(|| -> (r: Option<u32>) ensures r == Some(3u32) { Some(3) }) }
+        fn c(v: &Vec<u32>) -> (r: Option<u32>) ensures v@.len() > 0 ==> r == Some(v@[0]) { v.first().copied() }
+        fn d(o: Option<u32>) -> (r: bool) ensures r == (o.is_some() && o.unwrap() > 2) { o.is_some_and(|x: u32| -> (b: bool) ensures b == (x > 2) { x > 2 }) }
+        fn e(r: Result<u32, u8>) -> (x: u32) ensures r.is_ok() ==> x == r->Ok_0, r.is_err() ==> x == 0 { r.unwrap_or(0) }
+        fn f(r: Result<u32, u8>) -> (x: Result<u64, u8>) ensures r.is_err() ==> x == Err::<u64, u8>(r->Err_0), r.is_ok() ==> x == Ok::<u64, u8>(r->Ok_0 as u64) {
+            r.and_then(|v: u32| -> (y: Result<u64, u8>) ensures y == Ok::<u64, u8>(v as u64) { Ok(v as u64) })
+        }
+        fn g(o: &mut Option<u32>) -> (r: u32) ensures old(o).is_some() ==> r == old(o).unwrap(), old(o).is_none() ==> r == 9 {
+            *o.get_or_insert_with(|| -> (r: u32) ensures r == 9 { 9 })
+        }
+        fn h(o: Option<String>) -> Option<usize> { o.as_deref().map(|s: &str| s.len()) }
+        fn wrong(o: Option<u32>) -> (r: u32)
+            ensures r == 7, // FAILS
+        {
+            o.map_or(7, |x: u32| x)
+        }
+    } => Err(err) => assert_one_fails(err)
+}
