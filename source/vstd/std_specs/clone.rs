@@ -8,6 +8,13 @@ pub trait ExClone: Sized {
     type ExternalTraitSpecificationFor: core::clone::Clone;
 
     fn clone(&self) -> Self;
+
+    /// `a.clone_from(b)`: the provided implementation is `*a = b.clone()`; an impl may
+    /// override it (e.g. to reuse `a`'s allocation), in which case nothing is known.
+    fn clone_from(&mut self, source: &Self)
+        default_ensures
+            call_ensures(Self::clone, (source,), *final(self)),
+    ;
 }
 
 #[verifier::external_trait_specification]
