@@ -1619,6 +1619,9 @@ pub struct FunctionAttrsX {
     pub is_async: bool,
     /// Is this a types's drop implementation
     pub is_drop: bool,
+    /// `open` was inserted by verus! for an unannotated public const, not written by the user:
+    /// the body visibility may be narrowed so that it only mentions visible items
+    pub open_by_default: bool,
 }
 
 /// Function specification of its invariant mask

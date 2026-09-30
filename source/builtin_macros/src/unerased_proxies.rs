@@ -200,7 +200,10 @@ impl crate::syntax::Visitor {
                         Publish::Default,
                         FnMode::Spec(_) | FnMode::SpecChecked(_) | FnMode::Default,
                         _,
-                    ) => Publish::Open(verus_syn::Open { token: token::Open { span } }),
+                    ) => {
+                        attrs.push(mk_verus_attr(span, quote! { open_by_default }));
+                        Publish::Open(verus_syn::Open { token: token::Open { span } })
+                    }
                     (publish, _, _) => publish,
                 };
 
@@ -295,7 +298,10 @@ impl crate::syntax::Visitor {
                         Publish::Default,
                         FnMode::Spec(_) | FnMode::SpecChecked(_) | FnMode::Default,
                         _,
-                    ) => Publish::Open(verus_syn::Open { token: token::Open { span } }),
+                    ) => {
+                        attrs.push(mk_verus_attr(span, quote! { open_by_default }));
+                        Publish::Open(verus_syn::Open { token: token::Open { span } })
+                    }
                     (publish, _, _) => publish,
                 };
 
@@ -392,7 +398,10 @@ impl crate::syntax::Visitor {
                         Publish::Default,
                         FnMode::Spec(_) | FnMode::SpecChecked(_) | FnMode::Default,
                         _,
-                    ) => Publish::Open(verus_syn::Open { token: token::Open { span } }),
+                    ) => {
+                        attrs.push(mk_verus_attr(span, quote! { open_by_default }));
+                        Publish::Open(verus_syn::Open { token: token::Open { span } })
+                    }
                     (publish, _, _) => publish,
                 };
 
@@ -576,11 +585,20 @@ impl crate::syntax::Visitor {
         for item in std::mem::take(impl_items).into_iter() {
             if self.impl_item_needs_unerased_proxy(&item, for_trait) {
                 if for_trait {
-                    let msg = "Verus does not support const items in traits, except for simple expressions and external_body consts (hint: declare an extra non-trait constant `const C: t = ...` and then define the trait constant to be equal to `C`, or make the trait constant external_body)";
-                    *impl_items = vec![ImplItem::Verbatim(
-                        quote_spanned!(item.span() => compile_error!(#msg);),
-                    )];
-                    return;
+                    // An associated const of a trait impl whose initializer is not a simple
+                    // expression has no unerased proxy yet. It is treated as `external_body`:
+                    // its value is unknown to verification. The initializer is evaluated by
+                    // rustc at compile time and never runs at run time, so leaving it
+                    // unverified does not affect the verified program's behaviour.
+                    let mut item = item;
+                    if let ImplItem::Const(c) = &mut item {
+                        let span = c.span();
+                        c.attrs.push(
+                            verus_syn::parse_quote_spanned!(span => #[verifier::external_body]),
+                        );
+                    }
+                    new_impl_items.push(item);
+                    continue;
                 }
 
                 let proxy = self.impl_item_make_proxy(item.clone());

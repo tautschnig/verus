@@ -1857,6 +1857,67 @@ fn to_wf(v: VirErr) -> WFErr {
 /// - deferred_errors: legit errors that nonetheless don't prevent
 ///   us from going all the way to VCs
 /// - Err case: normal errors that prevent us from moving onto the next phase
+/// A public unannotated `const` is made `open` by verus! (`open_by_default`), so its
+/// initializer is visible wherever the const is. When the initializer mentions an item that
+/// is less visible (a private `const fn` or `const`), `open` is not a choice the user made,
+/// so instead of rejecting the const, its body is made visible only in its own module
+/// (closed elsewhere). Hiding a body only removes facts. A user-written `open` is not
+/// affected and keeps the error.
+pub fn narrow_default_open_bodies(krate: &Krate, unpruned_krate: &Krate) -> Krate {
+    let funs: HashMap<Fun, Function> =
+        krate.functions.iter().map(|f| (f.x.name.clone(), f.clone())).collect();
+    let mut dts: HashMap<Path, Datatype> = HashMap::new();
+    for d in krate.datatypes.iter() {
+        if let Dt::Path(p) = &d.x.name {
+            dts.insert(p.clone(), d.clone());
+        }
+    }
+    let traits: HashMap<Path, Trait> =
+        krate.traits.iter().map(|t| (t.x.name.clone(), t.clone())).collect();
+    let reveal_groups: HashSet<Fun> =
+        krate.reveal_groups.iter().map(|g| g.x.name.clone()).collect();
+    let ctxt = Ctxt { funs, reveal_groups, dts, traits, krate, unpruned_krate, no_cheating: false };
+    let mut kratex = (**krate).clone();
+    let mut changed = false;
+    for function in kratex.functions.iter_mut() {
+        if !function.x.attrs.open_by_default || function.x.mode != Mode::Spec {
+            continue;
+        }
+        let (Some(body), BodyVisibility::Visibility(body_visibility)) =
+            (&function.x.body, &function.x.body_visibility)
+        else {
+            continue;
+        };
+        if body_visibility.restricted_to.is_some() {
+            continue;
+        }
+        let mut emit = EmitErrorState {
+            boundary_errors: IndexMap::new(),
+            func_failed_proof_notes: HashMap::new(),
+            deferred_errors: vec![],
+            diags: vec![],
+        };
+        let r = check_expr(
+            &ctxt,
+            function,
+            body,
+            Some((body_visibility, "pub open spec function")),
+            Area::Body,
+            &mut emit,
+            &None,
+        );
+        if r.is_err() {
+            let mut fx = function.x.clone();
+            let private = Visibility { restricted_to: fx.owning_module.clone() };
+            fx.body_visibility = BodyVisibility::Visibility(private.clone());
+            fx.opaqueness = crate::ast::Opaqueness::Revealed { visibility: private };
+            *function = function.new_x(fx);
+            changed = true;
+        }
+    }
+    if changed { Arc::new(kratex) } else { krate.clone() }
+}
+
 pub fn check_crate(
     krate: &Krate,
     unpruned_krate: &Krate,

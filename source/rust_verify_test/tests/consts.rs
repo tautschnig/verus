@@ -837,3 +837,47 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    // an unannotated pub const whose initializer uses private items: its body is visible in
+    // its module only (verus! made it `open`, the user did not)
+    #[test] test_default_open_const_private_callee verus_code! {
+        use vstd::prelude::*;
+        mod m {
+            const fn priv_cast(x: u32) -> i32 { x as i32 }
+            const PRIV: u32 = 7;
+            pub const SA: i32 = priv_cast(5);
+            pub const PUB: u32 = PRIV + 1;
+            pub fn in_module() { assert(PUB == 8); }
+        }
+        fn outside() {
+            let x = m::PUB;
+            assert(m::PUB == 8); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    #[test] test_explicit_open_const_private_callee_rejected verus_code! {
+        use vstd::prelude::*;
+        mod m {
+            const PRIV: u32 = 7;
+            pub open const PUB: u32 = PRIV + 1;
+        }
+    } => Err(err) => assert_vir_error_msg(err, "in pub open spec function, cannot refer to private const item")
+}
+
+test_verify_one_file! {
+    #[test] test_usize_literal_64_bit verus_code! {
+        use vstd::prelude::*;
+        global size_of usize == 8;
+        fn f(k: usize) -> usize { k.wrapping_mul(0x9E3779B97F4A7C15) }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] test_usize_literal_64_bit_needs_arch verus_code! {
+        use vstd::prelude::*;
+        fn f(k: usize) -> usize { k.wrapping_mul(0x9E3779B97F4A7C15) }
+    } => Err(err) => assert_vir_error_msg(err, "on 32-bit targets")
+}

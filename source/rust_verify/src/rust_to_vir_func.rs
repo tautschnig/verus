@@ -247,6 +247,7 @@ fn handle_autospec<'tcx>(
                     tracked_take_option: false,
                     is_async: false,
                     is_drop: false,
+                    open_by_default: false,
                 }),
             },
         );
@@ -1505,6 +1506,7 @@ fn make_attributes<'tcx>(
         tracked_take_option: vattrs.tracked_take_option,
         is_async: is_async,
         is_drop: is_drop,
+        open_by_default: vattrs.open_by_default,
     };
     Ok(Arc::new(fattrs))
 }

@@ -4669,10 +4669,13 @@ test_verify_one_file! {
             const C: u8;
         }
         impl T for bool {
-            // when we support general assoc consts, should be a mode violation:
+            // a non-simple initializer is treated as external_body: the value is unknown
             const C: u8 = f();
         }
-    } => Err(err) => assert_vir_error_msg(err, "Verus does not support const items in traits, except for")
+        fn g() {
+            assert(<bool as T>::C == 3); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
 }
 
 test_verify_one_file! {

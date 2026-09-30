@@ -3363,6 +3363,7 @@ impl Verifier {
             vir::safe_api::check_safe_api(&vir_crate).map_err(|e| (vec![e], Vec::new()))?;
         }
 
+        let vir_crate = vir::well_formed::narrow_default_open_bodies(&vir_crate, &unpruned_crate);
         let check_crate_result1 = vir::well_formed::check_one_crate(&current_vir_crate);
         let check_crate_result = vir::well_formed::check_crate(
             &vir_crate,

@@ -255,6 +255,8 @@ pub(crate) enum Attr {
     Opaque,
     // publish body?
     Publish(AttrPublish),
+    // `open` inserted by verus! for an unannotated public const (not written by the user)
+    OpenByDefault,
     // publish body with zero fuel
     OpaqueOutsideModule,
     // inline spec function in SMT query
@@ -830,6 +832,9 @@ pub(crate) fn parse_attrs(
                     AttrTree::Fun(_, arg, None) if arg == "external_trait_blanket" => {
                         v.push(Attr::ExternalTraitBlanket)
                     }
+                    AttrTree::Fun(_, arg, None) if arg == "open_by_default" => {
+                        v.push(Attr::OpenByDefault)
+                    }
                     AttrTree::Fun(_, arg, None) if arg == "open" => {
                         v.push(Attr::Publish(AttrPublish::Open))
                     }
@@ -1261,6 +1266,7 @@ pub(crate) struct VerifierAttrs {
     pub(crate) external_body: bool,
     pub(crate) opaque: bool,
     pub(crate) publish: Option<AttrPublish>,
+    pub(crate) open_by_default: bool,
     pub(crate) opaque_outside_module: bool,
     pub(crate) inline: bool,
     pub(crate) ext_equal: bool,
@@ -1457,6 +1463,7 @@ pub(crate) fn get_verifier_attrs_maybe_check(
         external_body: false,
         opaque: false,
         publish: None,
+        open_by_default: false,
         opaque_outside_module: false,
         inline: false,
         ext_equal: false,
@@ -1533,6 +1540,7 @@ pub(crate) fn get_verifier_attrs_maybe_check(
             }
             Attr::Opaque => vs.opaque = true,
             Attr::Publish(open) => vs.publish = Some(open),
+            Attr::OpenByDefault => vs.open_by_default = true,
             Attr::OpaqueOutsideModule => vs.opaque_outside_module = true,
             Attr::Inline => vs.inline = true,
             Attr::ExtEqual => vs.ext_equal = true,
