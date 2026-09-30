@@ -498,8 +498,8 @@ test_verify_one_file! {
         #[verifier::external_body]
         #[verifier::reject_recursive_types(T)]
         pub struct ExNonNull<T: ?Sized>(NonNull<T>);
-        pub assume_specification<T: ?Sized>[ <*mut T>::is_null ](p: *mut T) -> bool;
-        fn f(p: *mut u8) -> bool { p.is_null() }
+        pub assume_specification<T: ?Sized>[ <*mut T>::cast_const ](p: *mut T) -> *const T;
+        fn f(p: *mut u8) -> *const u8 { p.cast_const() }
         fn g(n: NonNull<u8>) -> NonNull<u8> { n }
     } => Ok(())
 }

@@ -106,29 +106,37 @@ pub broadcast proof fn is_ascii_concat(s1: &str, s2: &str, s3: &str)
 
 // Pattern searches, parsing and UTF-8 validation: content-free (a `Pattern` has no model
 // here); the results are unconstrained, and nothing about `s` changes.
+#[cfg(all(verus_keep_ghost, not(verus_verify_core)))]
 #[verifier::external_trait_specification]
 pub trait ExPattern: Sized {
     type ExternalTraitSpecificationFor: core::str::pattern::Pattern;
 }
 
+#[cfg(all(verus_keep_ghost, not(verus_verify_core)))]
 #[verifier::external_type_specification]
 #[verifier::external_body]
 pub struct ExParseIntError(core::num::ParseIntError);
 
+#[cfg(all(verus_keep_ghost, not(verus_verify_core)))]
 #[verifier::external_type_specification]
 #[verifier::external_body]
 pub struct ExParseFloatError(core::num::ParseFloatError);
 
+#[cfg(all(verus_keep_ghost, not(verus_verify_core)))]
 #[verifier::external_type_specification]
 #[verifier::external_body]
 pub struct ExParseBoolError(core::str::ParseBoolError);
 
+#[cfg(all(verus_keep_ghost, not(verus_verify_core)))]
 pub assume_specification<'b, P: core::str::pattern::Pattern>[ str::starts_with::<P> ](s: &'b str, pat: P) -> bool;
 
+#[cfg(all(verus_keep_ghost, not(verus_verify_core)))]
 pub assume_specification<'b, P: core::str::pattern::Pattern>[ str::contains::<P> ](s: &'b str, pat: P) -> bool;
 
+#[cfg(all(verus_keep_ghost, not(verus_verify_core)))]
 pub assume_specification<'b, P: core::str::pattern::Pattern>[ str::find::<P> ](s: &'b str, pat: P) -> Option<usize>;
 
+#[cfg(all(verus_keep_ghost, not(verus_verify_core)))]
 #[verifier::external_trait_specification]
 pub trait ExFromStr: Sized {
     type ExternalTraitSpecificationFor: core::str::FromStr;
@@ -138,12 +146,15 @@ pub trait ExFromStr: Sized {
     fn from_str(s: &str) -> Result<Self, Self::Err>;
 }
 
+#[cfg(all(verus_keep_ghost, not(verus_verify_core)))]
 pub assume_specification<F: core::str::FromStr>[ str::parse::<F> ](s: &str) -> Result<F, F::Err>;
 
+#[cfg(all(verus_keep_ghost, not(verus_verify_core)))]
 #[verifier::external_type_specification]
 #[verifier::external_body]
 pub struct ExUtf8Error(core::str::Utf8Error);
 
+#[cfg(all(verus_keep_ghost, not(verus_verify_core)))]
 pub assume_specification[ core::str::from_utf8 ](v: &[u8]) -> Result<&str, core::str::Utf8Error>;
 
 #[cfg(not(verus_verify_core))]
@@ -475,7 +486,7 @@ pub assume_specification[ String::push_str ](s: &mut String, other: &str)
 
 // `s + t` and `s += t` for `s: String`, `t: &str` (the operator forms of `push_str`).
 // The operator specs (`obeys_*`) say nothing, so the value comes from the ensures below.
-#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+#[cfg(all(verus_keep_ghost, feature = "alloc", not(verus_verify_core)))]
 impl<'a> super::std_specs::ops::AddSpecImpl<&'a str> for String {
     open spec fn obeys_add_spec() -> bool {
         false
@@ -496,7 +507,7 @@ pub assume_specification<'a: 'a>[ <String as core::ops::Add<&'a str>>::add ](s: 
         res@ == s@ + other@,
 ;
 
-#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+#[cfg(all(verus_keep_ghost, feature = "alloc", not(verus_verify_core)))]
 impl<'a> super::std_specs::ops::AddAssignSpecImpl<&'a str> for String {
     open spec fn obeys_add_assign_spec() -> bool {
         false

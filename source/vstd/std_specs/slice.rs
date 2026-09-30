@@ -899,7 +899,7 @@ pub assume_specification<T>[ <[T]>::as_mut_ptr ](s: &mut [T]) -> *mut T
 pub assume_specification<T: Clone>[ <[T]>::fill ](s: &mut [T], value: T)
     ensures
         final(s)@.len() == old(s)@.len(),
-        forall|i: int| 0 <= i < final(s)@.len() - 1 ==> crate::pervasive::cloned(value, #[trigger] final(s)@[i]),
+        forall|i: int| 0 <= i < final(s)@.len() - 1 ==> super::super::pervasive::cloned(value, #[trigger] final(s)@[i]),
         final(s)@.len() > 0 ==> final(s)@.last() == value,
 ;
 
@@ -927,7 +927,7 @@ pub assume_specification<T: PartialEq>[ <[T]>::contains ](s: &[T], x: &T) -> (re
 pub assume_specification<T: Clone>[ <[T]>::to_vec ](s: &[T]) -> (res: alloc::vec::Vec<T>)
     ensures
         res@.len() == s@.len(),
-        forall|i: int| 0 <= i < s@.len() ==> crate::pervasive::cloned(s@[i], #[trigger] res@[i]),
+        forall|i: int| 0 <= i < s@.len() ==> super::super::pervasive::cloned(s@[i], #[trigger] res@[i]),
 ;
 
 } // verus!
