@@ -1001,3 +1001,35 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    // a spec method called on `dyn T` equals the method of the underlying value, also for
+    // a generic `X: T` (declaration-level see-through axiom)
+    #[test] test_dyn_spec_method_see_through verus_code! {
+        use vstd::prelude::*;
+        trait T {
+            spec fn v(&self) -> int;
+            fn get(&self) -> (r: u8) ensures r as int == self.v();
+        }
+        struct A;
+        struct B;
+        impl T for A { spec fn v(&self) -> int { 1 } fn get(&self) -> u8 { 1 } }
+        impl T for B { spec fn v(&self) -> int { 2 } fn get(&self) -> u8 { 2 } }
+        fn f(a: &A, b: &B) {
+            let da: &dyn T = a;
+            let db: &dyn T = b;
+            assert(da.v() == 1 && db.v() == 2);
+            let x = da.get();
+            assert(x == 1);
+        }
+        fn g<X: T>(x: &X) {
+            let d: &dyn T = x;
+            assert(d.v() == x.v());
+        }
+        fn no_false(a: &A, b: &B) {
+            let da: &dyn T = a;
+            let db: &dyn T = b;
+            assert(false); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}

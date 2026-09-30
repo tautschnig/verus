@@ -1404,6 +1404,100 @@ pub fn dyn_projection_axioms(ctx: &Ctx, traits: &Vec<Trait>) -> Commands {
     Arc::new(commands)
 }
 
+/// For a spec method `m` declared by a trait T (or T's extension trait) that is used as
+/// `dyn`, with a receiver `self: Self` (or a reference to Self):
+///   forall Self, A1..Am, B.., self, x1..xk.
+///     m(DYN%T(A1..Am, proj%T%C(Self, A..)..), A.., B.., to_dyn%T(Self, A.., self), x..)
+///       == m(Self, A.., B.., self, x..)
+/// The per-impl form of this equation (`dyn_spec_fn_axiom`) only exists for impls Verus sees
+/// as `TraitMethodImpl`s; a method whose meaning comes from elsewhere (a generic broadcast
+/// axiom over all `A: T`, as for `fmt_req` of std's `Debug` impls) needs this general form.
+/// Soundness: as for the per-impl form, `to_dyn%T` is the only source of `dyn T` values and
+/// a call on a dyn value dispatches to the underlying value's impl; the equation holds for
+/// every instance of the per-impl axiom, so the two are consistent.
+pub(crate) fn dyn_spec_fn_decl_axiom(
+    ctx: &Ctx,
+    decl_commands: &mut Vec<Command>,
+    trait_path: &Path,
+    function: &crate::sst::FunctionSst,
+) {
+    use crate::ast_util::LowerUniqueVar;
+    let Some(tr) = ctx.trait_map.get(trait_path) else { return };
+    let m = tr.x.typ_params.len();
+    let typ_params = &function.x.typ_params;
+    if typ_params.len() < 1 + m || typ_params[0] != crate::def::trait_self_type_param() {
+        return;
+    }
+    let Some(first) = function.x.pars.first() else { return };
+    let self_typ = Arc::new(TypX::TypParam(crate::def::trait_self_type_param()));
+    let is_self = |t: &Typ| {
+        let mut t = t;
+        while let TypX::Decorate(_, _, inner) = &**t {
+            t = inner;
+        }
+        crate::ast_util::types_equal(t, &self_typ)
+    };
+    if !is_self(&first.x.typ) {
+        return;
+    }
+    let binding_names = &ctx.reached_dyn_traits[trait_path];
+    let tparam = |x: &Ident| Arc::new(TypX::TypParam(x.clone()));
+    let trait_typ_args: Vec<Typ> = typ_params[0..1 + m].iter().map(|x| tparam(x)).collect();
+    let bindings: Vec<(Ident, Typ)> = binding_names
+        .iter()
+        .map(|name| {
+            (
+                name.clone(),
+                Arc::new(TypX::Projection {
+                    trait_typ_args: Arc::new(trait_typ_args.clone()),
+                    trait_path: trait_path.clone(),
+                    name: name.clone(),
+                }),
+            )
+        })
+        .collect();
+    let dyn_typ = Arc::new(TypX::Dyn(
+        trait_path.clone(),
+        Arc::new(trait_typ_args[1..].to_vec()),
+        Arc::new(vec![]),
+        Arc::new(bindings),
+    ));
+    let mut lhs_args: Vec<air::ast::Expr> = Vec::new();
+    let mut rhs_args: Vec<air::ast::Expr> = Vec::new();
+    for (n, x) in typ_params.iter().enumerate() {
+        rhs_args.extend(typ_to_ids(ctx, &tparam(x)));
+        if n == 0 {
+            lhs_args.extend(typ_to_ids(ctx, &dyn_typ));
+        } else {
+            lhs_args.extend(typ_to_ids(ctx, &tparam(x)));
+        }
+    }
+    let mut to_dyn_args: Vec<air::ast::Expr> =
+        trait_typ_args.iter().flat_map(|t| typ_to_ids(ctx, t)).collect();
+    for (n, param) in function.x.pars.iter().enumerate() {
+        rhs_args.push(ident_var(&param.x.name.lower()));
+        if n == 0 {
+            to_dyn_args.push(ident_var(&param.x.name.lower()));
+            lhs_args.push(ident_apply(&ctx.name_ctxt.to_dyn(trait_path), &to_dyn_args));
+        } else {
+            lhs_args.push(ident_var(&param.x.name.lower()));
+        }
+    }
+    let name = crate::def::suffix_global_id(&crate::sst_to_air::fun_to_air_ident(
+        &ctx.name_ctxt,
+        &function.x.name,
+    ));
+    let lhs = ident_apply(&name, &Arc::new(lhs_args));
+    let rhs = ident_apply(&name, &Arc::new(rhs_args));
+    let f_eq = Arc::new(air::ast::ExprX::Binary(air::ast::BinaryOp::Eq, lhs.clone(), rhs));
+    let qid = format!("{name}_to_dyn_decl");
+    let e_forall = mk_bind_expr(
+        &crate::sst_to_air_func::func_bind(ctx, qid, typ_params, &function.x.pars, &lhs, None),
+        &f_eq,
+    );
+    decl_commands.push(Arc::new(CommandX::Global(mk_unnamed_axiom(e_forall))));
+}
+
 pub(crate) fn dyn_spec_fn_axiom(
     ctx: &Ctx,
     decl_commands: &mut Vec<Command>,
