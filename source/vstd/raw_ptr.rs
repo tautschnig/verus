@@ -732,6 +732,24 @@ macro_rules! pointer_specs {
                 opens_invariants none
                 no_unwind;
 
+            /// `p.cast::<U>()` is `p as *mut U`: address and provenance kept, thin metadata.
+            #[cfg(verus_keep_ghost)]
+            pub assume_specification<T: ::core::marker::PointeeSized, U>[<*$mu T>::cast::<U>](p: *$mu T) -> (q: *$mu U)
+                ensures
+                    q@.addr == p@.addr,
+                    q@.provenance == p@.provenance,
+                    q@.metadata == (),
+                opens_invariants none
+                no_unwind;
+
+            /// `is_null` compares the data address with 0 (for wide pointers only the data
+            /// pointer is considered).
+            #[cfg(verus_keep_ghost)]
+            pub assume_specification<T: ::core::marker::PointeeSized>[<*$mu T>::is_null](p: *$mu T) -> (b: bool)
+                ensures b == (p@.addr == 0)
+                opens_invariants none
+                no_unwind;
+
             }
         }
     };

@@ -2788,3 +2788,28 @@ test_verify_one_file! {
     } => Err(err) => assert_one_fails(err)
 }
 
+test_verify_one_file! {
+    #[test] test_mem_slice_ptr_methods verus_code! {
+        use vstd::prelude::*;
+        use vstd::raw_ptr::*;
+        use vstd::std_specs::cmp::PartialEqSpec;
+        fn a(x: &mut u32) -> (r: u32) ensures r == *old(x), *final(x) == 5 { core::mem::replace(x, 5) }
+        fn b(x: &mut Vec<u8>) -> (r: Vec<u8>) ensures r@ == old(x)@, final(x)@.len() == 0 { core::mem::take(x) }
+        fn c(v: &mut [u32; 3]) ensures final(v)@ == seq![old(v)@[2], old(v)@[1], old(v)@[0]] { v.reverse(); }
+        fn d(v: &mut Vec<u32>) requires old(v)@.len() == 2 ensures final(v)@ == seq![old(v)@[1], old(v)@[0]] { v.swap(0, 1); }
+        fn e(v: &Vec<u32>) -> (r: bool) ensures r == v@.contains(3u32) {
+            let r = v.contains(&3);
+            assert(forall|i: int| 0 <= i < v@.len() ==>
+                (<u32 as PartialEqSpec>::eq_spec(&v@[i], &3u32) <==> v@[i] == 3u32));
+            r
+        }
+        fn f(v: &[u8]) -> (r: Vec<u8>) ensures r@ == v@ { v.to_vec() }
+        fn g(p: *mut u32) -> (q: *mut u8) ensures q@.addr == p@.addr { p.cast::<u8>() }
+        fn h(p: *const u32) -> (b: bool) ensures b == (p@.addr == 0) { p.is_null() }
+        fn i(x: Vec<u8>) { core::mem::drop(x); }
+        fn wrong(v: &mut Vec<u32>) requires old(v)@.len() == 2 {
+            v.swap(0, 2); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+

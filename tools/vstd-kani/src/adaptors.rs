@@ -1049,3 +1049,40 @@ fn enumerate_spec_holds() {
     assert!(n == 3);
 }
 
+/// vstd `core.rs`, `slice.rs`, `raw_ptr.rs`: `mem::replace`/`take`, `<[T]>::swap`/`reverse`/
+/// `contains`/`to_vec`, `<*mut T>::cast`/`is_null`.
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(5)]
+fn mem_slice_ptr_specs_hold() {
+    let x0: u8 = kani::any();
+    let src: u8 = kani::any();
+    let mut x = x0;
+    let r = core::mem::replace(&mut x, src);
+    assert!(r == x0 && x == src);
+    let mut y = x0;
+    let r = core::mem::take(&mut y);
+    assert!(r == x0 && y == 0);
+    let a0: [u8; 3] = kani::any();
+    let i: usize = kani::any();
+    let j: usize = kani::any();
+    kani::assume(i < 3 && j < 3);
+    let mut a = a0;
+    a.swap(i, j);
+    for k in 0..3 {
+        let expected = if k == j { a0[i] } else if k == i { a0[j] } else { a0[k] };
+        assert!(a[k] == expected);
+    }
+    let mut b = a0;
+    b.reverse();
+    assert!(b[0] == a0[2] && b[1] == a0[1] && b[2] == a0[0]);
+    let q: u8 = kani::any();
+    assert!(a0.contains(&q) == (a0[0] == q || a0[1] == q || a0[2] == q));
+    let v = a0[..].to_vec();
+    assert!(v.len() == 3 && v[0] == a0[0] && v[1] == a0[1] && v[2] == a0[2]);
+    let addr: usize = kani::any();
+    let p = core::ptr::without_provenance_mut::<u32>(addr);
+    assert!(p.cast::<u8>().addr() == p.addr());
+    assert!(p.is_null() == (p.addr() == 0));
+}
+

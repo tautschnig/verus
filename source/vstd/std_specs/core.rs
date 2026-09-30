@@ -214,6 +214,28 @@ pub assume_specification<T>[ core::mem::swap::<T> ](a: &mut T, b: &mut T)
     no_unwind
 ;
 
+pub assume_specification<T>[ core::mem::replace::<T> ](dest: &mut T, src: T) -> (res: T)
+    ensures
+        res == *old(dest),
+        *final(dest) == src,
+    opens_invariants none
+    no_unwind
+;
+
+pub assume_specification<T: core::default::Default>[ core::mem::take::<T> ](dest: &mut T) -> (res: T)
+    ensures
+        res == *old(dest),
+        T::default.ensures((), *final(dest)),
+;
+
+pub assume_specification<T>[ core::mem::drop::<T> ](x: T)
+;
+
+pub assume_specification<T>[ core::mem::forget::<T> ](t: T)
+    opens_invariants none
+    no_unwind
+;
+
 #[verifier::external_type_specification]
 pub struct ExOrdering(core::cmp::Ordering);
 
