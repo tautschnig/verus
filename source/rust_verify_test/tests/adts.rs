@@ -1988,3 +1988,20 @@ test_verify_one_file! {
         }
     } => Ok(())
 }
+
+test_verify_one_file! {
+    // a variant under #[cfg(..)] that is disabled has no generated `->` accessors
+    #[test] test_cfg_disabled_variant verus_code! {
+        use vstd::prelude::*;
+        pub enum N { F(u64), U(u64), #[cfg(feature = "never")] S(u32), #[cfg(not(feature = "never"))] T(u8) }
+        fn f(n: N) -> (r: u64) ensures n is F ==> r == n->F_0 {
+            match n {
+                N::F(x) => x,
+                N::U(_) => 1,
+                #[cfg(feature = "never")] N::S(_) => 0,
+                #[cfg(not(feature = "never"))] N::T(_) => 2,
+            }
+        }
+        fn g(n: N) -> (r: u8) requires n is T ensures r == n->T_0 { match n { N::T(x) => x, _ => 0 } }
+    } => Ok(())
+}

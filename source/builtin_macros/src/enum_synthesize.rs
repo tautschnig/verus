@@ -235,7 +235,20 @@ pub(crate) fn visit_item_enum_synthesize(
                 };
 
                 let variant_ident = variant.to_string();
+                // A variant under `#[cfg(..)]` may not exist; its accessors get the same cfg.
+                let cfgs: Vec<&verus_syn::Attribute> = enum_
+                    .variants
+                    .iter()
+                    .find(|v| &v.ident == variant)
+                    .map(|v| {
+                        v.attrs
+                            .iter()
+                            .filter(|a| a.path().is_ident("cfg") || a.path().is_ident("cfg_attr"))
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 quote_spanned_builtin! { verus_builtin, enum_.span() =>
+                    #(#cfgs)*
                     #[cfg(verus_keep_ghost)]
                     #[allow(non_snake_case)]
                     #[verus::internal(verus_macro)]
