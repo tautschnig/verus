@@ -2704,3 +2704,16 @@ test_verify_one_file! {
         fn f(a: (X, u8)) { let b = a.clone(); }
     } => Err(err) => assert_vir_error_msg(err, "built-in instance")
 }
+
+test_verify_one_file! {
+    #[test] test_string_add_str verus_code! {
+        use vstd::prelude::*;
+        fn f(a: &str) -> (r: String) ensures r@ == "-march=rv"@ + a@ { "-march=rv".to_owned() + a }
+        fn g(s: String, a: &str) -> (r: String) ensures r@ == s@ + a@ + a@ { let mut t = s; t += a; t + a }
+        fn wrong(a: &str) -> (r: String)
+            ensures r@ == a@, // FAILS
+        {
+            "x".to_owned() + a
+        }
+    } => Err(err) => assert_one_fails(err)
+}

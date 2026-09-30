@@ -431,6 +431,50 @@ pub assume_specification[ String::push_str ](s: &mut String, other: &str)
         final(s)@ == old(s)@ + other@,
 ;
 
+// `s + t` and `s += t` for `s: String`, `t: &str` (the operator forms of `push_str`).
+// The operator specs (`obeys_*`) say nothing, so the value comes from the ensures below.
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+impl<'a> super::std_specs::ops::AddSpecImpl<&'a str> for String {
+    open spec fn obeys_add_spec() -> bool {
+        false
+    }
+
+    open spec fn add_req(self, rhs: &'a str) -> bool {
+        true
+    }
+
+    open spec fn add_spec(self, rhs: &'a str) -> String {
+        arbitrary()
+    }
+}
+
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+pub assume_specification<'a: 'a>[ <String as core::ops::Add<&'a str>>::add ](s: String, other: &str) -> (res: String)
+    ensures
+        res@ == s@ + other@,
+;
+
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+impl<'a> super::std_specs::ops::AddAssignSpecImpl<&'a str> for String {
+    open spec fn obeys_add_assign_spec() -> bool {
+        false
+    }
+
+    open spec fn add_assign_req(&self, rhs: &'a str) -> bool {
+        true
+    }
+
+    open spec fn add_assign_spec(&self, rhs: &'a str) -> &Self {
+        arbitrary()
+    }
+}
+
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+pub assume_specification<'a: 'a>[ <String as core::ops::AddAssign<&'a str>>::add_assign ](s: &mut String, other: &str)
+    ensures
+        final(s)@ == old(s)@ + other@,
+;
+
 #[cfg(all(feature = "alloc", not(verus_verify_core)))]
 pub assume_specification[ String::is_empty ](s: &String) -> (res: bool)
     ensures

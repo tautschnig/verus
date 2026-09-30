@@ -475,6 +475,43 @@ fn s_result_is_ok_err() {
 // even when Kani is not installed.
 // ===========================================================================
 
+/// vstd's `rust_div`/`rust_rem` (`vstd/arithmetic/div_mod.rs`), transcribed with
+/// Euclidean `/` and `%` on unbounded integers (i64 is wide enough for i8/i16/i32 operands).
+/// They are the ensures of vstd's signed `Div`/`Rem`/`DivAssign`/`RemAssign` specifications.
+pub fn spec_rust_div(a: i64, b: i64) -> i64 {
+    if a == 0 { 0 } else if a > 0 { a.div_euclid(b) } else { -((-a).div_euclid(b)) }
+}
+pub fn spec_rust_rem(a: i64, b: i64) -> i64 {
+    if a == 0 { 0 } else if a > 0 { a.rem_euclid(b) } else { -((-a).rem_euclid(b)) }
+}
+
+#[cfg(kani)]
+#[kani::proof]
+fn signed_div_rem_specs_match_std_i8() {
+    let a: i8 = kani::any();
+    let b: i8 = kani::any();
+    // the specifications' preconditions: nonzero divisor, no MIN / -1 overflow
+    kani::assume(b != 0 && !(a == i8::MIN && b == -1));
+    assert_eq!((a / b) as i64, spec_rust_div(a as i64, b as i64));
+    assert_eq!((a % b) as i64, spec_rust_rem(a as i64, b as i64));
+    let (mut x, mut y) = (a, a);
+    x /= b;
+    y %= b;
+    assert_eq!(x as i64, spec_rust_div(a as i64, b as i64));
+    assert_eq!(y as i64, spec_rust_rem(a as i64, b as i64));
+}
+
+/// vstd `string.rs`: `(s + t)@ == s@ + t@` and `(s += t)` gives `old(s)@ + t@`, for
+/// `s: String`, `t: &str`; `@` is the sequence of chars.
+pub fn string_add_spec_holds(s: &str, t: &str) -> bool {
+    let expected: Vec<char> = s.chars().chain(t.chars()).collect();
+    let sum = s.to_owned() + t;
+    let mut acc = s.to_owned();
+    acc += t;
+    sum.chars().collect::<Vec<char>>() == expected && acc.chars().collect::<Vec<char>>() == expected
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -508,6 +545,28 @@ mod tests {
         assert_eq!(i8::MIN.checked_rem_euclid(-1), None);
         assert_eq!(spec_2603_checked_rem_euclid_old_i8(i8::MIN, -1), Some(0));
         assert_eq!(spec_2603_checked_rem_euclid_new_i8(i8::MIN, -1), None);
+    }
+
+    #[test]
+    fn string_add_str_specs_match_std() {
+        for s in ["", "a", "ab", "\u{e9}x", "\u{1F600}"] {
+            for t in ["", "c", "\u{df}", "yz"] {
+                assert!(super::string_add_spec_holds(s, t));
+            }
+        }
+    }
+
+    #[test]
+    fn exhaustive_i8_signed_div_rem_specs_match_std() {
+        for a in i8::MIN..=i8::MAX {
+            for b in i8::MIN..=i8::MAX {
+                if b == 0 || (a == i8::MIN && b == -1) {
+                    continue;
+                }
+                assert_eq!((a / b) as i64, super::spec_rust_div(a as i64, b as i64));
+                assert_eq!((a % b) as i64, super::spec_rust_rem(a as i64, b as i64));
+            }
+        }
     }
 
     #[test]
