@@ -406,3 +406,36 @@ test_verify_one_file! {
         pub uninterp open fn bar();
     } => Err(err) => assert_vir_error_msg(err, "expected `fn`")
 }
+
+test_verify_one_file! {
+    // items in a block are hoisted; each is verified (or external) as at module level
+    #[test] test_item_statements verus_code! {
+        use vstd::prelude::*;
+        struct S;
+        fn f() -> (r: u32) ensures r == 7 {
+            mod kw {
+                pub const A: u32 = 1;
+                pub fn g() -> (r: u32) ensures r == 6 { 6 }
+            }
+            static T: u32 = 4;
+            trait Loc { fn m(&self) -> u32; }
+            impl Loc for S { fn m(&self) -> u32 { 0 } }
+            type U = u32;
+            let x: U = kw::g();
+            x + kw::A
+        }
+        fn tl() -> u32 { std::thread_local!(static TL: u32 = 1); 0 }
+        fn wrong() -> (r: u32)
+            ensures r == 8, // FAILS
+        {
+            mod m2 { pub fn h() -> (r: u32) ensures r == 1 { 1 } }
+            m2::h()
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    #[test] test_item_statement_unsafe_impl_sync_still_rejected verus_code! {
+        fn f() { struct E; unsafe impl Sync for E {} }
+    } => Err(err) => assert_vir_error_msg(err, "unsafe impl for `Sync` is not allowed")
+}

@@ -806,3 +806,34 @@ test_verify_one_file! {
         fn f() -> &'static str { NAME }
     } => Ok(())
 }
+
+test_verify_one_file! {
+    // a const generated inside a function body by a macro_rules! macro (verus! does not see
+    // it) used to crash erasure (thir_body before the erasure context)
+    #[test] test_macro_generated_local_const verus_code! {
+        use vstd::prelude::*;
+        macro_rules! g { () => {{ const S: usize = 2; S }} }
+        macro_rules! h { () => { const T: usize = 3; } }
+        macro_rules! buf_get_impl {
+            ($b:expr, $t:ty) => {{ const SIZE: usize = core::mem::size_of::<$t>(); $b.len() >= SIZE }}
+        }
+        macro_rules! flags { () => { const _: u32 = !0; } }
+        flags!();
+        fn f() -> usize { g!() }
+        fn k() -> usize { h!(); T }
+        fn get_u16(b: &Vec<u8>) -> bool { buf_get_impl!(b, u16) }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] test_const_block verus_code! {
+        use vstd::prelude::*;
+        fn f() -> (r: u32) ensures r == 3 { const { 1 + 2 } }
+        fn g() -> u32 { if const { cfg!(target_endian = "little") } { 1 } else { 0 } }
+        fn wrong() -> (r: u32)
+            ensures r == 4, // FAILS
+        {
+            const { 1 + 2 }
+        }
+    } => Err(err) => assert_one_fails(err)
+}

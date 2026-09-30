@@ -4253,7 +4253,14 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
 
             expr_assign_to_vir_innermost(bctx, expr.span, lhs, mk_expr, rhs, Some(op))
         }
-        ExprKind::ConstBlock(..) => unsupported_err!(expr.span, format!("const block expressions")),
+        ExprKind::ConstBlock(cb) => {
+            // `const { e }` is evaluated at compile time; a const context has no side effects
+            // and evaluation is deterministic, so its value is the value of `e` evaluated
+            // here. Inline consts are type-checked with their parent, so `e`'s node types
+            // are in this body's typeck results.
+            let body = bctx.ctxt.tcx.hir_body(cb.body);
+            expr_to_vir_innermost(bctx, body.value)
+        }
         ExprKind::Type(..) => unsupported_err!(expr.span, format!("type expressions")),
         ExprKind::DropTemps(..) => unsupported_err!(expr.span, format!("drop-temps expressions")),
         ExprKind::Let(..) => unsupported_err!(expr.span, format!("let expressions")),
@@ -4880,9 +4887,20 @@ pub(crate) fn stmt_to_vir<'tcx>(
                         // It doesn't matter that they also appear here as statements
                         return Ok(vec![]);
                     }
-                    ItemKind::Fn { .. } | ItemKind::Const(..) => {
-                        // Nested functions and constants are handled elsewhere as standalone items
-                        // It doesn't matter that they also appear here as statements
+                    ItemKind::Fn { .. }
+                    | ItemKind::Const(..)
+                    | ItemKind::Static(..)
+                    | ItemKind::Impl(..)
+                    | ItemKind::Trait { .. }
+                    | ItemKind::TyAlias(..)
+                    | ItemKind::Mod(..)
+                    | ItemKind::Union(..)
+                    | ItemKind::ExternCrate(..)
+                    | ItemKind::ForeignMod { .. } => {
+                        // An item in a block is hoisted: the statement has no effect where it
+                        // appears. The item itself is collected with the crate's items (and
+                        // verified, or rejected, or external, as it would be at module
+                        // level), so it does not matter that it also appears here.
                         return Ok(vec![]);
                     }
                     _ => {

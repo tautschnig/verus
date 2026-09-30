@@ -335,6 +335,32 @@ impl<'a, 'tcx> VisitMod<'a, 'tcx> {
 
         // Append this item to the items
 
+        // An item nested where no VIR path exists (e.g. the `static` that std's
+        // `thread_local!` places inside a closure in a constant, when the macro is used in a
+        // function body) cannot be named in VIR; it comes from a foreign macro and has no
+        // Verus content, so it is treated as external (uses of it are then reported as uses
+        // of an external item, instead of an internal error).
+        // Likewise the `static` (or `const`) that `thread_local!` defines has type
+        // `std::thread::LocalKey<T>` and an initializer made of std internals; it is an
+        // external item (its uses need a `LocalKey` specification either way).
+        let is_thread_local_key = matches!(
+            self.ctxt.tcx.def_kind(def_id),
+            rustc_hir::def::DefKind::Static { .. } | rustc_hir::def::DefKind::Const { .. }
+        ) && match self.ctxt.tcx.type_of(def_id).skip_binder().kind() {
+            rustc_middle::ty::TyKind::Adt(adt, _) => {
+                self.ctxt.tcx.def_path_str(adt.did()) == "std::thread::LocalKey"
+            }
+            _ => false,
+        };
+        let state_for_this_item = if state_for_this_item == VerifState::Verify
+            && (is_thread_local_key
+                || def_id_to_vir_path_option(self.ctxt.tcx, Some(&self.ctxt.verus_items), def_id)
+                    .is_none())
+        {
+            VerifState::External
+        } else {
+            state_for_this_item
+        };
         let verif = if state_for_this_item == VerifState::Verify {
             if let Some(module_path) = self.module_path.clone() {
                 VerifOrExternal::VerusAware {
