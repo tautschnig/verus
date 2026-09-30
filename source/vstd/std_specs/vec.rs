@@ -570,4 +570,29 @@ pub assume_specification<T, A: Allocator>[ Vec::<T, A>::as_mut_ptr ](v: &mut Vec
     no_unwind
 ;
 
+
+// `Vec` extended by owned items appends them; by references (for `T: Copy`) appends copies.
+impl<T, A: Allocator> super::iter::ExtendSpecImpl<T> for Vec<T, A> {
+    open spec fn extend_ensures(old: Self, items: Seq<T>, new: Self) -> bool {
+        new@ == old@ + items
+    }
+}
+
+impl<'a, T: Copy + 'a, A: Allocator> super::iter::ExtendSpecImpl<&'a T> for Vec<T, A> {
+    open spec fn extend_ensures(old: Self, items: Seq<&'a T>, new: Self) -> bool {
+        new@ == old@ + items.map_values(|r: &'a T| *r)
+    }
+}
+
+
+pub assume_specification<T, A: Allocator>[ Vec::<T, A>::capacity ](v: &Vec<T, A>) -> (c: usize)
+    ensures
+        c >= v@.len(),
+;
+
+pub assume_specification<T, A: Allocator>[ Vec::<T, A>::into_boxed_slice ](v: Vec<T, A>) -> (b: Box<[T], A>)
+    ensures
+        b@ == v@,
+;
+
 } // verus!

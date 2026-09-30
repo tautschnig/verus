@@ -2893,3 +2893,47 @@ test_verify_one_file! {
     } => Err(err) => assert_one_fails(err)
 }
 
+test_verify_one_file! {
+    #[test] test_vec_extend verus_code! {
+        use vstd::prelude::*;
+        broadcast use vstd::std_specs::iter::group_iter_axioms, vstd::std_specs::iter::axiom_from_iterator_ensures;
+        fn a(v: &mut Vec<u32>, w: Vec<u32>) ensures final(v)@ == old(v)@ + w@ { v.extend(w.into_iter()); }
+        fn b(v: &mut Vec<u32>, w: &Vec<u32>) ensures final(v)@ == old(v)@ + w@ { v.extend(w.iter().copied()); }
+        fn c(v: &mut Vec<u32>, w: &[u32]) { v.extend(w.iter()); }
+        fn wrong(v: &mut Vec<u32>, w: Vec<u32>)
+            ensures final(v)@ == old(v)@, // FAILS
+        {
+            v.extend(w.into_iter());
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    #[test] test_misc_std_specs_round2 verus_code! {
+        use vstd::prelude::*;
+        fn a(v: &Vec<u8>) -> (c: usize) ensures c >= v@.len() { v.capacity() }
+        fn b(v: Vec<u8>) -> (r: Box<[u8]>) ensures r@ == v@ { v.into_boxed_slice() }
+        fn c(b: &Box<u32>) -> (r: u32) ensures r == **b { *b.as_ref() }
+        fn d() {
+            let c = char::from_u32(0x41);
+            assert(c is Some);
+            let n = char::from_u32(0xD800);
+            assert(n is None);
+        }
+        fn s(t: &str) -> usize {
+            let mut n = 0usize;
+            for b in t.bytes() invariant n <= 100 { if n < 100 { n += 1; } }
+            n
+        }
+        fn l(t: &str) -> usize {
+            let mut k = 0usize;
+            for line in t.lines() invariant k <= 10 { if k < 10 { k += 1; } }
+            k
+        }
+        fn wrong() {
+            let c = char::from_u32(0x110000);
+            assert(c is Some); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+

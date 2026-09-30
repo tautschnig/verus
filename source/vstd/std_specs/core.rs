@@ -206,6 +206,14 @@ pub trait ExMetaSized {
     type ExternalTraitSpecificationFor: core::marker::MetaSized;
 }
 
+/// `char::from_u32(i)` is `Some` exactly for Unicode scalar values (not a surrogate, at most
+/// U+10FFFF).
+pub assume_specification[ char::from_u32 ](i: u32) -> (c: Option<char>)
+    ensures
+        c is Some <==> (i <= 0xD7FF || (0xE000 <= i && i <= 0x10FFFF)),
+        c is Some ==> c.unwrap() as u32 == i,
+;
+
 // `core::error::Error`: declared so it can be used in bounds and as `dyn Error`; its
 // methods (`source`, `description`, `cause`) have no specifications.
 #[verifier::external_trait_specification]

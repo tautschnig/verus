@@ -137,6 +137,59 @@ pub assume_specification<'b, P: core::str::pattern::Pattern>[ str::contains::<P>
 pub assume_specification<'b, P: core::str::pattern::Pattern>[ str::find::<P> ](s: &'b str, pat: P) -> Option<usize>;
 
 #[cfg(all(verus_keep_ghost, not(verus_verify_core)))]
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExLines<'a>(core::str::Lines<'a>);
+
+#[cfg(all(verus_keep_ghost, not(verus_verify_core)))]
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExBytes<'a>(core::str::Bytes<'a>);
+
+#[cfg(all(verus_keep_ghost, not(verus_verify_core)))]
+pub assume_specification[ str::bytes ](s: &str) -> (iter: core::str::Bytes<'_>)
+    ensures
+        IteratorSpec::remaining(&iter) == s.spec_bytes(),
+        IteratorSpec::decrease(&iter) is Some,
+;
+
+#[cfg(all(verus_keep_ghost, not(verus_verify_core)))]
+impl<'a> super::std_specs::iter::IteratorSpecImpl for core::str::Bytes<'a> {
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool {
+        true
+    }
+
+    uninterp spec fn remaining(&self) -> Seq<Self::Item>;
+
+    uninterp spec fn will_return_none(&self) -> bool;
+
+    uninterp spec fn decrease(&self) -> Option<nat>;
+
+    uninterp spec fn peek(&self, index: int) -> Option<Self::Item>;
+}
+
+#[cfg(all(verus_keep_ghost, not(verus_verify_core)))]
+pub assume_specification[ str::lines ](s: &str) -> (iter: core::str::Lines<'_>)
+    ensures
+        IteratorSpec::decrease(&iter) is Some,
+;
+
+#[cfg(all(verus_keep_ghost, not(verus_verify_core)))]
+impl<'a> super::std_specs::iter::IteratorSpecImpl for core::str::Lines<'a> {
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool {
+        true
+    }
+
+    uninterp spec fn remaining(&self) -> Seq<Self::Item>;
+
+    uninterp spec fn will_return_none(&self) -> bool;
+
+    uninterp spec fn decrease(&self) -> Option<nat>;
+
+    uninterp spec fn peek(&self, index: int) -> Option<Self::Item>;
+}
+
+#[cfg(all(verus_keep_ghost, not(verus_verify_core)))]
 #[verifier::external_trait_specification]
 pub trait ExFromStr: Sized {
     type ExternalTraitSpecificationFor: core::str::FromStr;

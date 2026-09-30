@@ -1112,3 +1112,41 @@ fn cloned_peekable_specs_hold() {
     assert!(p.next().is_none());
 }
 
+/// vstd `vec.rs`: `Vec::extend` appends the items of the iterator (owned) or copies of them
+/// (by reference, `T: Copy`).
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(5)]
+fn vec_extend_spec_holds() {
+    let a: [u8; 2] = kani::any();
+    let b: [u8; 2] = kani::any();
+    let mut v: Vec<u8> = a.to_vec();
+    v.extend(b.iter());
+    assert!(v.len() == 4 && v[0] == a[0] && v[1] == a[1] && v[2] == b[0] && v[3] == b[1]);
+    let mut w: Vec<u8> = a.to_vec();
+    w.extend(b.to_vec().into_iter());
+    assert!(w == v);
+}
+
+/// vstd: `char::from_u32` is Some exactly for Unicode scalar values; `str::bytes` yields the
+/// UTF-8 encoding; `Vec::capacity >= len`; `into_boxed_slice` keeps the elements.
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(5)]
+fn char_bytes_vec_misc_specs_hold() {
+    let i: u32 = kani::any();
+    let c = char::from_u32(i);
+    assert!(c.is_some() == (i <= 0xD7FF || (0xE000 <= i && i <= 0x10FFFF)));
+    if let Some(ch) = c { assert!(ch as u32 == i); }
+    let a: [u8; 2] = kani::any();
+    kani::assume(a[0].is_ascii() && a[1].is_ascii());
+    let s = core::str::from_utf8(&a).unwrap();
+    let mut n = 0;
+    for b in s.bytes() { assert!(b == a[n]); n += 1; }
+    assert!(n == 2);
+    let v: Vec<u8> = a.to_vec();
+    assert!(v.capacity() >= v.len());
+    let bx = v.clone().into_boxed_slice();
+    assert!(bx.len() == 2 && bx[0] == a[0] && bx[1] == a[1]);
+}
+

@@ -515,6 +515,22 @@ pub trait ExFromIterator<A>: Sized {
     ;
 }
 
+#[verifier::external_trait_specification]
+#[verifier::external_trait_extension(ExtendSpec via ExtendSpecImpl)]
+pub trait ExExtend<A> {
+    type ExternalTraitSpecificationFor: core::iter::Extend<A>;
+
+    /// `self` after `extend` with the sequence of items `items`, starting from `old`
+    spec fn extend_ensures(old: Self, items: Seq<A>, new: Self) -> bool where Self: Sized;
+
+    #[verifier::impls_cannot_extend_spec]
+    fn extend<T>(&mut self, iter: T)
+        where T: IntoIterator<Item = A>, Self: Sized,
+        ensures
+            Self::extend_ensures(*old(self), into_iter_remaining(iter), *final(self)),
+    ;
+}
+
 /********************************************************************************
  * Definitions for `&mut I`
  ********************************************************************************/

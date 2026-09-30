@@ -75,4 +75,10 @@ pub assume_specification<T, A: Allocator>[ Rc::<T, A>::into_inner ](v: Rc<T, A>)
         result matches Some(t) ==> t == *v,
 ;
 
+
+pub assume_specification<'a, T: ?Sized, A: Allocator>[ <Box<T, A> as core::convert::AsRef<T>>::as_ref ](b: &'a Box<T, A>) -> (r: &'a T)
+    ensures
+        r == &**b,
+;
+
 } // verus!
