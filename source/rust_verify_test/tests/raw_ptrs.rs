@@ -451,3 +451,18 @@ test_verify_one_file! {
         "cannot borrow `pt` as mutable because it is also borrowed as immutable",
     ])
 }
+
+test_verify_one_file! {
+    // `a as *mut T` for a non-usize integer is `(a as usize) as *mut T`
+    #[test] int_to_ptr_cast_other_int_types verus_code! {
+        use vstd::prelude::*;
+        use vstd::raw_ptr::*;
+        fn f(x: i64) -> (p: *mut u8) ensures x >= 0 ==> p@.addr == x as usize { x as *mut u8 }
+        fn g(x: u8) -> (p: *const u32) ensures p@.addr == x as usize { x as *const u32 }
+        fn wrong(x: i64) -> (p: *mut u8)
+            ensures p@.addr == 0, // FAILS
+        {
+            x as *mut u8
+        }
+    } => Err(err) => assert_one_fails(err)
+}

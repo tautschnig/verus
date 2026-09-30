@@ -705,3 +705,21 @@ test_verify_one_file! {
         }
     } => Ok(())
 }
+
+test_verify_one_file! {
+    #[test] cast_usize_to_f64 verus_code! {
+        use vstd::prelude::*;
+        fn test_usize_as_f64(n: usize) {
+            let x: f64 = n as f64;
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] cast_f64_to_isize verus_code! {
+        use vstd::prelude::*;
+        fn test_f64_as_isize(f: f64) {
+            let n: isize = f as isize;
+        }
+    } => Ok(())
+}

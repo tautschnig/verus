@@ -456,6 +456,18 @@ pub(crate) fn check_lit_int(
             {
                 Ok(())
             }
+            IntRange::USize | IntRange::ISize
+                if ctxt.arch_word_bits.expect("unkown arch_word_bits").num_bits().is_none()
+                    && i < (1u128 << 64) + i_bump =>
+            {
+                // fits a 64-bit usize, but Verus verifies for 32- and 64-bit targets unless
+                // the crate fixes the width
+                return Err(crate::util::err_span_bare(
+                    span,
+                    format!("integer literal out of range {:?} on 32-bit targets", range),
+                )
+                .help("add `global size_of usize == 8;` to verify for 64-bit targets only"));
+            }
             _ => {
                 return err_span(span, format!("integer literal out of range {:?}", range));
             }
@@ -4335,6 +4347,11 @@ fn lit_to_vir<'tcx>(
             }
             return err_span(span, "Unsupported floating point literal");
         }
+        LitKind::CStr(..) => {
+            // `c"..."`: a `&'static CStr`; its contents are not modelled (CStr is opaque), so
+            // the literal is an unconstrained value of its type
+            mk_expr(ExprX::Nondeterministic)
+        }
         _ => {
             return err_span(span, "Unsupported constant type");
         }
@@ -5444,6 +5461,41 @@ pub(crate) fn maybe_do_ptr_cast<'tcx>(
 ) -> Result<Option<vir::ast::Expr>, VirErr> {
     let source_ty = bctx.types.expr_ty_adjusted(src_expr);
     let to_ty = bctx.types.expr_ty(dst_expr);
+    // `a as *const T` for an integer `a` of another type is `(a as usize) as *const T`
+    // (Rust's int-to-pointer cast goes through usize: sign-extension or truncation first)
+    if let TyKind::RawPtr(ty2, _) = to_ty.kind()
+        && crate::rust_to_vir_base::is_integer_ty(&bctx.ctxt.verus_items, &source_ty)
+        && !matches!(source_ty.kind(), TyKind::Uint(rustc_middle::ty::UintTy::Usize))
+        && ty2.is_sized(bctx.ctxt.tcx, TypingEnv::post_analysis(bctx.ctxt.tcx, bctx.fun_id))
+    {
+        let usize_typ = Arc::new(TypX::Int(IntRange::USize));
+        let as_usize = mk_ty_clip(bctx, &usize_typ, src_vir, true);
+        let dst_ty = bctx.mid_ty_to_vir(dst_expr.span, ty2)?;
+        let fun = vir::fun!(CrateId::Vstd => "raw_ptr", "cast_usize_to_ptr");
+        let call_target = CallTarget::Fun(
+            vir::ast::CallTargetKind::Static,
+            fun,
+            Arc::new(vec![dst_ty]),
+            Arc::new(vec![]),
+            vir::ast::CallTargetAttrs {
+                autospec: if bctx.in_ghost {
+                    AutospecUsage::IfMarked
+                } else {
+                    AutospecUsage::Final
+                },
+                const_var: false,
+                assume_external_allowed: false,
+            },
+        );
+        let x = ExprX::Call {
+            target: call_target,
+            args: Arc::new(vec![as_usize]),
+            post_args: None,
+            body: None,
+        };
+        let expr_typ = typ_of_node_unadjusted(bctx, dst_expr.span, &dst_expr.hir_id)?;
+        return Ok(Some(bctx.spanned_typed_new(dst_expr.span, &expr_typ, x)));
+    }
     match is_ptr_cast(bctx, dst_expr.span, source_ty, to_ty)? {
         Some(PtrCastKind::Trivial) => {
             return Ok(Some(src_vir.clone()));
