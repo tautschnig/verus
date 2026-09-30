@@ -881,7 +881,7 @@ pub broadcast axiom fn cloned_postcondition<'a, I, T: 'a>(i: I, r: Cloned<I>)
     ensures
         IteratorSpec::remaining(&r).len() == i.remaining().len(),
         forall|k: int| 0 <= k < i.remaining().len() ==>
-            crate::pervasive::cloned(*i.remaining()[k], #[trigger] IteratorSpec::remaining(&r)[k]),
+            super::super::pervasive::cloned(*i.remaining()[k], #[trigger] IteratorSpec::remaining(&r)[k]),
         cloned_iter(r) == i,
         IteratorSpec::will_return_none(&r) <==> i.will_return_none(),
         IteratorSpec::decrease(&r) is Some == i.decrease() is Some,
