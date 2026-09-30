@@ -608,14 +608,16 @@ test_verify_one_file_with_options! {
 }
 
 test_verify_one_file! {
-    #[test] tuple_clone_not_supported verus_code! {
+    // the compiler-provided Clone of a Copy tuple is a copy (rustc's clone shim for Copy
+    // types is `copy_shim`, even when the components have their own Clone impls)
+    #[test] tuple_clone verus_code! {
         use vstd::*;
 
         fn stuff(a: (u8, u8)) {
             let b = a.clone();
-            assert(a == b); // FAILS
+            assert(a == b);
         }
-    } => Err(err) => assert_vir_error_msg(err, "The verifier does not yet support the following Rust feature: built-in instance")
+    } => Ok(())
 }
 
 test_verify_one_file_with_options! {
@@ -2673,4 +2675,32 @@ test_verify_one_file! {
             }
         }
     } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    // compiler-provided `Clone` at a `Copy` type (unit, tuples, closures) is a copy
+    #[test] test_builtin_clone_of_copy_types verus_code! {
+        use vstd::prelude::*;
+        #[derive(Clone)] struct P { _priv: (), n: u32 }
+        #[derive(Clone)] struct E(());
+        fn t(x: (u32, bool)) -> (r: (u32, bool)) ensures r == x { x.clone() }
+        fn u() { let p = P { _priv: (), n: 3 }; let q = p.clone(); }
+        fn c() -> u32 { let f = |x: u32| x; let g = f.clone(); g(1) }
+        fn wrong(x: (u32, bool)) -> (r: (u32, bool))
+            ensures r.0 == 0, // FAILS
+        {
+            x.clone()
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    // a Copy type with its own Clone impl: the tuple's clone calls it, so it is not a copy
+    #[test] test_builtin_clone_user_component_rejected verus_code! {
+        use vstd::prelude::*;
+        #[derive(Copy)]
+        struct X(u8);
+        impl Clone for X { fn clone(&self) -> X { X(0) } }
+        fn f(a: (X, u8)) { let b = a.clone(); }
+    } => Err(err) => assert_vir_error_msg(err, "built-in instance")
 }
