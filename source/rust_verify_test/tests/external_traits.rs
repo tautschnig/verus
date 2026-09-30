@@ -344,8 +344,8 @@ test_verify_one_file_with_options! {
     #[test] test_trait4 ["--disable-internal-test-mode"] => verus_code! {
         #[verifier::external_type_specification]
         #[verifier::external_body]
-        #[verifier::reject_recursive_types_in_ground_variants(I)]
-        pub struct ExPeekable<I: Iterator>(core::iter::Peekable<I>);
+        #[verifier::reject_recursive_types(I)]
+        pub struct ExFuse<I>(core::iter::Fuse<I>);
 
         #[verifier::external_trait_specification]
         pub trait ExIterator1 {
@@ -360,7 +360,7 @@ test_verify_one_file_with_options! {
         pub trait ExIterator2 {
             type ExternalTraitSpecificationFor: core::iter::Iterator;
             type Item;
-            fn peekable(self) -> core::iter::Peekable<Self> where Self: Sized, Self: core::iter::Iterator requires false;
+            fn fuse(self) -> core::iter::Fuse<Self> where Self: Sized requires false;
         }
 
         fn test2<A: Iterator>(a: A) {
@@ -368,7 +368,7 @@ test_verify_one_file_with_options! {
         }
 
         fn test3<A: Iterator>(a: A) {
-            let y = a.peekable(); // FAILS
+            let y = a.fuse(); // FAILS
         }
     } => Err(e) => assert_one_fails(e)
 }
