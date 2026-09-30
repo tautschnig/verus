@@ -104,6 +104,48 @@ pub broadcast proof fn is_ascii_concat(s1: &str, s2: &str, s3: &str)
     }
 }
 
+// Pattern searches, parsing and UTF-8 validation: content-free (a `Pattern` has no model
+// here); the results are unconstrained, and nothing about `s` changes.
+#[verifier::external_trait_specification]
+pub trait ExPattern: Sized {
+    type ExternalTraitSpecificationFor: core::str::pattern::Pattern;
+}
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExParseIntError(core::num::ParseIntError);
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExParseFloatError(core::num::ParseFloatError);
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExParseBoolError(core::str::ParseBoolError);
+
+pub assume_specification<'b, P: core::str::pattern::Pattern>[ str::starts_with::<P> ](s: &'b str, pat: P) -> bool;
+
+pub assume_specification<'b, P: core::str::pattern::Pattern>[ str::contains::<P> ](s: &'b str, pat: P) -> bool;
+
+pub assume_specification<'b, P: core::str::pattern::Pattern>[ str::find::<P> ](s: &'b str, pat: P) -> Option<usize>;
+
+#[verifier::external_trait_specification]
+pub trait ExFromStr: Sized {
+    type ExternalTraitSpecificationFor: core::str::FromStr;
+
+    type Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err>;
+}
+
+pub assume_specification<F: core::str::FromStr>[ str::parse::<F> ](s: &str) -> Result<F, F::Err>;
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExUtf8Error(core::str::Utf8Error);
+
+pub assume_specification[ core::str::from_utf8 ](v: &[u8]) -> Result<&str, core::str::Utf8Error>;
+
 #[cfg(not(verus_verify_core))]
 #[verifier::when_used_as_spec(is_ascii)]
 pub assume_specification[ str::is_ascii ](s: &str) -> (b: bool)

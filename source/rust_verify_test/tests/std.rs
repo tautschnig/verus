@@ -2813,3 +2813,17 @@ test_verify_one_file! {
     } => Err(err) => assert_one_fails(err)
 }
 
+test_verify_one_file! {
+    #[test] test_str_search_parse_utf8 verus_code! {
+        use vstd::prelude::*;
+        fn a(s: &str) -> bool { s.starts_with("ab") || s.contains('c') }
+        fn b(s: &str) -> Option<usize> { s.find("x") }
+        fn c(s: &str) -> u32 { match s.parse::<u32>() { Ok(v) => v, Err(_) => 0 } }
+        fn d(v: &[u8]) -> usize { match core::str::from_utf8(v) { Ok(s) => s.len(), Err(_) => 0 } }
+        fn wrong(s: &str) {
+            let b = s.starts_with("a");
+            assert(b); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+

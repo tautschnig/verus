@@ -14,6 +14,7 @@
 #![cfg_attr(verus_keep_ghost, feature(core_intrinsics))]
 #![cfg_attr(any(verus_keep_ghost, feature = "allocator"), feature(allocator_api))]
 #![cfg_attr(verus_keep_ghost, feature(step_trait))]
+#![cfg_attr(verus_keep_ghost, feature(pattern))]
 #![cfg_attr(verus_keep_ghost, feature(ptr_metadata))]
 #![cfg_attr(verus_keep_ghost, feature(sized_hierarchy))]
 #![cfg_attr(verus_keep_ghost, feature(freeze))]
