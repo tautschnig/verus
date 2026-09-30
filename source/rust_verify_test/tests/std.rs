@@ -2626,3 +2626,51 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_fails(err, 2)
 }
+
+test_verify_one_file! {
+    #[test] test_fmt_formatter_builders_write verus_code! {
+        use vstd::prelude::*;
+        use core::fmt;
+        broadcast use vstd::std_specs::fmt::group_fmt_axioms;
+        struct P { x: u32, y: bool }
+        impl fmt::Debug for P {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_struct("P").field("x", &self.x).field("y", &self.y).finish()
+            }
+        }
+        struct Q(u64);
+        impl fmt::Display for Q {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                if f.alternate() { f.write_str("Q")?; }
+                write!(f, "{}", self.0)
+            }
+        }
+        struct Buf { n: usize }
+        impl fmt::Write for Buf {
+            fn write_str(&mut self, s: &str) -> fmt::Result {
+                if self.n < 1000 { self.n = self.n + 1; }
+                Ok(())
+            }
+        }
+        fn lst(v: &Vec<u8>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_list().entry(&v.len()).finish()
+        }
+        fn use_write(b: &mut Buf) -> fmt::Result {
+            use fmt::Write;
+            b.write_str("a")?;
+            b.write_char('c')
+        }
+        // a value whose `fmt_req` is unknown cannot be handed to a builder
+        struct Opaque;
+        impl fmt::Debug for Opaque {
+            #[verifier::external_body]
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { Ok(()) }
+        }
+        struct W { o: Opaque }
+        impl fmt::Debug for W {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_struct("W").field("o", &self.o).finish() // FAILS
+            }
+        }
+    } => Err(err) => assert_one_fails(err)
+}

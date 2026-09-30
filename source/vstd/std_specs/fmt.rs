@@ -1,5 +1,5 @@
 use super::super::prelude::*;
-use core::fmt::{Arguments, Error, Formatter};
+use core::fmt::{Arguments, DebugList, DebugMap, DebugSet, DebugStruct, DebugTuple, Error, Formatter};
 
 verus! {
 
@@ -169,6 +169,111 @@ pub assume_specification<'a, const N: usize, const M: usize>[ arguments_new ](
 #[cfg(all(feature = "alloc", not(verus_verify_core)))]
 pub assume_specification[ alloc::fmt::format ](args: Arguments<'_>) -> alloc::string::String
 ;
+
+// Formatting output: content-free specifications. Nothing is known about what a
+// `Formatter` or builder has written, and any write may return `Err` (a `Formatter` passes
+// through the error of its destination). A value handed to a builder is later formatted by
+// unverified code, so, as for `format_args!` arguments above, its `fmt_req` must hold.
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExDebugStruct<'a, 'b: 'a>(DebugStruct<'a, 'b>);
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExDebugTuple<'a, 'b: 'a>(DebugTuple<'a, 'b>);
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExDebugList<'a, 'b: 'a>(DebugList<'a, 'b>);
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExDebugSet<'a, 'b: 'a>(DebugSet<'a, 'b>);
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExDebugMap<'a, 'b: 'a>(DebugMap<'a, 'b>);
+
+pub assume_specification<'a>[ Formatter::<'a>::write_str ](f: &mut Formatter<'a>, data: &str) -> Result<(), Error>;
+
+pub assume_specification<'a>[ Formatter::<'a>::write_fmt ](f: &mut Formatter<'a>, fmt: Arguments<'_>) -> Result<(), Error>;
+
+pub assume_specification<'a>[ Formatter::<'a>::pad ](f: &mut Formatter<'a>, s: &str) -> Result<(), Error>;
+
+pub assume_specification<'a>[ Formatter::<'a>::pad_integral ](f: &mut Formatter<'a>, is_nonnegative: bool, prefix: &str, buf: &str) -> Result<(), Error>;
+
+pub assume_specification<'a>[ Formatter::<'a>::alternate ](f: &Formatter<'a>) -> bool;
+
+pub assume_specification<'a>[ Formatter::<'a>::sign_plus ](f: &Formatter<'a>) -> bool;
+
+pub assume_specification<'a>[ Formatter::<'a>::width ](f: &Formatter<'a>) -> Option<usize>;
+
+pub assume_specification<'a>[ Formatter::<'a>::precision ](f: &Formatter<'a>) -> Option<usize>;
+
+pub assume_specification<'a>[ Formatter::<'a>::fill ](f: &Formatter<'a>) -> char;
+
+pub assume_specification<'a, 'b>[ Formatter::<'a>::debug_struct ](f: &'b mut Formatter<'a>, name: &str) -> DebugStruct<'b, 'a>;
+
+pub assume_specification<'a, 'b>[ Formatter::<'a>::debug_tuple ](f: &'b mut Formatter<'a>, name: &str) -> DebugTuple<'b, 'a>;
+
+pub assume_specification<'a, 'b>[ Formatter::<'a>::debug_list ](f: &'b mut Formatter<'a>) -> DebugList<'b, 'a>;
+
+pub assume_specification<'a, 'b>[ Formatter::<'a>::debug_set ](f: &'b mut Formatter<'a>) -> DebugSet<'b, 'a>;
+
+pub assume_specification<'a, 'b>[ Formatter::<'a>::debug_map ](f: &'b mut Formatter<'a>) -> DebugMap<'b, 'a>;
+
+pub assume_specification<'c, 'a, 'b: 'a>[ DebugStruct::<'a, 'b>::field ](d: &'c mut DebugStruct<'a, 'b>, name: &str, value: &dyn core::fmt::Debug) -> &'c mut DebugStruct<'a, 'b>
+    requires
+        forall|f: &Formatter<'b>| value.fmt_req(f),
+;
+
+pub assume_specification<'a, 'b: 'a>[ DebugStruct::<'a, 'b>::finish ](d: &mut DebugStruct<'a, 'b>) -> Result<(), Error>;
+
+pub assume_specification<'a, 'b: 'a>[ DebugStruct::<'a, 'b>::finish_non_exhaustive ](d: &mut DebugStruct<'a, 'b>) -> Result<(), Error>;
+
+pub assume_specification<'c, 'a, 'b: 'a>[ DebugTuple::<'a, 'b>::field ](d: &'c mut DebugTuple<'a, 'b>, value: &dyn core::fmt::Debug) -> &'c mut DebugTuple<'a, 'b>
+    requires
+        forall|f: &Formatter<'b>| value.fmt_req(f),
+;
+
+pub assume_specification<'a, 'b: 'a>[ DebugTuple::<'a, 'b>::finish ](d: &mut DebugTuple<'a, 'b>) -> Result<(), Error>;
+
+pub assume_specification<'a, 'b: 'a>[ DebugTuple::<'a, 'b>::finish_non_exhaustive ](d: &mut DebugTuple<'a, 'b>) -> Result<(), Error>;
+
+pub assume_specification<'c, 'a, 'b: 'a>[ DebugList::<'a, 'b>::entry ](d: &'c mut DebugList<'a, 'b>, entry: &dyn core::fmt::Debug) -> &'c mut DebugList<'a, 'b>
+    requires
+        forall|f: &Formatter<'b>| entry.fmt_req(f),
+;
+
+pub assume_specification<'a, 'b: 'a>[ DebugList::<'a, 'b>::finish ](d: &mut DebugList<'a, 'b>) -> Result<(), Error>;
+
+pub assume_specification<'c, 'a, 'b: 'a>[ DebugSet::<'a, 'b>::entry ](d: &'c mut DebugSet<'a, 'b>, entry: &dyn core::fmt::Debug) -> &'c mut DebugSet<'a, 'b>
+    requires
+        forall|f: &Formatter<'b>| entry.fmt_req(f),
+;
+
+pub assume_specification<'a, 'b: 'a>[ DebugSet::<'a, 'b>::finish ](d: &mut DebugSet<'a, 'b>) -> Result<(), Error>;
+
+pub assume_specification<'c, 'a, 'b: 'a>[ DebugMap::<'a, 'b>::entry ](d: &'c mut DebugMap<'a, 'b>, key: &dyn core::fmt::Debug, value: &dyn core::fmt::Debug) -> &'c mut DebugMap<'a, 'b>
+    requires
+        forall|f: &Formatter<'b>| key.fmt_req(f),
+        forall|f: &Formatter<'b>| value.fmt_req(f),
+;
+
+pub assume_specification<'a, 'b: 'a>[ DebugMap::<'a, 'b>::finish ](d: &mut DebugMap<'a, 'b>) -> Result<(), Error>;
+
+// `fmt::Write`: the destination of `write!`. Implementors are verified against no
+// requires; callers learn nothing about what was written.
+#[verifier::external_trait_specification]
+pub trait ExWrite {
+    type ExternalTraitSpecificationFor: core::fmt::Write;
+
+    fn write_str(&mut self, s: &str) -> Result<(), Error>;
+
+    fn write_char(&mut self, c: char) -> Result<(), Error>;
+
+    fn write_fmt(&mut self, args: Arguments<'_>) -> Result<(), Error>;
+}
 
 pub uninterp spec fn fmt_req_all<A>() -> bool;
 
