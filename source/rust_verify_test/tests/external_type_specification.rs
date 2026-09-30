@@ -488,3 +488,18 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_vir_error_msg(err, "cannot use type `test_crate::X` which is ignored")
 }
+
+test_verify_one_file! {
+    // `T: ?Sized` in a proxy (implicitly `MetaSized`) matches std's `T: PointeeSized`
+    #[test] proxy_question_sized_matches_pointee_sized verus_code! {
+        use vstd::prelude::*;
+        use core::ptr::NonNull;
+        #[verifier::external_type_specification]
+        #[verifier::external_body]
+        #[verifier::reject_recursive_types(T)]
+        pub struct ExNonNull<T: ?Sized>(NonNull<T>);
+        pub assume_specification<T: ?Sized>[ <*mut T>::is_null ](p: *mut T) -> bool;
+        fn f(p: *mut u8) -> bool { p.is_null() }
+        fn g(n: NonNull<u8>) -> NonNull<u8> { n }
+    } => Ok(())
+}

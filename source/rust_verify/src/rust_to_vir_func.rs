@@ -2995,12 +2995,19 @@ pub(crate) fn predicates_match<'tcx>(
     // Outlives bounds (`T: 'a`, `'a: 'b`) are ignored: VIR erases lifetimes, and lifetime
     // correctness is checked by rustc on the external function itself. A proxy may need
     // one to make an impl lifetime early-bound (`impl Deref for Ref<'_, T>`).
-    let is_outlives = |c: &Clause<'tcx>| {
-        matches!(
-            c.kind().skip_binder(),
-            rustc_middle::ty::ClauseKind::TypeOutlives(_)
-                | rustc_middle::ty::ClauseKind::RegionOutlives(_)
-        )
+    // `MetaSized` and `PointeeSized` bounds (the implicit bound of `T: ?Sized` is
+    // `MetaSized`; std now writes `T: PointeeSized`) are ignored too: they only say that
+    // the type has (dynamically known) size metadata, which VIR does not model; `Sized` is
+    // still compared.
+    let is_outlives = |c: &Clause<'tcx>| match c.kind().skip_binder() {
+        rustc_middle::ty::ClauseKind::TypeOutlives(_)
+        | rustc_middle::ty::ClauseKind::RegionOutlives(_) => true,
+        rustc_middle::ty::ClauseKind::Trait(tp) => {
+            let id = Some(tp.trait_ref.def_id);
+            id == tcx.lang_items().meta_sized_trait()
+                || id == tcx.lang_items().pointee_sized_trait()
+        }
+        _ => false,
     };
     let preds1: Vec<Clause<'tcx>> = preds1.iter().filter(|c| !is_outlives(c)).cloned().collect();
     let preds2: Vec<Clause<'tcx>> = preds2.iter().filter(|c| !is_outlives(c)).cloned().collect();
