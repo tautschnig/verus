@@ -1949,7 +1949,8 @@ pub(crate) fn expr_to_vir_with_adjustments<'tcx>(
                                 TypX::MutRef(typ) => typ,
                                 _ => crate::internal_err!(expr.span, "expected TypX::MutRef"),
                             };
-                            let typ_args = match &**array_typ {
+                            // (through a `Box`, the array type carries a Box decoration)
+                            let typ_args = match &*undecorate_typ(array_typ) {
                                 TypX::Primitive(Primitive::Array, typs) => typs.clone(),
                                 _ => crate::internal_err!(expr.span, "expected array"),
                             };
