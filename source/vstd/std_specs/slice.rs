@@ -894,4 +894,13 @@ pub assume_specification<T>[ <[T]>::as_mut_ptr ](s: &mut [T]) -> *mut T
     no_unwind
 ;
 
+
+// `fill` clones `value` into every element but the last, and moves it into the last.
+pub assume_specification<T: Clone>[ <[T]>::fill ](s: &mut [T], value: T)
+    ensures
+        final(s)@.len() == old(s)@.len(),
+        forall|i: int| 0 <= i < final(s)@.len() - 1 ==> crate::pervasive::cloned(value, #[trigger] final(s)@[i]),
+        final(s)@.len() > 0 ==> final(s)@.last() == value,
+;
+
 } // verus!

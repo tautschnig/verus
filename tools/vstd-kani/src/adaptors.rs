@@ -956,3 +956,17 @@ mod tests {
         assert_eq!(x, 9);
     }
 }
+
+/// vstd `std_specs/slice.rs`: `<[T]>::fill(value)` keeps the length, clones `value` into
+/// all but the last element and moves it into the last (for `u8`, clone is the identity).
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(4)]
+fn slice_fill_spec_holds() {
+    let mut a: [u8; 3] = kani::any();
+    let v: u8 = kani::any();
+    let s: &mut [u8] = &mut a;
+    s.fill(v);
+    assert!(s.len() == 3);
+    assert!(s[0] == v && s[1] == v && s[2] == v);
+}

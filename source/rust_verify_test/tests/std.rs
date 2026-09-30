@@ -2717,3 +2717,25 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] test_slice_fill verus_code! {
+        use vstd::prelude::*;
+        pub const N: usize = 4;
+        pub struct H { pub dict: Box<[u8; N]>, pub arr: [u16; 3] }
+        impl H {
+            pub fn reset(&mut self)
+                ensures final(self).dict@ == seq![0u8, 0, 0, 0], final(self).arr@ == seq![0u16, 0, 0],
+            {
+                self.dict.fill(0);
+                self.arr.fill(0);
+            }
+        }
+        fn v(x: &mut Vec<u32>) requires old(x)@.len() == 3 ensures final(x)@ == seq![7u32, 7, 7] { x.fill(7); }
+        fn wrong(h: &mut H)
+            ensures final(h).dict@[0] == 1, // FAILS
+        {
+            h.dict.fill(0);
+        }
+    } => Err(err) => assert_one_fails(err)
+}
