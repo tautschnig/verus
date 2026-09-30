@@ -2827,3 +2827,39 @@ test_verify_one_file! {
     } => Err(err) => assert_one_fails(err)
 }
 
+test_verify_one_file! {
+    // clone_from: the provided implementation's default ensures relates it to `clone`
+    #[test] test_clone_from verus_code! {
+        use vstd::prelude::*;
+        #[derive(Clone)] struct S { x: u32 }
+        fn a(p: &mut S, q: &S) { p.clone_from(q); }
+        fn b(v: &mut Vec<u32>, w: &Vec<u32>) { v.clone_from(w); }
+        fn c(p: &mut u32, q: &u32) { p.clone_from(q); }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] test_dyn_error verus_code! {
+        use vstd::prelude::*;
+        use core::fmt;
+        fn f(e: Box<dyn std::error::Error + Send + Sync>) -> Box<dyn std::error::Error + Send + Sync> { e }
+        #[derive(Debug)] struct MyErr;
+        impl fmt::Display for MyErr {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str("e") }
+        }
+        impl std::error::Error for MyErr {}
+        fn g() -> Result<u32, Box<dyn std::error::Error>> { Err(Box::new(MyErr)) }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] test_extern_abi_fn_pointers verus_code! {
+        use vstd::prelude::*;
+        pub struct VT { pub f: extern "system" fn(u32) -> u32, pub g: extern "C" fn(u8) -> u8 }
+        extern "C" fn inc(x: u8) -> u8 { x }
+        fn mk() -> extern "C" fn(u8) -> u8 { inc }
+        fn call(v: &VT) -> u8 {
+            (v.g)(3) // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}

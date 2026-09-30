@@ -206,6 +206,13 @@ pub trait ExMetaSized {
     type ExternalTraitSpecificationFor: core::marker::MetaSized;
 }
 
+// `core::error::Error`: declared so it can be used in bounds and as `dyn Error`; its
+// methods (`source`, `description`, `cause`) have no specifications.
+#[verifier::external_trait_specification]
+pub trait ExError: core::fmt::Debug + core::fmt::Display {
+    type ExternalTraitSpecificationFor: core::error::Error;
+}
+
 pub assume_specification<T>[ core::mem::swap::<T> ](a: &mut T, b: &mut T)
     ensures
         *final(a) == *old(b),

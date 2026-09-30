@@ -504,6 +504,55 @@ pub(crate) fn gen_check_trait_impl_conflicts(
         ));
         let trait_as_datatype = Box::new(TypX::Datatype(name, Vec::new(), t_args));
         let trait_polarity = rustc_middle::ty::ImplPolarity::Positive;
+        // `dyn T` implements every supertrait of T. The generated `impl T for Dyn<..>` carries
+        // T's supertrait bounds (`where Self: S`), so the model needs the matching impls of the
+        // supertraits for the same `Dyn<n_T, ..>` type (distinct from every other type, so they
+        // overlap with nothing but blanket impls, which are what this check is for). Only
+        // supertraits with no type arguments besides Self and no associated types are
+        // modelled this way (for others the impl `T for Dyn` keeps failing its bounds, which
+        // rejects the program, as before).
+        {
+            let mut work: Vec<Path> = Vec::new();
+            let mut seen: HashSet<Path> = HashSet::new();
+            let push_supers = |tr: &vir::ast::Trait, work: &mut Vec<Path>| {
+                for b in tr.x.typ_bounds.iter() {
+                    if let GenericBoundX::Trait(TraitId::Path(sp), typs) = &**b
+                        && typs.len() == 1
+                        && matches!(&*typs[0], vir::ast::TypX::TypParam(x) if **x == *vir::def::trait_self_type_param())
+                    {
+                        work.push(sp.clone());
+                    }
+                }
+            };
+            push_supers(t, &mut work);
+            while let Some(sp) = work.pop() {
+                if !seen.insert(sp.clone()) {
+                    continue;
+                }
+                let Some(st) = vir_crate.traits.iter().find(|x| x.x.name == sp) else { continue };
+                if !st.x.typ_params.is_empty() || !st.x.assoc_typs.is_empty() {
+                    continue;
+                }
+                push_supers(st, &mut work);
+                let st_name = state.trait_name(&sp);
+                state.trait_impls.push(TraitImpl {
+                    span,
+                    self_typ: self_typ.clone(),
+                    generic_params: generic_params.clone(),
+                    // T's own `Self: Super` clauses are the obligations these impls
+                    // discharge; they are not bounds of the impls
+                    generic_bounds: generic_bounds
+                        .iter()
+                        .filter(|b| !matches!(&*b.typ, TypX::TraitSelf))
+                        .cloned()
+                        .collect(),
+                    trait_as_datatype: Box::new(TypX::Datatype(st_name, Vec::new(), vec![])),
+                    assoc_typs: vec![],
+                    trait_polarity,
+                    is_clone: false,
+                });
+            }
+        }
         let decl = TraitImpl {
             span,
             self_typ,

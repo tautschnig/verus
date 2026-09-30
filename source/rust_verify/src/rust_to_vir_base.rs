@@ -1622,8 +1622,16 @@ pub(crate) fn mid_ty_to_vir_ghost<'tcx>(
             if hdr.safety().is_unsafe() {
                 unsupported_err!(span, "unsafe function pointer types");
             }
-            if !matches!(hdr.abi(), rustc_abi::ExternAbi::Rust) {
-                unsupported_err!(span, "function pointer types with a non-Rust ABI");
+            // The ABI only changes the calling convention; a safe `extern "C" fn(..)` pointer
+            // is modelled like a Rust-ABI one (its callee's requires/ensures). Where such a
+            // pointer comes from unverified or foreign code, the callee is external either way.
+            if !matches!(
+                hdr.abi(),
+                rustc_abi::ExternAbi::Rust
+                    | rustc_abi::ExternAbi::C { .. }
+                    | rustc_abi::ExternAbi::System { .. }
+            ) {
+                unsupported_err!(span, "function pointer types with this ABI");
             }
             let sig = sig_tys.skip_binder();
             let mut arg_typs: Vec<Typ> = Vec::new();
