@@ -186,6 +186,12 @@ impl crate::syntax::Visitor {
                     ensures,
                     block,
                 } = item_const;
+                // the type becomes a function return type, where elision is not `'static`
+                let mut ty = ty;
+                verus_syn::visit_mut::VisitMut::visit_type_mut(
+                    &mut crate::syntax::ConstStaticLifetimes,
+                    &mut ty,
+                );
                 attrs.push(mk_verus_attr(span, quote! { encoded_const }));
 
                 let publish = match (publish, &mode, &vis) {
@@ -276,6 +282,11 @@ impl crate::syntax::Visitor {
                     _ => {}
                 }
 
+                let mut ty = ty;
+                verus_syn::visit_mut::VisitMut::visit_type_mut(
+                    &mut crate::syntax::ConstStaticLifetimes,
+                    &mut ty,
+                );
                 attrs.push(mk_verus_attr(span, quote! { encoded_static }));
 
                 let publish = match (publish, &mode, &vis) {
@@ -368,6 +379,11 @@ impl crate::syntax::Visitor {
                     block,
                     defaultness,
                 } = impl_item_const;
+                let mut ty = ty;
+                verus_syn::visit_mut::VisitMut::visit_type_mut(
+                    &mut crate::syntax::ConstStaticLifetimes,
+                    &mut ty,
+                );
                 attrs.push(mk_verus_attr(span, quote! { encoded_const }));
 
                 let publish = match (publish, &mode, &vis) {

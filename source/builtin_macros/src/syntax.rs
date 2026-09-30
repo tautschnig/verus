@@ -1568,6 +1568,27 @@ impl Visitor {
     }
 }
 
+/// In the type of a `const` or `static` item, an elided reference lifetime means
+/// `'static`. verus! may move the type into a position where elision is not allowed (the
+/// return type of a function), so the elided lifetimes are made explicit. Lifetimes under
+/// `fn(..)` pointer types and `Fn(..)` sugar keep their own elision rules and are left alone.
+pub(crate) struct ConstStaticLifetimes;
+
+impl VisitMut for ConstStaticLifetimes {
+    fn visit_type_reference_mut(&mut self, r: &mut verus_syn::TypeReference) {
+        if r.lifetime.is_none() {
+            r.lifetime = Some(verus_syn::Lifetime::new("'static", r.and_token.span));
+        }
+        verus_syn::visit_mut::visit_type_reference_mut(self, r);
+    }
+    fn visit_type_bare_fn_mut(&mut self, _: &mut verus_syn::TypeBareFn) {}
+    fn visit_parenthesized_generic_arguments_mut(
+        &mut self,
+        _: &mut verus_syn::ParenthesizedGenericArguments,
+    ) {
+    }
+}
+
 impl VisitMut for ExecGhostPatVisitor {
     // Recursive traverse pat, finding all Tracked(x), Ghost(x), and, for ghost/tracked, x.
     fn visit_pat_mut(&mut self, pat: &mut Pat) {
@@ -4904,6 +4925,7 @@ impl VisitMut for Visitor {
             &mut con.publish,
             &mut con.mode,
         );
+        ConstStaticLifetimes.visit_type_mut(&mut con.ty);
         self.desugar_const_or_static(
             &mode,
             &mut con.ensures,
@@ -4925,6 +4947,7 @@ impl VisitMut for Visitor {
             &mut sta.publish,
             &mut sta.mode,
         );
+        ConstStaticLifetimes.visit_type_mut(&mut sta.ty);
         self.desugar_const_or_static(
             &mode,
             &mut sta.ensures,
@@ -4946,6 +4969,7 @@ impl VisitMut for Visitor {
             &mut con.publish,
             &mut con.mode,
         );
+        ConstStaticLifetimes.visit_type_mut(&mut con.ty);
         self.desugar_const_or_static(
             &mode,
             &mut con.ensures,
