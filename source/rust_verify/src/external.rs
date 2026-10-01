@@ -750,7 +750,17 @@ fn get_attributes_for_automatic_derive<'tcx>(
                     if opts_in_to_verus(&type_eattrs) {
                         let trait_def_id = impll.of_trait.unwrap().trait_ref.path.res.def_id();
                         let rust_item = get_rust_item(ctxt.tcx, trait_def_id);
-                        let action = crate::automatic_derive::get_action(rust_item);
+                        let mut action = crate::automatic_derive::get_action(rust_item);
+                        // A derive of a third-party trait (`serde::Serialize`, `strum::Display`,
+                        // `clap::ValueEnum`, ...): the trait is not part of core/alloc/std, so
+                        // vstd does not declare it, and verified code cannot call its methods.
+                        // Like the derived `Debug`/`Hash` impls, the impl is left unverified.
+                        if rust_item.is_none() && !trait_def_id.is_local() {
+                            let krate = ctxt.tcx.crate_name(trait_def_id.krate);
+                            if !matches!(krate.as_str(), "core" | "alloc" | "std" | "vstd") {
+                                action = AutomaticDeriveAction::Ignore;
+                            }
+                        }
                         match action {
                             AutomaticDeriveAction::Special(_)
                             | AutomaticDeriveAction::VerifyAsIs => Some(type_eattrs),
