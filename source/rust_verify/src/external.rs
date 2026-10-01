@@ -757,7 +757,10 @@ fn get_attributes_for_automatic_derive<'tcx>(
                         // Like the derived `Debug`/`Hash` impls, the impl is left unverified.
                         if rust_item.is_none() && !trait_def_id.is_local() {
                             let krate = ctxt.tcx.crate_name(trait_def_id.krate);
-                            if !matches!(krate.as_str(), "core" | "alloc" | "std" | "vstd") {
+                            if !matches!(
+                                krate.as_str(),
+                                "core" | "alloc" | "std" | "vstd" | "verus_builtin"
+                            ) {
                                 action = AutomaticDeriveAction::Ignore;
                             }
                         }
