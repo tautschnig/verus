@@ -5000,3 +5000,22 @@ test_verify_one_file! {
         };
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    // `-> impl Trait` in a trait: rustc's synthesized associated type has no name, which used
+    // to panic in the projection conversion; now it is reported as unsupported
+    #[test] test_rpitit_unsupported_no_panic code! {
+        use vstd::prelude::*;
+        pub trait T {
+            fn it(&self) -> Option<impl Iterator<Item = u8>>;
+        }
+        fn take<A>(a: A) {}
+        verus! {
+            #[verifier::external_body]
+            fn take_v<A>(a: A) {}
+            fn g<X: T>(x: &X) {
+                take_v(x.it());
+            }
+        }
+    } => Err(err) => assert_vir_error_msg(err, "impl Trait` in a trait")
+}
