@@ -221,6 +221,11 @@ pub trait ExError: core::fmt::Debug + core::fmt::Display {
     type ExternalTraitSpecificationFor: core::error::Error;
 }
 
+pub assume_specification<T>[ bool::then_some::<T> ](b: bool, t: T) -> (r: Option<T>)
+    ensures
+        r == if b { Some(t) } else { None },
+;
+
 pub assume_specification<T>[ core::mem::swap::<T> ](a: &mut T, b: &mut T)
     ensures
         *final(a) == *old(b),

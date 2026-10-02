@@ -1150,3 +1150,63 @@ fn char_bytes_vec_misc_specs_hold() {
     assert!(bx.len() == 2 && bx[0] == a[0] && bx[1] == a[1]);
 }
 
+
+/// vstd `std_specs/time.rs`: `Duration` modelled by `duration_nanos`; here
+/// `duration_nanos(d) = d.as_nanos()`, and each assertion restates a vstd ensures clause.
+#[cfg(kani)]
+#[kani::proof]
+fn duration_specs_hold() {
+    use core::time::Duration;
+    let s: u64 = kani::any();
+    let m: u64 = kani::any();
+    let d = Duration::from_secs(s);
+    assert!(d.as_nanos() == s as u128 * 1_000_000_000);
+    let e = Duration::from_millis(m);
+    assert!(e.as_nanos() == m as u128 * 1_000_000);
+    // as_secs / as_millis / is_zero against the model
+    let secs: u64 = kani::any();
+    let sub: u32 = kani::any();
+    kani::assume(sub < 1_000_000_000);
+    let x = Duration::new(secs, sub);
+    let n = x.as_nanos();
+    assert!(n == secs as u128 * 1_000_000_000 + sub as u128);
+    assert!(n <= u64::MAX as u128 * 1_000_000_000 + 999_999_999);
+    assert!(x.as_secs() as u128 == n / 1_000_000_000);
+    assert!(x.as_millis() == n / 1_000_000);
+    assert!(x.is_zero() == (n == 0));
+    // saturating_add
+    let secs2: u64 = kani::any();
+    let sub2: u32 = kani::any();
+    kani::assume(sub2 < 1_000_000_000);
+    let y = Duration::new(secs2, sub2);
+    let max = u64::MAX as u128 * 1_000_000_000 + 999_999_999;
+    let sum = x.as_nanos() + y.as_nanos();
+    let r = x.saturating_add(y);
+    assert!(r.as_nanos() == if sum <= max { sum } else { max });
+}
+
+/// vstd `std_specs/core.rs` `bool::then_some`, `std_specs/option.rs` `Option::transpose`,
+/// `string`'s `String::with_capacity`.
+#[cfg(kani)]
+#[kani::proof]
+fn then_some_transpose_with_capacity_hold() {
+    let b: bool = kani::any();
+    let x: u8 = kani::any();
+    let r = b.then_some(x);
+    assert!(r == if b { Some(x) } else { None });
+    let o: Option<Result<u8, u16>> = match kani::any::<u8>() % 3 {
+        0 => None,
+        1 => Some(Ok(kani::any())),
+        _ => Some(Err(kani::any())),
+    };
+    let t = o.transpose();
+    match o {
+        None => assert!(t == Ok(None)),
+        Some(Ok(v)) => assert!(t == Ok(Some(v))),
+        Some(Err(e)) => assert!(t == Err(e)),
+    }
+    let n: usize = kani::any();
+    kani::assume(n <= 8);
+    let s = String::with_capacity(n);
+    assert!(s.is_empty());
+}

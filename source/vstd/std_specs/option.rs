@@ -552,4 +552,14 @@ pub assume_specification<T, F: FnOnce() -> T>[ Option::<T>::get_or_insert_with ]
         *final(option) == Some(*final(res)),
 ;
 
+pub assume_specification<T, E>[ Option::<Result<T, E>>::transpose ](o: Option<Result<T, E>>) -> (r: Result<Option<T>, E>)
+    ensures
+        r == match o {
+            None => Ok(None),
+            Some(Ok(x)) => Ok(Some(x)),
+            Some(Err(e)) => Err(e),
+        },
+;
+
+
 } // verus!

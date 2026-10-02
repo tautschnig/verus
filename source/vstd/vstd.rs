@@ -159,8 +159,9 @@ pub broadcast group group_vstd_default {
     //
     // std_specs for nonzero_internals
     //
-    #[cfg(feature = "nonzero_internals")]
+    #[cfg(any(feature = "nonzero_internals", verus_keep_ghost))]
     std_specs::nonzero::group_nonzero_axioms,
+    std_specs::time::group_time_axioms,
 }
 
 } // verus!

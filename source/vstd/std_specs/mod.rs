@@ -48,7 +48,21 @@ pub mod cell;
 #[cfg(feature = "std")]
 pub mod thread;
 
-#[cfg(feature = "nonzero_internals")]
+pub mod time;
+
+#[cfg(feature = "std")]
+pub mod sync;
+
+#[cfg(feature = "std")]
+pub mod os;
+
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+pub mod text;
+
+// `core::num::ZeroablePrimitive` is unstable; Verus builds enable the feature
+// (`vstd.rs`), so the specs are available whenever vstd is built by Verus, including by
+// `cargo verus`, which builds vstd with its default features.
+#[cfg(any(feature = "nonzero_internals", verus_keep_ghost))]
 pub mod nonzero;
 
 // This struct is a hack that exists purely to create

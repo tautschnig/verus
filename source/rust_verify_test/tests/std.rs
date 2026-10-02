@@ -2937,3 +2937,85 @@ test_verify_one_file! {
     } => Err(err) => assert_one_fails(err)
 }
 
+
+test_verify_one_file! {
+    // Duration: modelled by its length in nanoseconds
+    #[test] duration_specs verus_code! {
+        use vstd::prelude::*;
+        use vstd::std_specs::time::*;
+        use std::time::Duration;
+        fn test(s: u64, m: u64) {
+            let d = Duration::from_secs(s);
+            let secs = d.as_secs();
+            assert(secs == s) by (nonlinear_arith)
+                requires duration_nanos(d) == s as nat * 1_000_000_000,
+                    secs as nat == duration_nanos(d) / 1_000_000_000;
+            let e = Duration::from_millis(m);
+            let ms = e.as_millis();
+            assert(ms == m as u128) by (nonlinear_arith)
+                requires duration_nanos(e) == m as nat * 1_000_000, ms as nat == duration_nanos(e) / 1_000_000;
+            let z = Duration::from_secs(0);
+            let zz = z.is_zero();
+            assert(zz);
+            let t = d.saturating_add(e);
+            assert(duration_nanos(t) <= duration_max_nanos());
+        }
+        fn fails(s: u64) {
+            let d = Duration::from_secs(s);
+            let z = d.is_zero();
+            assert(z); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    #[test] then_some_transpose_specs verus_code! {
+        use vstd::prelude::*;
+        fn test(b: bool, x: u8, o: Option<Result<u8, u16>>) {
+            let r = b.then_some(x);
+            assert(b ==> r == Some(x));
+            assert(!b ==> r is None);
+            let t = o.transpose();
+            match o {
+                None => assert(t == Ok::<Option<u8>, u16>(None)),
+                Some(Ok(v)) => assert(t == Ok::<Option<u8>, u16>(Some(v))),
+                Some(Err(e)) => assert(t == Err::<Option<u8>, u16>(e)),
+            }
+        }
+        fn fails(b: bool, x: u8) {
+            let r = b.then_some(x);
+            assert(r is Some); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    // content-free: usable, nothing known about the results
+    #[test] os_text_sync_specs verus_code! {
+        use vstd::prelude::*;
+        use std::path::{Path, PathBuf};
+        use std::sync::OnceLock;
+        fn paths(base: &Path, p: PathBuf) -> bool {
+            let q = base.join("x");
+            let r = p.join(&q);
+            let _ = r.parent();
+            let _ = std::fs::read_to_string(&r);
+            let _ = std::fs::create_dir_all(&r);
+            r.exists() && r.is_dir()
+        }
+        fn text(s: &str) -> String {
+            let u = s.to_uppercase();
+            let l = s.to_ascii_lowercase();
+            let mut w = String::with_capacity(4);
+            assert(w@.len() == 0);
+            if s.eq_ignore_ascii_case("a") { u } else { l }
+        }
+        fn once(l: &OnceLock<u8>) -> u8 {
+            *l.get_or_init(|| 3)
+        }
+        fn fails(s: &str) {
+            let u = s.to_uppercase();
+            assert(u@.len() == s@.len()); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
