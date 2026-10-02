@@ -3661,13 +3661,14 @@ impl rustc_driver::Callbacks for VerifierCallbacksEraseMacro {
                 // borrow-checks the program that is compiled.
                 providers.queries.type_of_opaque = |tcx, def_id| {
                     if let Some(local) = def_id.as_local() {
-                        // Only opaques of free and inherent functions: for an `async fn` or
-                        // `-> impl Trait` in a trait impl, rustc compares the hidden type with the
-                        // trait's (`collect_return_position_impl_trait_in_trait_tys`) and needs
-                        // its regions, which the HIR-typeck type has erased.
+                        // Opaques of free and inherent functions and of trait impls (an
+                        // `async fn` in an impl of a trait; enum_dispatch generates many). Not
+                        // the trait's own declaration (it has no body).
                         let owner = match tcx.hir_node_by_def_id(local).expect_opaque_ty().origin {
-                            rustc_hir::OpaqueTyOrigin::FnReturn { parent, in_trait_or_impl: None }
-                            | rustc_hir::OpaqueTyOrigin::AsyncFn { parent, in_trait_or_impl: None } => {
+                            rustc_hir::OpaqueTyOrigin::FnReturn { parent, in_trait_or_impl }
+                            | rustc_hir::OpaqueTyOrigin::AsyncFn { parent, in_trait_or_impl }
+                                if in_trait_or_impl != Some(rustc_hir::RpitContext::Trait) =>
+                            {
                                 Some(parent)
                             }
                             _ => None,

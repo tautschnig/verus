@@ -418,3 +418,22 @@ test_verify_one_file! {
         }
     } => Ok(())
 }
+
+test_verify_one_file! {
+    // a verified `async fn` in a trait impl whose future is required to be `Send`
+    // (enum_dispatch-generated `Execute` impls in kraken-cli) used to crash like the free case
+    #[test] test_async_fn_in_trait_impl_send code! {
+        use vstd::prelude::*;
+        trait Execute { async fn execute(self, ctx: &Ctx) -> u8; }
+        verus! {
+            pub struct Ctx { pub n: u8 }
+            pub struct A { pub x: u8 }
+            impl Execute for A {
+                async fn execute(self, ctx: &Ctx) -> u8 { self.x }
+            }
+            #[verifier::external_body]
+            fn require_send<T: Send>(_t: T) {}
+            pub fn go(a: A, c: &Ctx) { require_send(a.execute(c)); }
+        }
+    } => Ok(())
+}
