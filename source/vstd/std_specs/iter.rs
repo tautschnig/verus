@@ -1441,6 +1441,34 @@ pub broadcast axiom fn zip_postcondition<I, U>(i: I, other: U, r: Zip<I, <U as I
  * for ergonomic for-loop support.
  ********************************************************************************/
 
+/// The by-reference `for` invariant (`for x in &mut e`): when the loop's iterator is a
+/// `&mut J` (core's blanket `impl Iterator for &mut I`), its future is fixed by the borrow and
+/// the loop keeps it. When `&mut e` is a collection (`&mut vec` iterates an `IterMut`), there
+/// is nothing to keep. The `verus!` macro calls `(&(iter, snapshot)).verus_ref_future_eq()`;
+/// method resolution picks `ForLoopRefMut` (by value) exactly when both are `&mut J`, and
+/// `ForLoopRefAny` (one autoref deeper, the trivial `true`) otherwise.
+pub trait ForLoopRefMut {
+    #[verifier::prophetic]
+    spec fn verus_ref_future_eq(&self) -> bool;
+}
+
+impl<'a, J: ?Sized> ForLoopRefMut for (&'a mut J, &'a mut J) {
+    #[verifier::prophetic]
+    open spec fn verus_ref_future_eq(&self) -> bool {
+        &*final_(self.0) == &*final_(self.1)
+    }
+}
+
+pub trait ForLoopRefAny {
+    spec fn verus_ref_future_eq(&self) -> bool;
+}
+
+impl<'a, A, B> ForLoopRefAny for &'a (A, B) {
+    open spec fn verus_ref_future_eq(&self) -> bool {
+        true
+    }
+}
+
 pub struct VerusForLoopWrapper<I: Iterator> {
     pub index: Ghost<int>,
     pub snapshot: Ghost<I>,

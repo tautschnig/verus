@@ -741,3 +741,24 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    // `for x in &mut vec`: the by-reference loop invariant must only apply when the iterator
+    // is a `&mut I` (it failed to type-check here: `final_` applied to an `IterMut`). The
+    // remaining error is upstream's (also on stock Verus): the `IterMut` wrapper invariant.
+    #[test] for_loop_over_mut_ref_to_vec_type_checks verus_code! {
+        use vstd::prelude::*;
+        fn h() {
+            let mut v: Vec<u64> = Vec::new();
+            v.push(1);
+            for x in &mut v { // FAILS
+                *x = 0;
+            }
+        }
+        fn it() {
+            let v: Vec<u64> = Vec::new();
+            let mut i = v.iter();
+            for x in &mut i { }
+        }
+    } => Err(err) => assert_one_fails(err)
+}

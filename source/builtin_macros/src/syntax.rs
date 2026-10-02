@@ -4171,11 +4171,14 @@ impl Visitor {
         // holds the initial `&mut I` value, including that future.
         let by_ref_inv: Option<Expr> = match &*expr {
             Expr::Reference(r) if r.mutability.is_some() => {
-                Some(Expr::Verbatim(quote_spanned_vstd!(vstd, expr.span() =>
-                    #vstd::prelude::spec_eq(
-                        &*#vstd::prelude::final_(#x_iter_name.iter),
-                        &*#vstd::prelude::final_(#x_iter_name.snapshot.view()))
-                )))
+                // `&mut e` may be an iterator (`&mut it`) or a collection (`&mut vec`);
+                // only the former has a future to keep. The trait selection is in vstd
+                // (`ForLoopRefMut` / `ForLoopRefAny`).
+                Some(Expr::Verbatim(quote_spanned_vstd!(vstd, expr.span() => ({
+                    use #vstd::std_specs::iter::ForLoopRefMut as _;
+                    use #vstd::std_specs::iter::ForLoopRefAny as _;
+                    (&(#x_iter_name.iter, #x_iter_name.snapshot.view())).verus_ref_future_eq()
+                }))))
             }
             _ => None,
         };
