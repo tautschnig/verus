@@ -3675,7 +3675,18 @@ impl rustc_driver::Callbacks for VerifierCallbacksEraseMacro {
                         if let Some(owner) = owner {
                             if rustc_mir_build_verus::verus::needs_erasure_but_ctxt_not_ready(owner)
                             {
-                                return tcx.type_of_opaque_hir_typeck(local);
+                                // HIR typeck leaves regions erased; region resolution in other
+                                // bodies that see this type (an `async fn` in a trait impl that
+                                // spawns this future) cannot relate erased regions. Use
+                                // `'static`: auto traits do not depend on regions, and the
+                                // stronger outlives facts can only cause errors, never hide
+                                // one; the erase pass re-checks with the real hidden type.
+                                let ty = tcx.type_of_opaque_hir_typeck(local);
+                                return ty.map_bound(|t| {
+                                    rustc_middle::ty::fold_regions(tcx, t, |r, _| {
+                                        if r.is_erased() { tcx.lifetimes.re_static } else { r }
+                                    })
+                                });
                             }
                         }
                     }
