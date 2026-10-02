@@ -62,7 +62,7 @@ pub mod text;
 // `core::num::ZeroablePrimitive` is unstable; Verus builds enable the feature
 // (`vstd.rs`), so the specs are available whenever vstd is built by Verus, including by
 // `cargo verus`, which builds vstd with its default features.
-#[cfg(any(feature = "nonzero_internals", verus_keep_ghost))]
+#[cfg(any(feature = "nonzero_internals", all(verus_keep_ghost, not(verus_verify_core))))]
 pub mod nonzero;
 
 // This struct is a hack that exists purely to create
