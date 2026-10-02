@@ -3661,10 +3661,16 @@ impl rustc_driver::Callbacks for VerifierCallbacksEraseMacro {
                 // borrow-checks the program that is compiled.
                 providers.queries.type_of_opaque = |tcx, def_id| {
                     if let Some(local) = def_id.as_local() {
+                        // Only opaques of free and inherent functions: for an `async fn` or
+                        // `-> impl Trait` in a trait impl, rustc compares the hidden type with the
+                        // trait's (`collect_return_position_impl_trait_in_trait_tys`) and needs
+                        // its regions, which the HIR-typeck type has erased.
                         let owner = match tcx.hir_node_by_def_id(local).expect_opaque_ty().origin {
-                            rustc_hir::OpaqueTyOrigin::FnReturn { parent, .. }
-                            | rustc_hir::OpaqueTyOrigin::AsyncFn { parent, .. } => Some(parent),
-                            rustc_hir::OpaqueTyOrigin::TyAlias { .. } => None,
+                            rustc_hir::OpaqueTyOrigin::FnReturn { parent, in_trait_or_impl: None }
+                            | rustc_hir::OpaqueTyOrigin::AsyncFn { parent, in_trait_or_impl: None } => {
+                                Some(parent)
+                            }
+                            _ => None,
                         };
                         if let Some(owner) = owner {
                             if rustc_mir_build_verus::verus::needs_erasure_but_ctxt_not_ready(owner)

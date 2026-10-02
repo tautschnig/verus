@@ -396,3 +396,25 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_help_error_msg(err, "future cannot be sent between threads safely")
 }
+
+test_verify_one_file! {
+    // `async fn` in a trait and its impl, with the trait outside verus! (as enum_dispatch
+    // generates): rustc compares the impl's future type with the trait's and needs its
+    // regions; the type_of_opaque override must not apply to it (it caused an ICE)
+    #[test] test_async_fn_in_trait_impl_no_ice code! {
+        use vstd::prelude::*;
+        trait Run {
+            async fn run(&self, x: &u8) -> u8;
+        }
+        verus! {
+            struct C;
+            impl Run for C {
+                async fn run(&self, x: &u8) -> u8 { *x }
+            }
+            async fn go(c: &C) -> u8 {
+                let y = 3u8;
+                c.run(&y).await
+            }
+        }
+    } => Ok(())
+}
