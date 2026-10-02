@@ -3429,7 +3429,9 @@ fn fuel_axiom(ctx: &Ctx, hidden: &Vec<Fun>) -> Decl {
 fn mk_static_prelude(ctx: &Ctx, statics: &Vec<Fun>) -> Vec<Stmt> {
     statics
         .iter()
-        .filter(|f| ctx.funcs_with_ensure_predicate[&**f])
+        // A static read by another static without a call-graph edge (see recursion.rs,
+        // `StaticVar`) may not be declared yet; assuming less is sound.
+        .filter(|f| ctx.funcs_with_ensure_predicate.get(&**f).copied().unwrap_or(false))
         .map(|f| {
             let f_ens = prefix_ensures(&fun_to_air_ident(&ctx.name_ctxt, &f));
             let f_static = string_var(&ctx.name_ctxt.static_name(f));

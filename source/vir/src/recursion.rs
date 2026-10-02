@@ -663,7 +663,25 @@ pub(crate) fn expand_call_graph(
                     call_graph.add_edge(f_node.clone(), Node::Fun(callee.clone()))
                 }
             }
-            ExprX::StaticVar(fun) => call_graph.add_edge(f_node.clone(), Node::Fun(fun.clone())),
+            ExprX::StaticVar(fun) => {
+                // A use of a static reads the value its initializer produced before `main`;
+                // it does not run the initializer (rustc's const evaluation rejects cyclic
+                // initializers). What a use depends on is the static's `ensures`, which every
+                // body that mentions the static assumes (`mk_static_prelude`). The edge also
+                // orders the static's declarations before its users. Two statics that take
+                // each other's address (`tracing`'s `META` and `__CALLSITE`) would form a
+                // cycle and be rejected as recursion, although, without ensures, neither
+                // body assumes anything proved by the other. So the edge is omitted between
+                // statics when the read static has no ensures; the reading static then
+                // assumes only what has been declared (`mk_static_prelude`).
+                let reader_is_static = matches!(function.x.item_kind, crate::ast::ItemKind::Static);
+                let read_has_ensures = func_map.get(fun).map_or(true, |f| {
+                    !f.x.ensure.0.is_empty() || !f.x.ensure.1.is_empty()
+                });
+                if read_has_ensures || !reader_is_static {
+                    call_graph.add_edge(f_node.clone(), Node::Fun(fun.clone()))
+                }
+            }
             ExprX::AssertAssumeUserDefinedTypeInvariant { is_assume: _, expr: _, fun } => {
                 call_graph.add_edge(f_node.clone(), Node::Fun(fun.clone()));
 

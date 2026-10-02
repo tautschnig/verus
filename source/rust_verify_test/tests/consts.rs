@@ -881,3 +881,39 @@ test_verify_one_file! {
         fn f(k: usize) -> usize { k.wrapping_mul(0x9E3779B97F4A7C15) }
     } => Err(err) => assert_vir_error_msg(err, "on 32-bit targets")
 }
+
+test_verify_one_file! {
+    // two statics that take each other's address (as `tracing`'s `META` and `__CALLSITE`
+    // do) are not recursion: a use reads the value, it does not run the initializer
+    #[test] test_statics_referencing_each_other code! {
+        use vstd::prelude::*;
+        macro_rules! two_statics {
+            () => {{
+                static A: Node = mk(&B, 1);
+                static B: Node = mk(&A, 2);
+                A.v
+            }};
+        }
+        verus! {
+            pub struct Node { pub next: Option<&'static Node>, pub v: u8 }
+            #[verifier::external_body]
+            pub const fn mk(next: &'static Node, v: u8) -> Node { Node { next: Some(next), v } }
+            fn f() -> u8 {
+                two_statics!()
+            }
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    // ... but a static with ensures that depends on itself through another static still needs
+    // the recursion check (otherwise the two ensures would be proved from each other)
+    #[test] test_statics_cycle_with_ensures verus_code! {
+        use vstd::prelude::*;
+        pub struct Node { pub next: Option<&'static Node>, pub v: u8 }
+        #[verifier::external_body]
+        pub const fn mk(next: &'static Node, v: u8) -> (r: Node) ensures r.v == v { Node { next: Some(next), v } }
+        exec static A: Node ensures A.v == 1 { mk(&B, 1) }
+        exec static B: Node ensures B.v == 2 { mk(&A, 2) }
+    } => Err(err) => assert_any_vir_error_msg(err, "recursive")
+}
