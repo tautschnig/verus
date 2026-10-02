@@ -14,6 +14,7 @@ pub mod convert;
 pub mod core;
 pub mod default;
 pub mod fmt;
+pub mod future;
 #[cfg(feature = "std")]
 pub mod io;
 pub mod iter;
