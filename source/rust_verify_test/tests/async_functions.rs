@@ -345,3 +345,54 @@ test_verify_one_file_with_options! {
         }
     } => Err(err) => assert_vir_error_msg(err, "on an async block that uses `.await`")
 }
+
+test_verify_one_file! {
+    // A caller that needs the future of a verified `async fn` to be `Send` (as
+    // `tokio::spawn(x.run())` does) used to crash: rustc asks for the future's hidden type,
+    // from borrowck of `run`, before Verus has computed erasure for `run`. The body of `run`
+    // is still verified.
+    #[test] test_async_future_send_bound code! {
+        use vstd::prelude::*;
+        verus! {
+            pub struct C { pub x: u64 }
+            impl C {
+                pub async fn run(self) -> (r: u64)
+                    ensures r == self.x
+                {
+                    self.x
+                }
+                pub async fn wrong(self) -> (r: u64)
+                    ensures r == self.x // FAILS
+                {
+                    0
+                }
+            }
+            #[verifier::external_body]
+            fn require_send<T: Send>(_t: T) {}
+            pub fn g(c: C, d: C) {
+                require_send(c.run());
+                require_send(d.wrong());
+            }
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    // ... and a future that is not `Send` is still rejected
+    #[test] test_async_future_not_send_rejected code! {
+        use vstd::prelude::*;
+        verus! {
+            pub async fn nop() {}
+            pub async fn bad() -> u64 {
+                let r = std::rc::Rc::new(1u64);
+                nop().await;
+                *r
+            }
+            #[verifier::external_body]
+            fn require_send<T: Send>(_t: T) {}
+            pub fn h() {
+                require_send(bad());
+            }
+        }
+    } => Err(err) => assert_help_error_msg(err, "future cannot be sent between threads safely")
+}

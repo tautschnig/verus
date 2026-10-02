@@ -163,6 +163,18 @@ fn get_verus_erasure_ctxt() -> Arc<VerusErasureCtxt> {
         .clone()
 }
 
+/// Is `local_def_id` a body that needs Verus erasure, and has the erasure context not been
+/// computed yet? Then building its THIR now would bypass erasure (see
+/// `check_this_query_isnt_running_early`).
+pub fn needs_erasure_but_ctxt_not_ready(local_def_id: LocalDefId) -> bool {
+    get_verus_erasure_ctxt_option().is_none()
+        && VERUS_AWARE_DEF_IDS
+            .read()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|m| m.contains(&local_def_id))
+}
+
 pub(crate) fn get_verus_erasure_ctxt_option() -> Option<Arc<VerusErasureCtxt>> {
     VERUS_ERASURE_CTXT.read().unwrap().clone()
 }

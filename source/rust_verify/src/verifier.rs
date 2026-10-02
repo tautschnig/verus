@@ -3648,6 +3648,33 @@ impl rustc_driver::Callbacks for VerifierCallbacksEraseMacro {
 
                 rustc_hir_analysis_verus::provide(&mut providers.queries);
                 rustc_mir_build_verus::verus_provide(providers);
+                // The hidden type of an `impl Trait`/`async fn` opaque is normally taken from
+                // borrowck of the defining function. Type checking of *another* body asks for
+                // it when it needs an auto trait of the opaque (`tokio::spawn(x.run())` needs
+                // the future of `async fn run` to be `Send`). If `run` needs Verus erasure,
+                // its borrowck cannot run before modes are computed. For that case, take the
+                // hidden type from HIR type checking of `run` (rustc's own fallback for the
+                // same cycle under the new trait solver): same type, regions erased.
+                // Verification never depends on hidden types (VIR treats opaque types as
+                // opaque); the auto trait judgment is redone with the borrowck hidden type by
+                // the erased compilation (`run_with_erase_macro_compile`), which type- and
+                // borrow-checks the program that is compiled.
+                providers.queries.type_of_opaque = |tcx, def_id| {
+                    if let Some(local) = def_id.as_local() {
+                        let owner = match tcx.hir_node_by_def_id(local).expect_opaque_ty().origin {
+                            rustc_hir::OpaqueTyOrigin::FnReturn { parent, .. }
+                            | rustc_hir::OpaqueTyOrigin::AsyncFn { parent, .. } => Some(parent),
+                            rustc_hir::OpaqueTyOrigin::TyAlias { .. } => None,
+                        };
+                        if let Some(owner) = owner {
+                            if rustc_mir_build_verus::verus::needs_erasure_but_ctxt_not_ready(owner)
+                            {
+                                return tcx.type_of_opaque_hir_typeck(local);
+                            }
+                        }
+                    }
+                    (rustc_interface::DEFAULT_QUERY_PROVIDERS.queries.type_of_opaque)(tcx, def_id)
+                };
                 providers.queries.mir_built = |tcx, def| {
                     // We need to override this to call our verus of build_mir.
                     // mir_built is defined in the crate rustc_mir_transform, which I prefer
