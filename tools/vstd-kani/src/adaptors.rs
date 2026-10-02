@@ -1210,3 +1210,13 @@ fn then_some_transpose_with_capacity_hold() {
     let s = String::with_capacity(n);
     assert!(s.is_empty());
 }
+
+/// vstd `std_specs/result.rs` `Result::and`.
+#[cfg(kani)]
+#[kani::proof]
+fn result_and_holds() {
+    let r: Result<u8, u16> = if kani::any() { Ok(kani::any()) } else { Err(kani::any()) };
+    let s: Result<u32, u16> = if kani::any() { Ok(kani::any()) } else { Err(kani::any()) };
+    let a = r.and(s);
+    match r { Ok(_) => assert!(a == s), Err(e) => assert!(a == Err(e)) }
+}

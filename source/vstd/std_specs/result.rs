@@ -348,4 +348,12 @@ pub assume_specification<T, E>[ Result::<T, E>::unwrap_unchecked ](result: Resul
         res == result->Ok_0,
 ;
 
+pub assume_specification<T, E, U>[ Result::<T, E>::and::<U> ](r: Result<T, E>, res: Result<U, E>) -> (out: Result<U, E>)
+    ensures
+        out == match r {
+            Ok(_) => res,
+            Err(e) => Err(e),
+        },
+;
+
 } // verus!

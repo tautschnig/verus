@@ -3019,3 +3019,26 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] result_and_env_float_str_specs verus_code! {
+        use vstd::prelude::*;
+        fn test(r: Result<u8, u16>, s: Result<u32, u16>, x: f64, t: &str) {
+            let a = r.and(s);
+            match r {
+                Ok(_) => assert(a == s),
+                Err(e) => assert(a == Err::<u32, u16>(e)),
+            }
+            let _ = x.is_finite();
+            let m = x.min(1.0);
+            let n = x.max(1.0).abs();
+            let _ = t.strip_prefix("a");
+            let _ = std::env::var("HOME");
+            let _ = std::env::var_os("HOME");
+        }
+        fn fails(r: Result<u8, u16>, s: Result<u32, u16>) {
+            let a = r.and(s);
+            assert(a == s); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}

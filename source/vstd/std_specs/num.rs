@@ -20,6 +20,31 @@ pub open spec fn next_multiple_of(x: int, y: int) -> int
     }
 }
 
+
+// `f32` predicates and selection: content-free, like the arithmetic operators (`std_specs/ops.rs`
+// leaves float results uninterpreted).
+pub assume_specification[ f32::is_finite ](x: f32) -> bool;
+
+pub assume_specification[ f32::is_nan ](x: f32) -> bool;
+
+pub assume_specification[ f32::min ](x: f32, y: f32) -> f32;
+
+pub assume_specification[ f32::max ](x: f32, y: f32) -> f32;
+
+pub assume_specification[ f32::abs ](x: f32) -> f32;
+
+// `f64` predicates and selection: content-free, like the arithmetic operators (`std_specs/ops.rs`
+// leaves float results uninterpreted).
+pub assume_specification[ f64::is_finite ](x: f64) -> bool;
+
+pub assume_specification[ f64::is_nan ](x: f64) -> bool;
+
+pub assume_specification[ f64::min ](x: f64, y: f64) -> f64;
+
+pub assume_specification[ f64::max ](x: f64, y: f64) -> f64;
+
+pub assume_specification[ f64::abs ](x: f64) -> f64;
+
 } // verus!
 macro_rules! num_specs {
     ($uN: ty, $iN: ty, $mod_u_tmp:ident, $mod_i_tmp:ident, $mod_u:ident, $mod_i:ident, $range:expr) => {

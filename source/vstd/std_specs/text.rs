@@ -17,6 +17,8 @@ pub assume_specification[ str::eq_ignore_ascii_case ](s: &str, other: &str) -> b
 
 pub assume_specification[ str::trim ](s: &str) -> &str;
 
+pub assume_specification<'a, P: core::str::pattern::Pattern>[ str::strip_prefix::<P> ](s: &'a str, prefix: P) -> Option<&'a str>;
+
 pub assume_specification[ String::with_capacity ](n: usize) -> (r: String)
     ensures
         r@ == Seq::<char>::empty(),
