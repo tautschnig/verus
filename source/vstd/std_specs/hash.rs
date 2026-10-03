@@ -1318,6 +1318,15 @@ pub assume_specification<'a, K, V, A: Allocator>[ Entry::or_insert ](
         entry.final_value() == Some(*final(value)),
 ;
 
+/// `or_insert(V::default())`; the default value is not specified.
+pub assume_specification<'a, K, V: core::default::Default>[ Entry::<'a, K, V>::or_default ](
+    entry: Entry::<'a, K, V>,
+) -> (value: &'a mut V)
+    ensures
+        entry.value() is Some ==> *value == entry.value().unwrap(),
+        entry.final_value() == Some(*final(value)),
+;
+
 pub assume_specification<'a, K, V, A: Allocator>[ Entry::insert_entry ](
     entry: Entry::<'a, K, V, A>,
     value: V,

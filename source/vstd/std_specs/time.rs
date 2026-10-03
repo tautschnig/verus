@@ -56,6 +56,23 @@ pub assume_specification[ Duration::saturating_add ](a: Duration, b: Duration) -
         },
 ;
 
+pub assume_specification[ Duration::ZERO ] -> (r: Duration)
+    ensures
+        duration_nanos(r) == 0,
+;
+
+pub assume_specification[ Duration::saturating_sub ](a: Duration, b: Duration) -> (r: Duration)
+    ensures
+        duration_nanos(r) == if duration_nanos(a) >= duration_nanos(b) {
+            (duration_nanos(a) - duration_nanos(b)) as nat
+        } else {
+            0
+        },
+;
+
+/// Float conversion: content-free, like float arithmetic.
+pub assume_specification[ Duration::as_secs_f64 ](d: &Duration) -> f64;
+
 pub broadcast group group_time_axioms {
     axiom_duration_nanos_bound,
 }

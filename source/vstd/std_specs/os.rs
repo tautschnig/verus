@@ -93,6 +93,12 @@ pub assume_specification<P: AsRef<Path>>[ std::fs::File::open::<P> ](p: P) -> st
 
 pub assume_specification[ std::io::stdout ]() -> std::io::Stdout;
 
+pub assume_specification<S: AsRef<OsStr>>[ Path::with_extension::<S> ](p: &Path, ext: S) -> PathBuf;
+
+pub assume_specification<P: AsRef<Path>>[ std::fs::exists::<P> ](p: P) -> std::io::Result<bool>;
+
+pub assume_specification<P: AsRef<Path>, C: AsRef<[u8]>>[ std::fs::write::<P, C> ](p: P, contents: C) -> std::io::Result<()>;
+
 pub assume_specification<K: AsRef<OsStr>>[ std::env::var::<K> ](key: K) -> Result<String, std::env::VarError>;
 
 pub assume_specification<K: AsRef<OsStr>>[ std::env::var_os::<K> ](key: K) -> Option<OsString>;

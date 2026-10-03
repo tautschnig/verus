@@ -3042,3 +3042,28 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] duration_zero_sub_or_default verus_code! {
+        use vstd::prelude::*;
+        use vstd::std_specs::time::*;
+        use std::time::Duration;
+        use std::collections::HashMap;
+        fn test(a: Duration, b: Duration) {
+            let z = Duration::ZERO;
+            assert(duration_nanos(z) == 0);
+            let d = a.saturating_sub(b);
+            assert(duration_nanos(d) <= duration_nanos(a));
+            let e = b.saturating_sub(b);
+            assert(duration_nanos(e) == 0);
+        }
+        fn counts(m: &mut HashMap<u8, u64>, k: u8) {
+            let v = m.entry(k).or_default();
+            *v = 1;
+        }
+        fn fails(a: Duration, b: Duration) {
+            let d = a.saturating_sub(b);
+            assert(duration_nanos(d) > 0); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}

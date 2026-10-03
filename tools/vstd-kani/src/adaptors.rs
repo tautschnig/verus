@@ -1157,32 +1157,32 @@ fn char_bytes_vec_misc_specs_hold() {
 #[kani::proof]
 fn duration_specs_hold() {
     use core::time::Duration;
+    // duration_nanos(d) = secs * 10^9 + nanos (nanos < 10^9), so each clause is checked on the
+    // (secs, nanos) pair, which keeps 128-bit products out of the solver's problem.
     let s: u64 = kani::any();
     let m: u64 = kani::any();
     let d = Duration::from_secs(s);
-    assert!(d.as_nanos() == s as u128 * 1_000_000_000);
+    assert!(d.as_secs() == s && d.subsec_nanos() == 0);
     let e = Duration::from_millis(m);
-    assert!(e.as_nanos() == m as u128 * 1_000_000);
-    // as_secs / as_millis / is_zero against the model
+    assert!(e.as_secs() == m / 1000 && e.subsec_nanos() as u64 == (m % 1000) * 1_000_000);
     let secs: u64 = kani::any();
     let sub: u32 = kani::any();
     kani::assume(sub < 1_000_000_000);
     let x = Duration::new(secs, sub);
-    let n = x.as_nanos();
-    assert!(n == secs as u128 * 1_000_000_000 + sub as u128);
-    assert!(n <= u64::MAX as u128 * 1_000_000_000 + 999_999_999);
-    assert!(x.as_secs() as u128 == n / 1_000_000_000);
-    assert!(x.as_millis() == n / 1_000_000);
-    assert!(x.is_zero() == (n == 0));
-    // saturating_add
+    assert!(x.as_secs() == secs && x.subsec_nanos() == sub);
+    assert!(x.as_millis() == secs as u128 * 1000 + (sub / 1_000_000) as u128);
+    assert!(x.is_zero() == (secs == 0 && sub == 0));
     let secs2: u64 = kani::any();
     let sub2: u32 = kani::any();
     kani::assume(sub2 < 1_000_000_000);
     let y = Duration::new(secs2, sub2);
-    let max = u64::MAX as u128 * 1_000_000_000 + 999_999_999;
-    let sum = x.as_nanos() + y.as_nanos();
     let r = x.saturating_add(y);
-    assert!(r.as_nanos() == if sum <= max { sum } else { max });
+    let carry = (sub + sub2 >= 1_000_000_000) as u64;
+    let ns = if carry == 1 { sub + sub2 - 1_000_000_000 } else { sub + sub2 };
+    match secs.checked_add(secs2).and_then(|t| t.checked_add(carry)) {
+        Some(t) => assert!(r.as_secs() == t && r.subsec_nanos() == ns),
+        None => assert!(r.as_secs() == u64::MAX && r.subsec_nanos() == 999_999_999),
+    }
 }
 
 /// vstd `std_specs/core.rs` `bool::then_some`, `std_specs/option.rs` `Option::transpose`,
@@ -1219,4 +1219,44 @@ fn result_and_holds() {
     let s: Result<u32, u16> = if kani::any() { Ok(kani::any()) } else { Err(kani::any()) };
     let a = r.and(s);
     match r { Ok(_) => assert!(a == s), Err(e) => assert!(a == Err(e)) }
+}
+
+/// vstd `std_specs/time.rs` `Duration::ZERO`, `saturating_sub`. (`Entry::or_default` is tested
+/// by `entry_or_default_exec` below: map search does not unwind under Kani.)
+#[cfg(kani)]
+#[kani::proof]
+fn duration_zero_saturating_sub_hold() {
+    use core::time::Duration;
+    assert!(Duration::ZERO.as_nanos() == 0);
+    let (s1, n1, s2, n2): (u64, u32, u64, u32) = (kani::any(), kani::any(), kani::any(), kani::any());
+    kani::assume(n1 < 1_000_000_000 && n2 < 1_000_000_000);
+    let (a, b) = (Duration::new(s1, n1), Duration::new(s2, n2));
+    let r = a.saturating_sub(b);
+    // duration_nanos(d) = secs * 10^9 + nanos with nanos < 10^9, so the nanosecond statement is
+    // the lexicographic one on (secs, nanos); stated that way to keep 128-bit products out of
+    // the solver's problem.
+    let ge = (s1, n1) >= (s2, n2);
+    let (es, en) = if !ge { (0, 0) } else if n1 >= n2 { (s1 - s2, n1 - n2) } else { (s1 - s2 - 1, n1 + 1_000_000_000 - n2) };
+    assert!(r.as_secs() == es && r.subsec_nanos() == en);
+}
+
+/// `Entry::or_default`, executed exhaustively over small maps (ordinary `cargo test`).
+#[cfg(test)]
+#[test]
+fn entry_or_default_exec() {
+    use std::collections::HashMap;
+    for had in [None, Some(0u64), Some(7)] {
+        for k in 0u8..4 {
+            let mut m: HashMap<u8, u64> = HashMap::new();
+            m.insert(9, 1);
+            if let Some(x) = had { m.insert(k, x); }
+            let before = m.clone();
+            let v = m.entry(k).or_default();
+            let got = *v;
+            *v = got + 1;
+            if let Some(x) = had { assert_eq!(got, x); }
+            let mut e = before.clone(); e.insert(k, got + 1);
+            assert_eq!(m, e);
+        }
+    }
 }
