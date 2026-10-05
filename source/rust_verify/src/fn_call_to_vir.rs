@@ -320,7 +320,15 @@ fn fn_call_or_assoc_const_to_vir<'tcx>(
                     record_call(bctx, expr, ResolvedCall::NonStaticExec);
                     return Ok(copy);
                 }
-                unsupported_err!(expr.span, format!("built-in instance {:?}", b));
+                // The compiler-provided `Future` impl of an `async` block or `async fn` future
+                // (a coroutine) is its state machine, which Verus treats as opaque anyway.
+                // Call the trait method under its (content-free) specification.
+                let is_future = Some(tcx.parent(f)) == tcx.lang_items().future_trait();
+                if is_future && matches!(self_ty.kind(), TyKind::Coroutine(..)) {
+                    vir::ast::CallTargetKind::Dynamic
+                } else {
+                    unsupported_err!(expr.span, format!("built-in instance {:?}", b));
+                }
             }
             ResolutionResult::Unresolved => {
                 // Method is generic

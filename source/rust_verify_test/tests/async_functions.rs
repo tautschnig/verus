@@ -438,3 +438,21 @@ test_verify_one_file! {
         }
     } => Ok(())
 }
+
+test_verify_one_file_with_options! {
+    #[test] poll_async_block ["--edition 2024"] => verus_code! {
+        use vstd::prelude::*;
+        use core::future::Future;
+        use core::pin::Pin;
+        use core::task::{Context, Poll};
+        fn p(cx: &mut Context<'_>) -> bool {
+            let mut f = async { 1u8 };
+            let pf = unsafe { Pin::new_unchecked(&mut f) };
+            match pf.poll(cx) { Poll::Ready(_) => true, Poll::Pending => false }
+        }
+        fn unknown(cx: &mut Context<'_>) {
+            let r = p(cx);
+            assert(r); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
