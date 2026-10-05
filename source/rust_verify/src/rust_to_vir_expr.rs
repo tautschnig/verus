@@ -2690,11 +2690,25 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
                             tcx.check_stability(def_id, Some(expr.hir_id), expr.span, None);
 
                             let args = args_slice.iter().collect();
+                            // The lang-item paths of rustc's own `for` desugaring
+                            // (`IntoIterator::into_iter`, `Iterator::next`) record no node
+                            // args; the callee's `FnDef` type carries them.
+                            let mut node_substs = bctx.types.node_args(fun.hir_id);
+                            if node_substs.is_empty()
+                                && fun.span.desugaring_kind()
+                                    == Some(rustc_span::DesugaringKind::ForLoop)
+                            {
+                                if let rustc_middle::ty::TyKind::FnDef(_, substs) =
+                                    bctx.types.node_type(fun.hir_id).kind()
+                                {
+                                    node_substs = substs;
+                                }
+                            }
                             Some(fn_call_to_vir(
                                 bctx,
                                 expr,
                                 def_id,
-                                bctx.types.node_args(fun.hir_id),
+                                node_substs,
                                 fun.span,
                                 args,
                                 false,
@@ -3774,7 +3788,12 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
             }
             mk_expr(ExprX::Match(vir_place, Arc::new(vir_arms), false))
         }
-        ExprKind::Loop(block, label, LoopSource::Loop, header_span) => {
+        // A `for` loop that `verus!` did not rewrite (one produced by a macro expansion) is
+        // rustc's desugaring, `match IntoIterator::into_iter(e) { mut iter => loop { match
+        // Iterator::next(&mut iter) { None => break, Some(p) => body } } }`: the loop is a plain
+        // `loop` over calls that vstd specifies, with no invariant (and no decreases unless
+        // the function allows that), so it is lowered like one.
+        ExprKind::Loop(block, label, LoopSource::Loop | LoopSource::ForLoop, header_span) => {
             let label = bctx.fresh_label(expr.hir_id, label);
             let allow_complex_invariants = allow_complex_invariants();
             let typ = typ_of_node_unadjusted(bctx, block.span, &block.hir_id)?;
@@ -4236,17 +4255,6 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
                 }
                 Ok(ExprOrPlace::Place(p))
             }
-        }
-        ExprKind::Loop(_, _, LoopSource::ForLoop, _) => {
-            // The `verus!` macro rewrites `for` loops internally before they
-            // reach rustc's native for-loop desugaring, so a `LoopSource::ForLoop`
-            // only shows up here when the `for` loop was not visited by `verus!`
-            unsupported_err!(
-                expr.span,
-                format!(
-                    "`for` loops produced by a macro expansion (wrap the loop in the macro body with `verus_exec_expr! {{ ... }}`)"
-                )
-            )
         }
         ExprKind::Loop(..) => unsupported_err!(expr.span, format!("complex loop expressions")),
         ExprKind::AssignOp(op, lhs, rhs) => {

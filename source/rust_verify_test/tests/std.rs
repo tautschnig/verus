@@ -3372,3 +3372,16 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] for_loop_from_macro verus_code! {
+        use vstd::prelude::*;
+        macro_rules! each { ($v:expr) => {{ let mut n = 0u64; for x in $v.iter() { if *x > 0 { n = 1; } } n }} }
+        #[verifier::exec_allows_no_decreases_clause]
+        fn f(v: &Vec<u8>) -> u64 { each!(v) }
+        #[verifier::exec_allows_no_decreases_clause]
+        fn g(v: &Vec<u8>) -> (r: u64) ensures r <= 1 { // FAILS
+            each!(v)
+        }
+    } => Err(err) => assert_one_fails(err)
+}

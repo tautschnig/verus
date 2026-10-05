@@ -2064,14 +2064,24 @@ test_verify_one_file! {
 test_verify_one_file! {
     // A `for` loop produced by a `macro_rules!` expansion is not rewritten by the
     // `verus!` macro, so it reaches rustc's native for-loop desugaring.
+    // A `for` loop from a macro expansion is rustc's desugaring, lowered like a plain loop
+    // (no invariant, so the function must allow the missing decreases).
     #[test] macro_rules_for_loop_no_ice_issue2751 verus_code! {
+        use vstd::prelude::*;
+        #[verifier::exec_allows_no_decreases_clause]
         fn f() {
             macro_rules! m {
                 () => { for _ in 0..1 {} };
             }
             m!();
         }
-    } => Err(err) => assert_vir_error_msg(err, "`for` loops produced by a macro expansion")
+        fn g() {
+            macro_rules! m {
+                () => { for _ in 0..1 {} };
+            }
+            m!(); // FAILS
+        }
+    } => Err(err) => assert_vir_error_msg(err, "loop must have a decreases clause")
 }
 
 test_verify_one_file! {
