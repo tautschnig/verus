@@ -3739,6 +3739,27 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
                     continue;
                 }
                 let pattern = pattern_to_vir(bctx, &arm.pat)?;
+                // `A | B => body` where the alternatives bind by mutable reference (VIR's
+                // or-pattern lowering merges each binding's two places into one value, which
+                // a mutable borrow cannot be): split into `A => body, B => body`, in order,
+                // which has the same semantics; as above, not when the body contains
+                // closures or constructor values.
+                if let (None, PatKind::Or(alts)) = (&arm.guard, &arm.pat.kind)
+                    && vir::patterns::pattern_find_mut_binding(&pattern).is_some()
+                    && !hir_contains_closure_or_fn_value(bctx, arm.body)
+                {
+                    for alt in alts.iter() {
+                        let pattern = pattern_to_vir(bctx, alt)?;
+                        let guard = bctx.spanned_typed_new(
+                            expr.span,
+                            &bool_typ(),
+                            ExprX::Const(Constant::Bool(true)),
+                        );
+                        let body = expr_to_vir_consume(bctx, &arm.body)?;
+                        vir_arms.push(bctx.spanned_new(arm.span, ArmX { pattern, guard, body }));
+                    }
+                    continue;
+                }
                 let guard = match &arm.guard {
                     None => bctx.spanned_typed_new(
                         expr.span,

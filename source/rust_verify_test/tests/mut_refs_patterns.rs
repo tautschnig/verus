@@ -3329,12 +3329,19 @@ test_verify_one_file_with_options! {
 }
 
 test_verify_one_file_with_options! {
+    // a top-level or-pattern arm with `ref mut` bindings is split into one arm per alternative
     #[test] not_support_pattern_mut_ref_binding_with_or_pat [] => verus_code! {
         fn test() {
-            let m = (0, false);
+            let mut m = (0u8, false);
             match m {
-                (ref mut a, false) | (ref mut a, true) => { }
-                _ => { }
+                (ref mut a, false) | (ref mut a, true) => { *a = 3; }
+            }
+            assert(m.0 == 3);
+        }
+        fn nested() {
+            let mut m = (0u8, false);
+            match m {
+                (ref mut a, false | true) => { }
             }
         }
     } => Err(err) => assert_vir_error_msg(err, "Not supported: pattern containing both an or-pattern (|) and a binding by mutable reference")

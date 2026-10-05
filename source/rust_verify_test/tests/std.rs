@@ -3340,3 +3340,35 @@ test_verify_one_file! {
         async fn spawnit() { let mut c = C; let _ = c.run().await; }
     } => Ok(())
 }
+
+test_verify_one_file! {
+    #[test] or_pattern_ref_mut_binding verus_code! {
+        use vstd::prelude::*;
+        pub enum Sub { Ticker { snapshot: Option<bool>, n: u8 }, Trade { snapshot: Option<bool> }, Exec { k: u8 } }
+        impl Sub {
+            pub fn force_snapshot(&mut self)
+                ensures
+                    *old(self) is Exec ==> *final(self) == *old(self),
+                    !(*old(self) is Exec) ==> (match *final(self) {
+                        Sub::Ticker { snapshot, .. } => snapshot == Some(true),
+                        Sub::Trade { snapshot } => snapshot == Some(true),
+                        Sub::Exec { .. } => false,
+                    }),
+            {
+                match self {
+                    Sub::Ticker { snapshot: s, .. } | Sub::Trade { snapshot: s, .. } => *s = Some(true),
+                    Sub::Exec { .. } => {}
+                }
+            }
+        }
+        fn wrong(x: &mut Sub)
+            ensures
+                *old(x) is Ticker ==> (match *final(x) { Sub::Ticker { snapshot, .. } => snapshot == Some(true), _ => true }), // FAILS
+        {
+            match x {
+                Sub::Ticker { snapshot: s, .. } | Sub::Trade { snapshot: s, .. } => *s = Some(false),
+                Sub::Exec { .. } => {}
+            }
+        }
+    } => Err(err) => assert_one_fails(err)
+}
