@@ -70,4 +70,9 @@ pub assume_specification<'a, T: ?Sized>[ Pin::<&'a T>::get_ref ](pin: Pin<&'a T>
 // arbitrary `Ptr`. Use `get_ref`/`get_mut`/`into_inner`, which are specified above; the
 // compiler-inserted pin adjustments are rejected by the front end.
 
+/// `new_unchecked` is unsafe: the caller promises the pointee is not moved. That promise is
+/// the aliasing discipline this model does not capture (see above), so nothing is said
+/// about the result beyond its type.
+pub assume_specification<Ptr: Deref>[ Pin::<Ptr>::new_unchecked ](pointer: Ptr) -> Pin<Ptr>;
+
 } // verus!

@@ -11,7 +11,21 @@ pub trait ExFuture {
     type ExternalTraitSpecificationFor: core::future::Future;
 
     type Output;
+
+    /// Content-free: whether the future is ready, and with what, is not modelled.
+    fn poll(
+        self: core::pin::Pin<&mut Self>,
+        cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<Self::Output>;
 }
+
+#[verifier::external_type_specification]
+#[verifier::accept_recursive_types(T)]
+pub struct ExPoll<T>(core::task::Poll<T>);
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExContext<'a>(core::task::Context<'a>);
 
 #[verifier::external_trait_specification]
 pub trait ExIntoFuture {

@@ -3550,3 +3550,29 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] future_poll_pin_from_fn verus_code! {
+        use vstd::prelude::*;
+        use core::future::Future;
+        use core::pin::Pin;
+        use core::task::{Context, Poll};
+        fn p<F: Future + Unpin>(f: &mut F, cx: &mut Context<'_>) -> bool {
+            match Pin::new(f).poll(cx) { Poll::Ready(_) => true, Poll::Pending => false }
+        }
+        fn pinned<F: Future>(f: F) {
+            let mut f = f;
+            let _p = unsafe { Pin::new_unchecked(&mut f) };
+        }
+        fn gen() -> usize {
+            let mut n = 0u8;
+            let it = core::iter::from_fn(move || if n < 3 { n = n + 1; Some(n) } else { None });
+            let v: Vec<u8> = it.collect();
+            v.len()
+        }
+        fn unknown<F: Future + Unpin>(f: &mut F, cx: &mut Context<'_>) {
+            let r = p(f, cx);
+            assert(r); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}

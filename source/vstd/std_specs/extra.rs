@@ -408,4 +408,20 @@ pub assume_specification<'a, T>[ Option::<T>::iter ](o: &'a Option<T>) -> core::
 /// is not modelled).
 pub assume_specification<T: core::error::Error + 'static>[ <dyn core::error::Error + Send + Sync>::downcast::<T> ](b: alloc::boxed::Box<dyn core::error::Error + Send + Sync>) -> Result<alloc::boxed::Box<T>, alloc::boxed::Box<dyn core::error::Error + Send + Sync>>;
 
+/// `iter::from_fn(f)`: an iterator calling `f` (opaque, no laws).
+#[verifier::external_type_specification]
+#[verifier::external_body]
+#[verifier::reject_recursive_types(F)]
+pub struct ExFromFn<F>(core::iter::FromFn<F>);
+
+impl<T, F: FnMut() -> Option<T>> super::iter::IteratorSpecImpl for core::iter::FromFn<F> {
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool { false }
+    uninterp spec fn remaining(&self) -> Seq<T>;
+    uninterp spec fn will_return_none(&self) -> bool;
+    uninterp spec fn decrease(&self) -> Option<nat>;
+    open spec fn peek(&self, index: int) -> Option<T> { None }
+}
+
+pub assume_specification<T, F: FnMut() -> Option<T>>[ core::iter::from_fn::<T, F> ](f: F) -> core::iter::FromFn<F>;
+
 } // verus!
