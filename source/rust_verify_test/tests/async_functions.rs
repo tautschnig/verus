@@ -456,3 +456,24 @@ test_verify_one_file_with_options! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file_with_options! {
+    #[test] box_pin_async_block_as_dyn_future ["--edition 2024"] => verus_code! {
+        use vstd::prelude::*;
+        use core::future::Future;
+        use core::pin::Pin;
+        use vstd::std_specs::pin::PinAdditionalFns;
+        pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
+        pub trait Src { fn fetch(&self) -> BoxFuture<u8>; }
+        pub struct S;
+        impl Src for S {
+            fn fetch(&self) -> BoxFuture<u8> {
+                Box::pin(async move { 1u8 })
+            }
+        }
+        fn pinned(x: u8) {
+            let b = Box::pin(x);
+            assert(*b.pointer() == x);
+        }
+    } => Ok(())
+}

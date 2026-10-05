@@ -75,4 +75,20 @@ pub assume_specification<'a, T: ?Sized>[ Pin::<&'a T>::get_ref ](pin: Pin<&'a T>
 /// about the result beyond its type.
 pub assume_specification<Ptr: Deref>[ Pin::<Ptr>::new_unchecked ](pointer: Ptr) -> Pin<Ptr>;
 
+/// The unsizing coercion `Pin<P> -> Pin<Q>` (`Pin<Box<async { .. }>>` to
+/// `Pin<Box<dyn Future>>`), used by Verus to lower that coercion. Nothing is said about the
+/// result: the pointee is opaque on both sides.
+#[doc(hidden)]
+#[verifier::external_body]
+pub fn pin_unsize<P, Q>(p: Pin<P>) -> Pin<Q> {
+    unimplemented!()
+}
+
+/// `Box::pin(x)`: the pinned box holds `x`.
+#[cfg(feature = "alloc")]
+pub assume_specification<T>[ alloc::boxed::Box::<T>::pin ](x: T) -> (r: Pin<alloc::boxed::Box<T>>)
+    ensures
+        *r.pointer() == x,
+;
+
 } // verus!

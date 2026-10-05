@@ -1971,6 +1971,18 @@ pub(crate) fn expr_to_vir_with_adjustments<'tcx>(
                         _ => None,
                     }
                 }
+                (TyKind::Adt(a1, args1), TyKind::Adt(a2, args2))
+                    if a1.did() == a2.did()
+                        && bctx.ctxt.tcx.lang_items().pin_type() == Some(a1.did())
+                        && !bctx.ctxt.no_vstd =>
+                {
+                    // `Pin<P> -> Pin<Q>` (e.g. `Box::pin(async { .. })` as
+                    // `Pin<Box<dyn Future>>`): an opaque coercion.
+                    let fun = vir::fun!(CrateId::Vstd => "std_specs", "pin", "pin_unsize");
+                    let p = bctx.mid_ty_to_vir(expr.span, &args1.type_at(0))?;
+                    let q = bctx.mid_ty_to_vir(expr.span, &args2.type_at(0))?;
+                    Some((fun, Arc::new(vec![p, q])))
+                }
                 _ => {
                     let (ty1, ty2) = remove_decoration_typs_for_unsizing(bctx.ctxt.tcx, ty1, ty2);
                     match (ty1.kind(), ty2.kind()) {
