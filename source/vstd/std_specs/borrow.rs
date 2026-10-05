@@ -12,10 +12,12 @@ verus! {
 
 #[cfg(feature = "alloc")]
 #[verifier::external_trait_specification]
-pub(crate) trait ExToOwned {
+pub trait ExToOwned {
     type ExternalTraitSpecificationFor: ToOwned;
 
     type Owned: Borrow<Self>;
+
+    fn to_owned(&self) -> Self::Owned;
 }
 
 #[cfg(feature = "alloc")]

@@ -60,6 +60,9 @@ pub mod os;
 #[cfg(all(feature = "alloc", not(verus_verify_core)))]
 pub mod text;
 
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+pub mod extra;
+
 // `core::num::ZeroablePrimitive` is unstable; Verus builds enable the feature
 // (`vstd.rs`), so the specs are available whenever vstd is built by Verus, including by
 // `cargo verus`, which builds vstd with its default features.

@@ -3112,3 +3112,83 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] option_array_int_slice_specs verus_code! {
+        use vstd::prelude::*;
+        use vstd::std_specs::extra::*;
+        use vstd::std_specs::time::*;
+        use vstd::std_specs::cmp::OrdSpec;
+        use vstd::arithmetic::power::pow;
+        use std::collections::VecDeque;
+        use std::time::Duration;
+        fn opt(a: Option<Option<u8>>, b: Option<u8>) {
+            let f = a.flatten();
+            assert(a == Some(Some(3u8)) ==> f == Some(3u8));
+            let z = b.zip(f);
+            assert(b is None ==> z is None);
+        }
+        fn arr() {
+            let a = [1u8, 2, 3];
+            let b = a.map(|x: u8| -> (y: u16) ensures y == x as u16 * 2 { x as u16 * 2 });
+            assert(b@[1] == 4);
+        }
+        fn powers() {
+            proof { reveal_with_fuel(pow, 5); }
+            let x = 3u64.pow(4);
+            assert(x == 81);
+        }
+        fn hex(c: u8) -> (r: bool) ensures c == 0x41 ==> r {
+            c.is_ascii_hexdigit()
+        }
+        fn sorted(v: &mut Vec<u8>)
+            requires old(v)@.len() == 2,
+            ensures final(v)@[0] <= final(v)@[1], final(v)@.to_multiset() == old(v)@.to_multiset(),
+        {
+            v.sort();
+        }
+        fn by_key(v: &mut Vec<(u8, u8)>) ensures final(v)@.len() == old(v)@.len() {
+            v.sort_by_key(|p: &(u8, u8)| p.0);
+        }
+        fn search(v: &Vec<u8>, x: u8) {
+            match v.binary_search(&x) {
+                Ok(i) => { assert(v[i as int] == x); }
+                Err(i) => { assert(i <= v.len()); }
+            }
+        }
+        fn deque(d: &mut VecDeque<u8>) {
+            if let Some(x) = d.front_mut() {
+                *x = 7;
+            }
+            let f = d.front();
+            assert(d@.len() > 0 ==> f == Some(&7u8));
+        }
+        fn strings(s: String) -> (r: usize) {
+            let n = s.len();
+            let b = s.as_bytes();
+            assert(n == b@.len());
+            n
+        }
+        fn dur() {
+            let e = Duration::from_secs(1).saturating_mul(3);
+            assert(duration_nanos(e) == 3_000_000_000);
+        }
+        fn once() {
+            let it = std::iter::once(5u8);
+            assert(vstd::std_specs::iter::IteratorSpec::remaining(&it) == seq![5u8]);
+        }
+        fn pow_overflow() {
+            let x = 2u8.pow(8); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    #[test] sort_by_not_sorted verus_code! {
+        use vstd::prelude::*;
+        fn test(v: &mut Vec<u8>) requires old(v)@.len() == 2 {
+            v.sort_by(|a: &u8, b: &u8| b.cmp(a));
+            assert(v@[0] <= v@[1]); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}

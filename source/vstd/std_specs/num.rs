@@ -45,6 +45,18 @@ pub assume_specification[ f64::max ](x: f64, y: f64) -> f64;
 
 pub assume_specification[ f64::abs ](x: f64) -> f64;
 
+
+// f64 rounding: content-free, like float arithmetic.
+pub assume_specification[ f64::fract ](x: f64) -> f64;
+
+pub assume_specification[ f64::ceil ](x: f64) -> f64;
+
+pub assume_specification[ f64::round ](x: f64) -> f64;
+
+pub assume_specification[ f64::floor ](x: f64) -> f64;
+
+pub assume_specification[ f64::trunc ](x: f64) -> f64;
+
 } // verus!
 macro_rules! num_specs {
     ($uN: ty, $iN: ty, $mod_u_tmp:ident, $mod_i_tmp:ident, $mod_u:ident, $mod_i:ident, $range:expr) => {

@@ -1317,3 +1317,109 @@ fn iterator_sum_overflow_panics() {
     let r: u8 = a.iter().sum();
     let _ = r;
 }
+
+/// vstd `std_specs/extra.rs`: `Option::flatten`/`zip`, `array::map`, `pow` (u8, inside the
+/// precondition), `u8::is_ascii_hexdigit`, `Duration::saturating_mul`.
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(9)]
+fn extra_specs_hold() {
+    let o: Option<Option<u8>> = match kani::any::<u8>() % 3 { 0 => None, 1 => Some(None), _ => Some(Some(kani::any())) };
+    assert!(o.flatten() == match o { Some(Some(x)) => Some(x), _ => None });
+    let a: Option<u8> = if kani::any() { Some(kani::any()) } else { None };
+    let b: Option<u16> = if kani::any() { Some(kani::any()) } else { None };
+    assert!(a.zip(b) == match (a, b) { (Some(x), Some(y)) => Some((x, y)), _ => None });
+    let arr: [u8; 3] = kani::any();
+    let k: u8 = kani::any();
+    let m = arr.map(|x: u8| x ^ k);
+    assert!(m[0] == arr[0] ^ k && m[1] == arr[1] ^ k && m[2] == arr[2] ^ k);
+    let c: u8 = kani::any();
+    assert!(c.is_ascii_hexdigit() == ((0x30 <= c && c <= 0x39) || (0x41 <= c && c <= 0x46) || (0x61 <= c && c <= 0x66)));
+}
+
+/// `u8::pow` inside the precondition is the exact power.
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(9)]
+fn pow_in_range_exact() {
+    let x: u8 = kani::any(); let e: u32 = kani::any(); kani::assume(e < 9);
+    let mut exact: u16 = 1; let mut i = 0;
+    while i < e && exact <= 255 { exact = exact * x as u16; i += 1; }
+    if i == e && exact <= 255 { assert!(x.pow(e) as u16 == exact); }
+}
+
+/// `Duration::saturating_mul` without saturation: the exact product, stated on (secs, nanos)
+/// (no 128-bit products). Saturation is the `checked_mul` fallback (`Duration::MAX`).
+#[cfg(kani)]
+#[kani::proof]
+fn duration_saturating_mul_exact() {
+    let (secs, nanos, k): (u64, u32, u32) = (kani::any(), kani::any(), kani::any());
+    kani::assume(nanos < 1_000_000_000 && secs < 1 << 8 && k < 1 << 4);
+    let d = core::time::Duration::new(secs, nanos).saturating_mul(k);
+    let total_n = nanos as u64 * k as u64;
+    assert!(d.subsec_nanos() as u64 == total_n % 1_000_000_000);
+    assert!(d.as_secs() == secs * k as u64 + total_n / 1_000_000_000);
+    let m = core::time::Duration::MAX.saturating_mul(2 + k);
+    assert!(m == core::time::Duration::MAX);
+}
+
+/// `VecDeque::front`/`front_mut`; `String::len`/`as_bytes` are the UTF-8 encoding.
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(5)]
+fn extra_container_specs_hold() {
+    let mut d: std::collections::VecDeque<u8> = std::collections::VecDeque::with_capacity(4);
+    let n: u8 = kani::any(); kani::assume(n < 3);
+    let mut i = 0; while i < n { d.push_back(i + 10); i += 1; }
+    assert!(d.front() == if n > 0 { Some(&10u8) } else { None });
+    let w: u8 = kani::any();
+    if let Some(y) = d.front_mut() { *y = w; }
+    if n > 0 { assert!(d.len() == n as usize && d[0] == w && (1..d.len()).all(|j| d[j] == 10 + j as u8)); } else { assert!(d.is_empty()); }
+    let ch: char = kani::any();
+    let mut s = String::with_capacity(4);
+    s.push(ch);
+    let mut buf = [0u8; 4];
+    let enc: &[u8] = ch.encode_utf8(&mut buf).as_bytes();
+    assert!(s.len() == ch.len_utf8() && s.as_bytes().len() == enc.len());
+    assert!(s.as_bytes()[0] == enc[0]);
+}
+
+/// `sort`, `sort_unstable`, `sort_by`, `sort_by_key`, `sort_unstable_by(_key)`: a permutation
+/// (same length, same multiset), sorted for `sort`/`sort_unstable`; `binary_search`.
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(5)]
+fn slice_sort_specs_hold() {
+    let a: [u8; 3] = kani::any();
+    let count = |s: &[u8], v: u8| s.iter().filter(|x| **x == v).count();
+    let perm = |s: &[u8]| s.len() == 3 && (0..3).all(|i| count(s, a[i]) == count(&a, a[i]));
+    let mut s = a; s.sort();
+    assert!(perm(&s) && s[0] <= s[1] && s[1] <= s[2]);
+    let mut s = a; s.sort_unstable();
+    assert!(perm(&s) && s[0] <= s[1] && s[1] <= s[2]);
+    let mut s = a; s.sort_by(|x, y| y.cmp(x));
+    assert!(perm(&s));
+    let mut s = a; s.sort_unstable_by(|x, y| y.cmp(x));
+    assert!(perm(&s));
+    let mut s = a; s.sort_by_key(|x| *x / 2);
+    assert!(perm(&s));
+    let mut s = a; s.sort_unstable_by_key(|x| *x % 3);
+    assert!(perm(&s));
+    let mut s = a; s.sort();
+    let x: u8 = kani::any();
+    match s.binary_search(&x) { Ok(i) => assert!(i < 3 && s[i] == x), Err(i) => assert!(i <= 3) }
+}
+
+/// `iter::once(v)` yields exactly `v`; `max_by_key` returns an element of the iterator.
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(5)]
+fn once_and_max_by_key_hold() {
+    let v: u8 = kani::any();
+    let mut it = core::iter::once(v);
+    assert!(it.next() == Some(v) && it.next().is_none());
+    let a: [u8; 3] = kani::any();
+    let k: u8 = kani::any();
+    let m = *a.iter().max_by_key(|x| **x ^ k).unwrap();
+    assert!(a.contains(&m));
+}

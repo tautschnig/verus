@@ -70,6 +70,19 @@ pub assume_specification[ Duration::saturating_sub ](a: Duration, b: Duration) -
         },
 ;
 
+pub assume_specification[ Duration::saturating_mul ](d: Duration, n: u32) -> (r: Duration)
+    ensures
+        duration_nanos(r) == if duration_nanos(d) * (n as nat) <= duration_max_nanos() {
+            duration_nanos(d) * (n as nat)
+        } else {
+            duration_max_nanos()
+        },
+;
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExTryFromFloatSecsError(core::time::TryFromFloatSecsError);
+
 /// Float conversion: content-free, like float arithmetic.
 pub assume_specification[ Duration::as_secs_f64 ](d: &Duration) -> f64;
 
