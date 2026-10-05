@@ -990,6 +990,18 @@ impl<'a> Builder<'a> {
                         InstructionKind::MoveFrom(fp),
                     );
                 }
+                // A mutably captured place may be mutated by the closure at any later call,
+                // so it must never be resolved after this point (the closure's lifetime is not
+                // visible here). Treat it as moved into the closure: an uninitialized place is
+                // never resolved. (Rust forbids using it while the closure lives; afterwards,
+                // the SST has havocked it, StmX::ClosureInner.)
+                for fp in fn_scope.upvars_mutated.into_iter() {
+                    self.push_instruction_propagate(
+                        bb,
+                        AstPosition::After(expr.span.id),
+                        InstructionKind::MoveFrom(fp),
+                    );
+                }
 
                 Maybe::Some(bb)
             }
@@ -1882,14 +1894,25 @@ impl<'a> Builder<'a> {
         self.pop_scope();
         let mut fn_scope = self.pop_fn();
 
-        if fn_scope.upvars_mutated.len() > 0 {
+        // Mutably captured places. Inside the closure, each call starts from an arbitrary
+        // value (the SST havocs them, StmX::ClosureInner), so the prologue overwrites them;
+        // in the parent, creating the closure moves them (see the caller).
+        if proof_fn_modes.is_some() && fn_scope.upvars_mutated.len() > 0 {
             let name = &self.locals.locals[fn_scope.upvars_mutated[0].local].name;
             let name = match name {
                 LocalName::Named(var_ident) => crate::def::user_local_name(&var_ident),
                 LocalName::Temporary(..) => "[Verus Internal Error: mutably captured temporary]",
             };
             self.errors.push(error(span,
-                format!("Verus does not currently support closures capturing a mutable reference (mutably captured variable `{name}`)")));
+                format!("Verus does not currently support closures capturing a mutable reference (mutably captured variable `{name}`, in a proof closure)")));
+        }
+        fn_scope.upvars_mutated = sort_and_remove_redundant(fn_scope.upvars_mutated);
+        for fp in fn_scope.upvars_mutated.iter() {
+            self.push_instruction_raw(
+                closure_prologue,
+                AstPosition::Before(body.span.id),
+                InstructionKind::Overwrite(fp.clone()),
+            );
         }
 
         fn_scope.upvars_moved = sort_and_remove_redundant(fn_scope.upvars_moved);

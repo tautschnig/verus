@@ -2187,7 +2187,7 @@ pub(crate) fn expr_to_stm_opt(
                 exec_closure_body_stms(ctx, state, params, ret, body, requires, ensures)?;
             let block = Spanned::new(expr.span.clone(), StmX::Block(Arc::new(inner_stms)));
             let clos =
-                Spanned::new(expr.span.clone(), StmX::ClosureInner { body: block, typ_inv_vars });
+                Spanned::new(expr.span.clone(), StmX::ClosureInner { body: block, typ_inv_vars, modified_vars: None });
             all_stms.push(clos);
 
             // Create the closure object and assume all the information given in its

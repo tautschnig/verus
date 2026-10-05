@@ -12,7 +12,8 @@ use crate::context::Ctx;
 use crate::def::{
     ARCH_SIZE, BYTESTR_NEW_BYTELIT, CommandsWithContext, CommandsWithContextX, FUEL_BOOL,
     FUEL_BOOL_DEFAULT, FUEL_DEFAULTS, FUEL_ID, FUEL_PARAM, FUEL_TYPE, I_HI, I_LO, NameCtxt, POLY,
-    ProverChoice, SNAPSHOT_BOUNDARY, SNAPSHOT_CALL, SNAPSHOT_LOOP, SNAPSHOT_PRE, STRSLICE_GET_CHAR,
+    ProverChoice, SNAPSHOT_BOUNDARY, SNAPSHOT_CALL, SNAPSHOT_CLOSURE, SNAPSHOT_LOOP, SNAPSHOT_PRE,
+    STRSLICE_GET_CHAR,
     STRSLICE_LEN, STRSLICE_NEW_STRLIT, SUCC, SUFFIX_SNAP_JOIN, SUFFIX_SNAP_MUT,
     SUFFIX_SNAP_WHILE_BEGIN, SUFFIX_SNAP_WHILE_END, SnapPos, SpanKind, Spanned, U_HI,
     encode_dt_as_path, new_internal_qid, new_user_qid_name, prefix_ensures, prefix_fuel_id,
@@ -2776,8 +2777,12 @@ fn stm_to_stmts_inner(ctx: &Ctx, state: &mut State, stm: &Stm) -> Result<Vec<Stm
             }
             stmts
         }
-        StmX::ClosureInner { body, typ_inv_vars } => {
+        StmX::ClosureInner { body, typ_inv_vars, modified_vars } => {
+            let modified_vars = modified_vars.as_ref().expect("modified_vars");
             let mut stmts = vec![];
+            // each call of the closure sees arbitrary values of its mutable captures
+            stmts.push(Arc::new(StmtX::Snapshot(snapshot_ident(SNAPSHOT_CLOSURE))));
+            modified_vars.emit_havocs(ctx, SNAPSHOT_CLOSURE, &mut stmts);
             for (x, typ) in typ_inv_vars.iter() {
                 let typ_inv = typ_invariant(ctx, typ, &ident_var(&suffix_local_unique_id(x)));
                 if let Some(expr) = typ_inv {
@@ -2794,7 +2799,15 @@ fn stm_to_stmts_inner(ctx: &Ctx, state: &mut State, stm: &Stm) -> Result<Vec<Stm
 
             stmts.append(&mut body_stmts);
 
-            vec![Arc::new(StmtX::DeadEnd(one_stmt(stmts)))]
+            // the enclosing function forgets the values of the mutable captures: the closure
+            // may run any number of times (the borrow checker keeps the function from using
+            // them while the closure lives)
+            let mut after = vec![Arc::new(StmtX::DeadEnd(one_stmt(stmts)))];
+            if !modified_vars.is_empty() {
+                after.push(Arc::new(StmtX::Snapshot(snapshot_ident(SNAPSHOT_CLOSURE))));
+                modified_vars.emit_havocs(ctx, SNAPSHOT_CLOSURE, &mut after);
+            }
+            after
         }
         StmX::If(cond, lhs, rhs) => {
             let pos_cond = exp_to_expr(ctx, &cond, expr_ctxt)?;

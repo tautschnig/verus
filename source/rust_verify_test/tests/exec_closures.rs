@@ -1293,26 +1293,27 @@ test_verify_one_file_with_options! {
     } => Err(err) => assert_vir_error_msg(err, "closures only accept exec-mode parameters")
 }
 
-// mut restrictions
+// mutable captures (exec closures): each call sees arbitrary values of the captured
+// variables, and the enclosing function forgets their values when the closure is created
 
 test_verify_one_file_with_options! {
-    #[test] disallowed_mut_capture1 ["vstd"] => verus_code! {
+    #[test] allowed_mut_capture1 ["vstd"] => verus_code! {
         use vstd::prelude::*;
 
         fn test1() {
             let mut a = 5;
 
-            let f = |t: u8| {
+            let mut f = |t: u8| {
                 a = 7;
             };
 
             f(7);
         }
-    } => Err(err) => assert_vir_error_msg(err, "Verus does not currently support closures capturing a mutable reference")
+    } => Ok(())
 }
 
 test_verify_one_file_with_options! {
-    #[test] disallowed_mut_capture2 ["vstd"] => verus_code! {
+    #[test] allowed_mut_capture2 ["vstd"] => verus_code! {
         use vstd::prelude::*;
 
         fn takes_mut(u: &mut u64) { }
@@ -1320,49 +1321,49 @@ test_verify_one_file_with_options! {
         fn test1() {
             let mut a = 5;
 
-            let f = |t: u8| {
+            let mut f = |t: u8| {
                 takes_mut(&mut a);
             };
 
             f(7);
         }
-    } => Err(err) => assert_vir_error_msg(err, "Verus does not currently support closures capturing a mutable reference")
+    } => Ok(())
 }
 
 test_verify_one_file_with_options! {
-    #[test] disallowed_mut_capture3 ["vstd"] => verus_code! {
+    #[test] allowed_mut_capture3 ["vstd"] => verus_code! {
         use vstd::prelude::*;
 
         fn takes_mut(u: &mut u64) { }
 
         fn test1(a: &mut u64) {
-            let f = |t: u8| {
+            let mut f = |t: u8| {
                 takes_mut(a);
             };
 
             f(7);
         }
-    } => Err(err) => assert_vir_error_msg(err, "Verus does not currently support closures capturing a mutable reference")
+    } => Ok(())
 }
 
 test_verify_one_file_with_options! {
-    #[test] disallowed_mut_capture4 ["vstd"] => verus_code! {
+    #[test] allowed_mut_capture4 ["vstd"] => verus_code! {
         use vstd::prelude::*;
 
         fn takes_mut(u: &mut u64) { }
 
         fn test1(a: &mut u64) {
-            let f = |t: u8| {
+            let mut f = |t: u8| {
                 takes_mut(&mut *a);
             };
 
             f(7);
         }
-    } => Err(err) => assert_vir_error_msg(err, "Verus does not currently support closures capturing a mutable reference")
+    } => Ok(())
 }
 
 test_verify_one_file_with_options! {
-    #[test] disallowed_mut_capture5 ["vstd"] => verus_code! {
+    #[test] allowed_mut_capture5 ["vstd"] => verus_code! {
         use vstd::prelude::*;
 
         fn test1() {
@@ -1371,11 +1372,11 @@ test_verify_one_file_with_options! {
                 let ref mut y = x;
             };
         }
-    } => Err(err) => assert_vir_error_msg(err, "Verus does not currently support closures capturing a mutable reference")
+    } => Ok(())
 }
 
 test_verify_one_file_with_options! {
-    #[test] disallowed_mut_capture6 ["vstd"] => verus_code! {
+    #[test] allowed_mut_capture6 ["vstd"] => verus_code! {
         use vstd::prelude::*;
 
         fn test1() {
@@ -1386,11 +1387,11 @@ test_verify_one_file_with_options! {
                 }
             };
         }
-    } => Err(err) => assert_vir_error_msg(err, "Verus does not currently support closures capturing a mutable reference")
+    } => Ok(())
 }
 
 test_verify_one_file_with_options! {
-    #[test] disallowed_mut_capture7 ["vstd"] => verus_code! {
+    #[test] allowed_mut_capture7 ["vstd"] => verus_code! {
         use vstd::prelude::*;
 
         fn test1() {
@@ -1400,11 +1401,11 @@ test_verify_one_file_with_options! {
                 }
             };
         }
-    } => Err(err) => assert_vir_error_msg(err, "Verus does not currently support closures capturing a mutable reference")
+    } => Ok(())
 }
 
 test_verify_one_file_with_options! {
-    #[test] disallowed_mut_capture8 ["vstd"] => verus_code! {
+    #[test] allowed_mut_capture8 ["vstd"] => verus_code! {
         use vstd::prelude::*;
 
         fn test1() {
@@ -1413,7 +1414,7 @@ test_verify_one_file_with_options! {
                 let Some(ref mut y) = x else { return; };
             };
         }
-    } => Err(err) => assert_vir_error_msg(err, "Verus does not currently support closures capturing a mutable reference")
+    } => Ok(())
 }
 
 test_verify_one_file_with_options! {
@@ -1434,13 +1435,13 @@ test_verify_one_file_with_options! {
 }
 
 test_verify_one_file_with_options! {
-    #[test] disallowed_mut_capture_nested ["vstd"] => verus_code! {
+    #[test] allowed_mut_capture_nested ["vstd"] => verus_code! {
         use vstd::prelude::*;
 
         fn test1() {
             let mut a = 5;
 
-            let f = |t: u8| {
+            let mut f = |t: u8| {
                 let g = |s: u8| {
                     a = 7;
                 };
@@ -1448,11 +1449,11 @@ test_verify_one_file_with_options! {
 
             f(7);
         }
-    } => Err(err) => assert_vir_error_msg(err, "Verus does not currently support closures capturing a mutable reference")
+    } => Ok(())
 }
 
 test_verify_one_file_with_options! {
-    #[test] disallowed_mut_capture_nested2 ["vstd"] => verus_code! {
+    #[test] allowed_mut_capture_nested2 ["vstd"] => verus_code! {
         use vstd::prelude::*;
 
         fn test1() {
@@ -1465,7 +1466,7 @@ test_verify_one_file_with_options! {
 
             f(7);
         }
-    } => Err(err) => assert_vir_error_msg(err, "Verus does not currently support closures capturing a mutable reference")
+    } => Ok(())
 }
 
 // closures that depend on type params
@@ -2314,4 +2315,61 @@ test_verify_one_file! {
             f(3); // FAILS
         }
     } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file_with_options! {
+    #[test] mut_capture_soundness ["vstd"] => verus_code! {
+        use vstd::prelude::*;
+        fn body_does_not_know_capture() {
+            let mut n = 0u64;
+            let mut f = || {
+                assert(n == 0); // FAILS
+                n = 5;
+            };
+            f();
+        }
+        fn caller_forgets_capture() {
+            let mut n = 0u64;
+            let mut f = || { n = 5; };
+            f();
+            assert(n == 0); // FAILS
+        }
+        fn caller_forgets_even_if_not_called() {
+            let mut n = 0u64;
+            let mut f = || { n = 5; };
+            assert(n == 0); // FAILS
+        }
+        fn others_kept() {
+            let a = 3u64;
+            let mut n = 0u64;
+            let mut f = || { n = a; };
+            f();
+            assert(a == 3);
+        }
+        fn through_mut_ref(r: &mut u64)
+            ensures *final(r) == 0, // FAILS
+        {
+            let rr = &mut *r;
+            let mut f = || { *rr = 1; };
+            f();
+        }
+        fn vec_capture(v: &mut Vec<u8>)
+            requires old(v).len() == 0,
+            ensures final(v).len() == 0, // FAILS
+        {
+            let mut f = || { v.push(1); };
+            f();
+        }
+    } => Err(err) => assert_fails(err, 5)
+}
+
+test_verify_one_file_with_options! {
+    #[test] mut_capture_filter_insert ["vstd"] => verus_code! {
+        use vstd::prelude::*;
+        use std::collections::BTreeSet;
+        fn dedup_keep_first(v: Vec<u64>) -> Vec<u64> {
+            let mut seen: BTreeSet<u64> = BTreeSet::new();
+            v.into_iter().filter(|x| seen.insert(*x)).collect()
+        }
+    } => Ok(())
 }

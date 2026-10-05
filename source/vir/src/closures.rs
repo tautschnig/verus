@@ -15,13 +15,15 @@ use crate::messages::error;
 pub fn check_closure_well_formed(expr: &Expr, is_proof_fn: bool) -> Result<(), VirErr> {
     expr_visitor_check(expr, &mut |scope_map, expr| {
         match &expr.x {
-            ExprX::Assign { place, .. } | ExprX::BorrowMut(place) => {
+            // Exec closures may mutate captured variables (see StmX::ClosureInner's
+            // `modified_vars`); proof closures may not.
+            ExprX::Assign { place, .. } | ExprX::BorrowMut(place) if is_proof_fn => {
                 if let Some(local) = place_get_local(place) {
                     let PlaceX::Local(ident) = &local.x else { unreachable!() };
                     if !scope_map.contains_key(ident) {
                         return Err(error(
                             &expr.span,
-                            "Verus does not currently support closures capturing a mutable reference for variables of any mode",
+                            "Verus does not currently support closures capturing a mutable reference for variables of any mode (in a proof closure)",
                         ));
                     }
                 }

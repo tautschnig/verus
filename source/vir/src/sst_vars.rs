@@ -362,16 +362,33 @@ fn stm_assign(
             Spanned::new(stm.span.clone(), StmX::DeadEnd(s))
         }
         StmX::BreakOrContinue { label: _, is_break: _ } => stm.clone(),
-        StmX::ClosureInner { body, typ_inv_vars } => {
-            let pre_modified = modified.clone();
+        StmX::ClosureInner { body, typ_inv_vars, modified_vars } => {
+            // Variables of the enclosing function the body modifies: the closure's mutable
+            // captures. Excluded: the closure's parameters and the locals first initialized in
+            // the body (declared inside the closure).
             let pre_assigned = assigned.clone();
-            let body = stm_assign(assign_map, declared, assigned, modified, body);
+            let mut inner_modified = HavocSet::new();
+            let body = stm_assign(assign_map, declared, assigned, &mut inner_modified, body);
+            let inner_declared: IndexMap<UniqueIdent, Typ> = declared
+                .iter()
+                .filter(|(x, _)| {
+                    (pre_assigned.contains(*x) || !assigned.contains(*x))
+                        && !typ_inv_vars.iter().any(|(p, _)| p == *x)
+                })
+                .map(|(x, t)| (x.clone(), t.clone()))
+                .collect();
             *assigned = pre_assigned;
-            *modified = pre_modified;
-
+            assert!(modified_vars.is_none());
+            let captured = inner_modified.filter_by_declared(&inner_declared);
+            // after the closure is created, the enclosing function forgets these variables
+            modified.merge_with(&captured);
             Spanned::new(
                 stm.span.clone(),
-                StmX::ClosureInner { body, typ_inv_vars: typ_inv_vars.clone() },
+                StmX::ClosureInner {
+                    body,
+                    typ_inv_vars: typ_inv_vars.clone(),
+                    modified_vars: Some(Arc::new(captured)),
+                },
             )
         }
         StmX::If(cond, lhs, rhs) => {
@@ -625,9 +642,14 @@ fn stm_mutations(param_typs: &[(VarIdent, Typ)], mutations: &mut HavocSet, stm: 
             let body = stm_mutations(param_typs, mutations, body);
             stm.new_x(StmX::OpenInvariant(body))
         }
-        StmX::ClosureInner { body, typ_inv_vars } => {
+        StmX::ClosureInner { body, typ_inv_vars, modified_vars } => {
             let body = stm_mutations(param_typs, mutations, body);
-            stm.new_x(StmX::ClosureInner { body, typ_inv_vars: typ_inv_vars.clone() })
+            mutations.merge_with(&modified_vars.as_ref().unwrap().filter_by_params(param_typs));
+            stm.new_x(StmX::ClosureInner {
+                body,
+                typ_inv_vars: typ_inv_vars.clone(),
+                modified_vars: modified_vars.clone(),
+            })
         }
         StmX::Block(stms) => {
             let mut v = vec![];
@@ -737,6 +759,10 @@ impl HavocSet {
             }
         }
         result
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.vars.is_empty()
     }
 
     pub(crate) fn emit_havocs(

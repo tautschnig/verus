@@ -364,7 +364,15 @@ pub enum StmX {
     /// Atomic invariant opening for concurrent verification
     OpenInvariant(Stm),
     /// Body of an exec closure, with associated type invariants
-    ClosureInner { body: Stm, typ_inv_vars: Arc<Vec<(UniqueIdent, Typ)>> },
+    /// `modified_vars`: variables of the enclosing function that the closure body may modify
+    /// (mutable captures), filled in by sst_vars. Each call of the closure starts from
+    /// arbitrary values of them, and the enclosing function forgets their values when the
+    /// closure is created.
+    ClosureInner {
+        body: Stm,
+        typ_inv_vars: Arc<Vec<(UniqueIdent, Typ)>>,
+        modified_vars: Option<Arc<crate::sst_vars::HavocSet>>,
+    },
     /// Raw AIR code injection (for internal use only)
     Air(Arc<String>),
     /// Sequential composition of statements

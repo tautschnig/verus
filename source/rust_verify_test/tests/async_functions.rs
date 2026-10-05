@@ -326,8 +326,9 @@ test_verify_one_file_with_options! {
             let mut x = 1u32;
             let fut = async { x = 2; };
             let _ = fut;
+            assert(x == 1); // FAILS
         }
-    } => Err(err) => assert_vir_error_msg(err, "closures capturing a mutable reference")
+    } => Err(err) => assert_one_fails(err)
 }
 
 test_verify_one_file_with_options! {
