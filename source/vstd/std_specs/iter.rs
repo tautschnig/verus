@@ -350,6 +350,122 @@ pub trait ExIterator {
             forall |k| #![auto] 0 <= k < self.remaining().len() ==> call_ensures(f, (self.remaining()[k], ), ()),
     ;
 
+    /// `count` consumes the iterator and counts with `+ 1` under overflow checks, so it panics
+    /// for more than `usize::MAX` elements; the precondition rules that out, which needs the
+    /// iterator's remaining items to be known.
+    fn count(self) -> (r: usize)
+        where Self: Sized,
+        requires
+            self.obeys_prophetic_iter_laws(),
+            self.remaining().len() <= usize::MAX,
+        ensures
+            r == self.remaining().len(),
+    ;
+
+    /// The index of the first item satisfying `predicate` (overflow-checked like `count`).
+    fn position<P>(&mut self, predicate: P) -> (r: Option<usize>)
+        where Self: Sized,
+            P: FnMut(Self::Item) -> bool
+        requires
+            old(self).obeys_prophetic_iter_laws(),
+            old(self).remaining().len() <= usize::MAX,
+            forall |k| #![auto] 0 <= k < old(self).remaining().len() ==> call_requires(predicate, (old(self).remaining()[k], )),
+        ensures
+            final(self).obeys_prophetic_iter_laws(),
+            final(self).remaining().is_suffix_of(old(self).remaining()),
+            r is None ==> {
+                &&& final(self).remaining().len() == 0
+                &&& forall |i| 0 <= i < old(self).remaining().len() ==>
+                    predicate.ensures((#[trigger] old(self).remaining()[i],), false)
+            },
+            r is Some ==> {
+                let idx = r.unwrap() as int;
+                &&& idx == old(self).remaining().len() - final(self).remaining().len() - 1
+                &&& predicate.ensures((old(self).remaining()[idx],), true)
+                &&& forall |i| 0 <= i < idx ==>
+                    predicate.ensures((#[trigger] old(self).remaining()[i],), false)
+            },
+    ;
+
+    /// The first `Some(b)` that `f` returns.
+    fn find_map<B, F>(&mut self, f: F) -> (r: Option<B>)
+        where Self: Sized,
+            F: FnMut(Self::Item) -> Option<B>
+        requires
+            forall |k| #![auto] 0 <= k < old(self).remaining().len() ==> call_requires(f, (old(self).remaining()[k], )),
+        ensures
+            final(self).obeys_prophetic_iter_laws() == old(self).obeys_prophetic_iter_laws(),
+            final(self).obeys_prophetic_iter_laws() ==> final(self).remaining().is_suffix_of(old(self).remaining()),
+            final(self).obeys_prophetic_iter_laws() && r is None ==> {
+                &&& final(self).remaining().len() == 0
+                &&& forall |i| 0 <= i < old(self).remaining().len() ==>
+                    f.ensures((#[trigger] old(self).remaining()[i],), None::<B>)
+            },
+            final(self).obeys_prophetic_iter_laws() && r is Some ==> {
+                let idx = old(self).remaining().len() - final(self).remaining().len() - 1;
+                &&& 0 <= idx < old(self).remaining().len()
+                &&& f.ensures((old(self).remaining()[idx],), r)
+                &&& forall |i| 0 <= i < idx ==>
+                    f.ensures((#[trigger] old(self).remaining()[i],), None::<B>)
+            },
+    ;
+
+    /// `sum` adds the items with the type's `+`; whether that can panic and what it computes
+    /// is per type: `sum_req`/`sum_ensures` (below), given content for the primitive numbers.
+    fn sum<S>(self) -> (r: S)
+        where Self: Sized,
+            S: core::iter::Sum<Self::Item>
+        requires
+            sum_req::<Self, S>(self),
+        ensures
+            sum_ensures::<Self, S>(self, r),
+    ;
+
+    /// The largest item (the last of equal maxima), `None` if there is none.
+    fn max(self) -> (r: Option<Self::Item>)
+        where Self: Sized,
+            Self::Item: Ord,
+        ensures
+            self.obeys_prophetic_iter_laws() ==> (r is None <==> self.remaining().len() == 0),
+            self.obeys_prophetic_iter_laws() && r is Some ==> self.remaining().contains(r.unwrap()),
+            self.obeys_prophetic_iter_laws() && r is Some && <Self::Item as super::cmp::OrdSpec>::obeys_cmp_spec() ==>
+                forall |i| 0 <= i < self.remaining().len() ==>
+                    #[trigger] super::cmp::OrdSpec::cmp_spec(&self.remaining()[i], &r.unwrap()) != core::cmp::Ordering::Greater,
+    ;
+
+    /// The smallest item (the first of equal minima), `None` if there is none.
+    fn min(self) -> (r: Option<Self::Item>)
+        where Self: Sized,
+            Self::Item: Ord,
+        ensures
+            self.obeys_prophetic_iter_laws() ==> (r is None <==> self.remaining().len() == 0),
+            self.obeys_prophetic_iter_laws() && r is Some ==> self.remaining().contains(r.unwrap()),
+            self.obeys_prophetic_iter_laws() && r is Some && <Self::Item as super::cmp::OrdSpec>::obeys_cmp_spec() ==>
+                forall |i| 0 <= i < self.remaining().len() ==>
+                    #[trigger] super::cmp::OrdSpec::cmp_spec(&self.remaining()[i], &r.unwrap()) != core::cmp::Ordering::Less,
+    ;
+
+    /// The item with the largest key: one of the items, `None` if there is none.
+    fn max_by_key<B, F>(self, f: F) -> (r: Option<Self::Item>)
+        where Self: Sized,
+            B: Ord,
+            F: FnMut(&Self::Item) -> B,
+        requires
+            forall |k| #![auto] 0 <= k < self.remaining().len() ==> call_requires(f, (&self.remaining()[k], )),
+        ensures
+            self.obeys_prophetic_iter_laws() ==> (r is None <==> self.remaining().len() == 0),
+            self.obeys_prophetic_iter_laws() && r is Some ==> self.remaining().contains(r.unwrap()),
+    ;
+
+    /// `filter_map` gives an iterator that is opaque here (`FilterMap` does not obey the
+    /// prophetic laws in vstd); `f` must be callable on every item.
+    fn filter_map<B, F>(self, f: F) -> (r: core::iter::FilterMap<Self, F>)
+        where Self: Sized,
+            F: FnMut(Self::Item) -> Option<B>,
+        requires
+            forall |k| #![auto] 0 <= k < self.remaining().len() ==> call_requires(f, (self.remaining()[k], )),
+    ;
+
     fn rev(self) -> (r: Rev<Self>)
         where Self: Sized,
         ensures
@@ -407,6 +523,130 @@ pub trait ExIterator {
             *final(r) == *final(self),
     ;
 }
+
+// ------------------------------------------------------------------------------------- sum
+
+/// `sum::<S>()` on an iterator `I` does not panic. Uninterpreted: a sum is known not to
+/// panic only where an axiom says so (the primitive numbers below; spec crates may add more).
+pub uninterp spec fn sum_req<I, S>(i: I) -> bool;
+
+/// What `sum::<S>()` on `I` returns. Uninterpreted, like `sum_req`.
+pub uninterp spec fn sum_ensures<I, S>(i: I, r: S) -> bool;
+
+/// The exact sum of the first `n` items of `s` (as integers).
+pub open spec fn int_prefix_sum(s: Seq<int>, n: int) -> int
+    decreases n,
+{
+    if n <= 0 { 0 } else { int_prefix_sum(s, n - 1) + s[n - 1] }
+}
+
+macro_rules! sum_axioms {
+    ($($t:ty, $own:ident, $refd:ident, $ints:ident, $rints:ident, $rreq:ident, $rens:ident);* $(;)?) => {
+        $crate::vstd::prelude::verus! {
+            $(
+            pub open spec fn $ints(s: Seq<$t>) -> Seq<int> { s.map_values(|x: $t| x as int) }
+
+            pub open spec fn $rints<'a>(s: Seq<&'a $t>) -> Seq<int> { s.map_values(|x: &$t| *x as int) }
+
+            /// `Sum<T> for T` adds with overflow checks: it does not panic when every prefix
+            /// sum is in range ...
+            pub broadcast axiom fn $own<I: Iterator<Item = $t> + IteratorSpec>(i: I)
+                ensures
+                    i.obeys_prophetic_iter_laws() && (forall |n: int| 0 <= n <= i.remaining().len() ==>
+                        $t::MIN <= #[trigger] int_prefix_sum($ints(i.remaining()), n) <= $t::MAX)
+                        ==> #[trigger] sum_req::<I, $t>(i),
+            ;
+
+            /// ... and then returns the exact sum.
+            pub broadcast axiom fn $refd<I: Iterator<Item = $t> + IteratorSpec>(i: I, r: $t)
+                ensures
+                    i.obeys_prophetic_iter_laws() && #[trigger] sum_ensures::<I, $t>(i, r)
+                        ==> r as int == int_prefix_sum($ints(i.remaining()), i.remaining().len() as int),
+            ;
+
+            /// `Sum<&T> for T`, likewise.
+            pub broadcast axiom fn $rreq<'a, I: Iterator<Item = &'a $t> + IteratorSpec>(i: I)
+                ensures
+                    i.obeys_prophetic_iter_laws() && (forall |n: int| 0 <= n <= i.remaining().len() ==>
+                        $t::MIN <= #[trigger] int_prefix_sum($rints(i.remaining()), n) <= $t::MAX)
+                        ==> #[trigger] sum_req::<I, $t>(i),
+            ;
+
+            pub broadcast axiom fn $rens<'a, I: Iterator<Item = &'a $t> + IteratorSpec>(i: I, r: $t)
+                ensures
+                    i.obeys_prophetic_iter_laws() && #[trigger] sum_ensures::<I, $t>(i, r)
+                        ==> r as int == int_prefix_sum($rints(i.remaining()), i.remaining().len() as int),
+            ;
+            )*
+        }
+    };
+}
+
+sum_axioms!(
+    u8, axiom_sum_u8, axiom_sum_ens_u8, seq_u8_as_ints, seq_ref_u8_as_ints, axiom_sum_ref_u8, axiom_sum_ref_ens_u8;
+    u16, axiom_sum_u16, axiom_sum_ens_u16, seq_u16_as_ints, seq_ref_u16_as_ints, axiom_sum_ref_u16, axiom_sum_ref_ens_u16;
+    u32, axiom_sum_u32, axiom_sum_ens_u32, seq_u32_as_ints, seq_ref_u32_as_ints, axiom_sum_ref_u32, axiom_sum_ref_ens_u32;
+    u64, axiom_sum_u64, axiom_sum_ens_u64, seq_u64_as_ints, seq_ref_u64_as_ints, axiom_sum_ref_u64, axiom_sum_ref_ens_u64;
+    u128, axiom_sum_u128, axiom_sum_ens_u128, seq_u128_as_ints, seq_ref_u128_as_ints, axiom_sum_ref_u128, axiom_sum_ref_ens_u128;
+    usize, axiom_sum_usize, axiom_sum_ens_usize, seq_usize_as_ints, seq_ref_usize_as_ints, axiom_sum_ref_usize, axiom_sum_ref_ens_usize;
+    i8, axiom_sum_i8, axiom_sum_ens_i8, seq_i8_as_ints, seq_ref_i8_as_ints, axiom_sum_ref_i8, axiom_sum_ref_ens_i8;
+    i16, axiom_sum_i16, axiom_sum_ens_i16, seq_i16_as_ints, seq_ref_i16_as_ints, axiom_sum_ref_i16, axiom_sum_ref_ens_i16;
+    i32, axiom_sum_i32, axiom_sum_ens_i32, seq_i32_as_ints, seq_ref_i32_as_ints, axiom_sum_ref_i32, axiom_sum_ref_ens_i32;
+    i64, axiom_sum_i64, axiom_sum_ens_i64, seq_i64_as_ints, seq_ref_i64_as_ints, axiom_sum_ref_i64, axiom_sum_ref_ens_i64;
+    i128, axiom_sum_i128, axiom_sum_ens_i128, seq_i128_as_ints, seq_ref_i128_as_ints, axiom_sum_ref_i128, axiom_sum_ref_ens_i128;
+    isize, axiom_sum_isize, axiom_sum_ens_isize, seq_isize_as_ints, seq_ref_isize_as_ints, axiom_sum_ref_isize, axiom_sum_ref_ens_isize;
+);
+
+verus! {
+
+/// Floating-point sums do not panic; their value is not modelled (as for float `+`).
+pub broadcast axiom fn axiom_sum_f64<I: Iterator<Item = f64>>(i: I)
+    ensures #[trigger] sum_req::<I, f64>(i);
+
+pub broadcast axiom fn axiom_sum_ref_f64<'a, I: Iterator<Item = &'a f64>>(i: I)
+    ensures #[trigger] sum_req::<I, f64>(i);
+
+pub broadcast axiom fn axiom_sum_f32<I: Iterator<Item = f32>>(i: I)
+    ensures #[trigger] sum_req::<I, f32>(i);
+
+pub broadcast group group_sum_axioms {
+    axiom_sum_u8, axiom_sum_ens_u8, axiom_sum_ref_u8, axiom_sum_ref_ens_u8,
+    axiom_sum_u16, axiom_sum_ens_u16, axiom_sum_ref_u16, axiom_sum_ref_ens_u16,
+    axiom_sum_u32, axiom_sum_ens_u32, axiom_sum_ref_u32, axiom_sum_ref_ens_u32,
+    axiom_sum_u64, axiom_sum_ens_u64, axiom_sum_ref_u64, axiom_sum_ref_ens_u64,
+    axiom_sum_u128, axiom_sum_ens_u128, axiom_sum_ref_u128, axiom_sum_ref_ens_u128,
+    axiom_sum_usize, axiom_sum_ens_usize, axiom_sum_ref_usize, axiom_sum_ref_ens_usize,
+    axiom_sum_i8, axiom_sum_ens_i8, axiom_sum_ref_i8, axiom_sum_ref_ens_i8,
+    axiom_sum_i16, axiom_sum_ens_i16, axiom_sum_ref_i16, axiom_sum_ref_ens_i16,
+    axiom_sum_i32, axiom_sum_ens_i32, axiom_sum_ref_i32, axiom_sum_ref_ens_i32,
+    axiom_sum_i64, axiom_sum_ens_i64, axiom_sum_ref_i64, axiom_sum_ref_ens_i64,
+    axiom_sum_i128, axiom_sum_ens_i128, axiom_sum_ref_i128, axiom_sum_ref_ens_i128,
+    axiom_sum_isize, axiom_sum_ens_isize, axiom_sum_ref_isize, axiom_sum_ref_ens_isize,
+    axiom_sum_f64, axiom_sum_ref_f64, axiom_sum_f32,
+}
+
+#[verifier::external_trait_specification]
+pub trait ExSum<A = Self>: Sized {
+    type ExternalTraitSpecificationFor: core::iter::Sum<A>;
+}
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+#[verifier::reject_recursive_types(I)]
+#[verifier::reject_recursive_types(F)]
+pub struct ExFilterMap<I, F>(core::iter::FilterMap<I, F>);
+
+/// `FilterMap` is opaque: it does not obey the prophetic laws here, so nothing is known about
+/// what it yields (collecting it gives an arbitrary collection).
+impl<B, I: Iterator, F: FnMut(I::Item) -> Option<B>> IteratorSpecImpl for core::iter::FilterMap<I, F> {
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool { false }
+    uninterp spec fn remaining(&self) -> Seq<B>;
+    uninterp spec fn will_return_none(&self) -> bool;
+    uninterp spec fn decrease(&self) -> Option<nat>;
+    open spec fn peek(&self, index: int) -> Option<B> { None }
+}
+
+} // verus!
 
 #[verifier::external_trait_specification]
 #[verifier::external_trait_extension(DoubleEndedIteratorSpec via DoubleEndedIteratorSpecImpl)]

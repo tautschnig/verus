@@ -1260,3 +1260,60 @@ fn entry_or_default_exec() {
         }
     }
 }
+
+/// vstd `std_specs/iter.rs`: `count`, `position`, `find_map`, `max`, `min` on a slice iterator
+/// of length 3 (`remaining` = the slice), and `sum` of `u8`/`&u8`: no panic when every prefix
+/// sum fits, and then the exact sum; a panic otherwise (the precondition is necessary).
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(5)]
+fn iterator_consumers_hold() {
+    let a: [u8; 3] = kani::any();
+    let x: u8 = kani::any();
+    assert!(a.iter().count() == 3);
+    // position: the first index whose item satisfies the predicate; the iterator then holds
+    // the items after it
+    let mut it = a.iter();
+    let p = it.position(|y| *y == x);
+    match p {
+        None => assert!(a[0] != x && a[1] != x && a[2] != x && it.len() == 0),
+        Some(i) => {
+            assert!(i < 3 && a[i] == x && (0..i).all(|j| a[j] != x));
+            assert!(it.len() == 3 - i - 1);
+        }
+    }
+    // find_map
+    let mut it = a.iter();
+    let f = |y: &u8| if *y > x { Some(*y - x) } else { None };
+    let r = it.find_map(f);
+    match r {
+        None => assert!(a.iter().all(|y| f(y).is_none()) && it.len() == 0),
+        Some(v) => { let idx = 3 - it.len() - 1; assert!(f(&a[idx]) == Some(v) && (0..idx).all(|j| f(&a[j]).is_none())); }
+    }
+    // max / min: one of the items, and no item compares greater / less
+    let m = *a.iter().max().unwrap();
+    assert!(a.contains(&m) && a.iter().all(|y| *y <= m));
+    let n = *a.iter().min().unwrap();
+    assert!(a.contains(&n) && a.iter().all(|y| *y >= n));
+    let e: [u8; 0] = [];
+    assert!(e.iter().max().is_none() && e.iter().min().is_none() && e.iter().count() == 0);
+    // sum: prefix sums in range => exact
+    let s0 = a[0] as u32; let s1 = s0 + a[1] as u32; let s2 = s1 + a[2] as u32;
+    if s1 <= 255 && s2 <= 255 {
+        let r: u8 = a.iter().sum();
+        assert!(r as u32 == s2);
+        let r2: u8 = a.into_iter().sum();
+        assert!(r2 as u32 == s2);
+    }
+}
+
+/// `sum` overflowing a prefix panics (debug build): the `sum_req` precondition is not
+/// vacuous. Kani reports the overflow as a failed check, so this harness is expected to fail.
+#[cfg(kani)]
+#[kani::proof]
+#[kani::should_panic]
+fn iterator_sum_overflow_panics() {
+    let a: [u8; 2] = [200, 100];
+    let r: u8 = a.iter().sum();
+    let _ = r;
+}

@@ -3067,3 +3067,48 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] iterator_consumers verus_code! {
+        use vstd::prelude::*;
+        use vstd::std_specs::iter::{IteratorSpec, group_sum_axioms, int_prefix_sum, seq_ref_u8_as_ints};
+        broadcast use group_sum_axioms;
+        fn count_all(v: &Vec<u8>) -> (r: usize) ensures r == v.len() {
+            let it = v.iter();
+            assert(IteratorSpec::remaining(&it).len() == v.len());
+            it.count()
+        }
+        fn pos(v: &Vec<u8>, x: u8) -> (r: Option<usize>)
+            ensures r is Some ==> r.unwrap() < v.len() && v[r.unwrap() as int] == x,
+        {
+            let mut it = v.iter();
+            assert(IteratorSpec::remaining(&it).len() == v.len());
+            it.position(|y: &u8| -> (b: bool) ensures b == (*y == x) { *y == x })
+        }
+        fn total2(v: &Vec<u8>) -> (r: u8)
+            requires v.len() == 2, v[0] == 1, v[1] == 2,
+            ensures r == 3,
+        {
+            let it = v.iter();
+            proof {
+                assert(seq_ref_u8_as_ints(IteratorSpec::remaining(&it)) =~= seq![1int, 2int]);
+                reveal_with_fuel(int_prefix_sum, 3);
+                assert forall |n: int| 0 <= n <= IteratorSpec::remaining(&it).len() implies
+                    u8::MIN <= #[trigger] int_prefix_sum(seq_ref_u8_as_ints(IteratorSpec::remaining(&it)), n) <= u8::MAX by {
+                    assert(n == 0 || n == 1 || n == 2);
+                }
+            }
+            it.sum()
+        }
+        fn largest(v: &Vec<u8>) -> (r: Option<&u8>) ensures v.len() > 0 ==> r is Some {
+            v.iter().max()
+        }
+        fn fm(v: &Vec<u8>) -> Option<u8> {
+            let mut it = v.iter();
+            it.find_map(|x: &u8| if *x > 3 { Some(*x) } else { None })
+        }
+        fn sum_unchecked(v: &Vec<u8>) -> u8 {
+            v.iter().sum() // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}

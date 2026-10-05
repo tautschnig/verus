@@ -162,6 +162,7 @@ pub broadcast group group_vstd_default {
     #[cfg(any(feature = "nonzero_internals", all(verus_keep_ghost, not(verus_verify_core))))]
     std_specs::nonzero::group_nonzero_axioms,
     std_specs::time::group_time_axioms,
+    std_specs::iter::group_sum_axioms,
 }
 
 } // verus!

@@ -351,7 +351,7 @@ test_verify_one_file_with_options! {
         pub trait ExIterator1 {
             type ExternalTraitSpecificationFor: core::iter::Iterator;
             type Item;
-            fn count(self) -> usize where Self: Sized;
+            fn last(self) -> Option<Self::Item> where Self: Sized;
             #[verifier::impls_cannot_extend_spec]
             fn cmp<I>(self, other: I) -> core::cmp::Ordering where Self: core::iter::Iterator, I: core::iter::IntoIterator<Item = <Self as core::iter::Iterator>::Item>, <Self as core::iter::Iterator>::Item: Ord, Self: Sized;
         }
@@ -364,7 +364,7 @@ test_verify_one_file_with_options! {
         }
 
         fn test2<A: Iterator>(a: A) {
-            let x = a.count();
+            let x = a.last();
         }
 
         fn test3<A: Iterator>(a: A) {
