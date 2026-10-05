@@ -3327,3 +3327,16 @@ test_verify_one_file! {
         const C: TableSpec = TableSpec::new("c", &[Column::req("x", 0)]);
     } => Ok(())
 }
+
+test_verify_one_file! {
+    #[test] module_in_async_method_body verus_code! {
+        use vstd::prelude::*;
+        macro_rules! sel { () => {{ mod __util { pub enum Out { A, B } } let o = __util::Out::A; match o { __util::Out::A => 1u8, __util::Out::B => 2u8 } }} }
+        pub struct C;
+        impl C {
+            #[verifier::exec_allows_no_decreases_clause]
+            pub async fn run(&mut self) -> u8 { loop { let x = sel!(); if x == 1 { return x; } } }
+        }
+        async fn spawnit() { let mut c = C; let _ = c.run().await; }
+    } => Ok(())
+}

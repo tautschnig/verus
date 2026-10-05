@@ -72,7 +72,14 @@ pub(crate) fn def_id_to_stable_rust_path<'tcx>(tcx: TyCtxt<'tcx>, def_id: DefId)
                     return None;
                 }
                 one_impl_block_in_path = true;
-                let self_ty = tcx.type_of(tcx.parent(def_id)).skip_binder();
+                // the impl block itself, which is the parent of `def_id` only for items
+                // directly in the impl (not for an item declared inside a method body, such
+                // as the module `tokio::select!` declares)
+                let mut impl_id = tcx.parent(def_id);
+                while !matches!(tcx.def_key(impl_id).disambiguated_data.data, DefPathData::Impl) {
+                    impl_id = tcx.parent(impl_id);
+                }
+                let self_ty = tcx.type_of(impl_id).skip_binder();
                 let path = ty_to_stable_string_partial(tcx, &self_ty)?;
                 segments.clear();
                 segments.push(path);
