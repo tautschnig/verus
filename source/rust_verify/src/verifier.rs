@@ -3666,6 +3666,25 @@ impl rustc_driver::Callbacks for VerifierCallbacksEraseMacro {
                     }
                     (rustc_interface::DEFAULT_QUERY_PROVIDERS.queries.type_of_opaque)(tcx, def_id)
                 };
+                // Proving an auto trait (`Send`) of a coroutine's type during type checking
+                // asks for its witness types (the locals held across `.await`), which rustc
+                // takes from the coroutine's MIR. If the coroutine needs erasure and the
+                // erasure context is not ready, that MIR would be built (and cached) without
+                // Verus's erasure and closure handling, and the later lifetime check would
+                // borrow-check that program instead (rejecting the `verus!` closure encoding:
+                // "closure may outlive the current block"). Report no witness types then:
+                // the auto-trait judgment of this session is not used by verification, and the
+                // erased compilation (`run_with_erase_macro_compile`) redoes it with the real
+                // witness types.
+                providers.queries.mir_coroutine_witnesses = |tcx, def_id| {
+                    let root = tcx.typeck_root_def_id(def_id.to_def_id()).expect_local();
+                    if rustc_mir_build_verus::verus::needs_erasure_but_ctxt_not_ready(root) {
+                        return None;
+                    }
+                    (rustc_interface::DEFAULT_QUERY_PROVIDERS.queries.mir_coroutine_witnesses)(
+                        tcx, def_id,
+                    )
+                };
                 providers.queries.mir_built = |tcx, def| {
                     // We need to override this to call our verus of build_mir.
                     // mir_built is defined in the crate rustc_mir_transform, which I prefer

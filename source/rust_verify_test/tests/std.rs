@@ -3456,3 +3456,36 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_vir_error_msg(err, "Verus does not yet support specifications on trait methods returning `impl Trait`")
 }
+
+test_verify_one_file! {
+    #[test] closure_in_send_async_fn verus_code! {
+        use vstd::prelude::*;
+        fn need_send<T: Send>(t: T) {}
+        pub enum E { P(u8) }
+        fn ser(v: u8) -> Result<u8, u8> { Ok(v) }
+        pub async fn a1(x: u8) -> Result<u8, E> {
+            let y = ser(x).map_err(|e| E::P(e))?;
+            let z = async { 1u8 }.await;
+            Ok(y)
+        }
+        pub async fn g1() { let _ = a1(1).await; }
+        pub fn d1() { need_send(g1()); need_send(a1(2)); }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] non_send_future_still_rejected verus_code! {
+        use vstd::prelude::*;
+        fn need_send<T: Send>(t: T) {}
+        async fn yield_now() {}
+        #[verifier::external_body]
+        fn rc() -> std::rc::Rc<u8> { std::rc::Rc::new(1) }
+        pub async fn holds_rc() -> u8 {
+            let r = rc();
+            yield_now().await;
+            let _ = r;
+            0
+        }
+        pub fn d1() { need_send(holds_rc()); }
+    } => Err(err) => assert!(err.errors.iter().any(|e| e.message.contains("cannot be sent between threads safely")))
+}
