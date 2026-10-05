@@ -917,3 +917,20 @@ test_verify_one_file! {
         exec static B: Node ensures B.v == 2 { mk(&A, 2) }
     } => Err(err) => assert_any_vir_error_msg(err, "recursive")
 }
+
+test_verify_one_file! {
+    // a `pub(super)` const whose initializer names a private const: its body is narrowed to
+    // its module, like a `pub` one
+    #[test] restricted_pub_const_private_initializer verus_code! {
+        use vstd::prelude::*;
+        mod m {
+            use vstd::prelude::*;
+            const PING: u64 = 30;
+            pub(super) const IDLE: u64 = PING * 3;
+            pub fn g() -> (r: u64) ensures r == 90 { IDLE }
+        }
+        fn f() -> (r: u64) ensures r == 90 { // FAILS
+            m::IDLE
+        }
+    } => Err(err) => assert_one_fails(err)
+}

@@ -1888,7 +1888,11 @@ pub fn narrow_default_open_bodies(krate: &Krate, unpruned_krate: &Krate) -> Krat
         else {
             continue;
         };
-        if body_visibility.restricted_to.is_some() {
+        // (already visible only in the owning module: nothing to narrow; `pub(super)` and
+        // `pub(crate)` are narrowed like `pub`)
+        if body_visibility.restricted_to.is_some()
+            && body_visibility.restricted_to == function.x.owning_module
+        {
             continue;
         }
         let mut emit = EmitErrorState {
