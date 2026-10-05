@@ -235,6 +235,14 @@ fn get_binder_hir_id<'tcx>(
     Some((path.span, path.segments[0].ident, id))
 }
 
+static GHOST_OWNERS: std::sync::RwLock<Option<HashSet<LocalDefId>>> =
+    std::sync::RwLock::new(None);
+
+/// Whether erasure changes anything in the body of `def_id` (false: erased to itself).
+pub(crate) fn body_has_ghost_code(def_id: LocalDefId) -> bool {
+    GHOST_OWNERS.read().unwrap().as_ref().map_or(true, |s| s.contains(&def_id))
+}
+
 pub(crate) fn setup_verus_ctxt_for_thir_erasure<'tcx>(
     tcx: rustc_middle::ty::TyCtxt<'tcx>,
     verus_items: &VerusItems,
@@ -412,6 +420,29 @@ pub(crate) fn setup_verus_ctxt_for_thir_erasure<'tcx>(
         let found = local_invariant_bodies.insert(l.inner_block_hir_id, l.clone());
         assert!(found.is_none());
     }
+
+    // Owners (items) whose bodies contain anything that erasure changes. A body outside this
+    // set is erased to itself.
+    let mut ghost_owners = HashSet::<LocalDefId>::new();
+    for (hir_id, v) in vars.iter() {
+        if !matches!(v, VarErasure::Keep) {
+            ghost_owners.insert(hir_id.owner.def_id);
+        }
+    }
+    for (hir_id, (c, _)) in calls.iter() {
+        if !matches!(c, CallErasure::Call(rustc_mir_build_verus::verus::NodeErase::Keep)) {
+            ghost_owners.insert(hir_id.owner.def_id);
+        }
+    }
+    for (def_id, b) in bodies.iter() {
+        if b.erase_body || b.ret_spec {
+            ghost_owners.insert(*def_id);
+        }
+    }
+    for hir_id in loop_erasure.keys().chain(local_invariant_bodies.keys()) {
+        ghost_owners.insert(hir_id.owner.def_id);
+    }
+    *GHOST_OWNERS.write().unwrap() = Some(ghost_owners);
 
     let verus_erasure_ctxt = VerusErasureCtxt {
         locals,

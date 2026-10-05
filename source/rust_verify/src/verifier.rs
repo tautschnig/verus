@@ -3904,7 +3904,20 @@ impl VerifierCallbacksEraseMacro {
                         external_body: false,
                         external_fn_specification: false,
                     }) => {
-                        tcx.ensure_ok().mir_borrowck(def_id);
+                        // The unerased proxy of a `static`/`const` is a function, so its body
+                        // is borrow-checked without the constant-promotion rules of the item
+                        // (`static S: T = T::new(&[f()])` promotes `&[f()]` to 'static; the
+                        // proxy function cannot). When erasure changes nothing in the proxy,
+                        // it is the item's initializer verbatim, and the erased build
+                        // borrow-checks the item itself, with the right rules.
+                        let is_const_proxy = crate::attributes::get_verifier_attrs_no_check(
+                            tcx.hir_attrs(tcx.local_def_id_to_hir_id(def_id)),
+                            None,
+                        )
+                        .map_or(false, |a| a.unerased_proxy && (a.encoded_static || a.encoded_const));
+                        if !(is_const_proxy && !crate::erase::body_has_ghost_code(def_id)) {
+                            tcx.ensure_ok().mir_borrowck(def_id);
+                        }
                     }
                     Some(VerifOrExternal::VerusAware { .. })
                     | Some(VerifOrExternal::External { .. })

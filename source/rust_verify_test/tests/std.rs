@@ -3313,3 +3313,17 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] static_with_promoted_borrow verus_code! {
+        use vstd::prelude::*;
+        pub struct Column { name: &'static str, ty: u8 }
+        impl Column { pub const fn req(name: &'static str, ty: u8) -> Self { Column { name, ty } } }
+        pub struct TableSpec { name: &'static str, columns: &'static [Column] }
+        impl TableSpec {
+            pub const fn new(name: &'static str, columns: &'static [Column]) -> Self { TableSpec { name, columns } }
+        }
+        static BOOK: TableSpec = TableSpec::new("book", &[Column::req("symbol", 0), Column::req("seq", 1)]);
+        const C: TableSpec = TableSpec::new("c", &[Column::req("x", 0)]);
+    } => Ok(())
+}
