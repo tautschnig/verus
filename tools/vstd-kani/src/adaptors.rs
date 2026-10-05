@@ -1471,3 +1471,25 @@ fn s27_specs_hold() {
     assert!(v.len() <= 3 && v.len() > 0 && v[0] == a[0]);
     assert!(core::num::NonZeroU64::MIN.get() == 1 && core::num::NonZeroU8::MIN.get() == 1);
 }
+
+/// S28: `Result::as_mut` keeps the variant and writes through to the payload;
+/// `Duration::subsec_nanos` is the total nanoseconds mod 10^9 (stated on (secs, nanos));
+/// `Duration::MAX` is (u64::MAX, 10^9 - 1).
+#[cfg(kani)]
+#[kani::proof]
+fn s28_specs_hold() {
+    let ok: bool = kani::any();
+    let v: u8 = kani::any();
+    let w: u8 = kani::any();
+    let mut r: Result<u8, u8> = if ok { Ok(v) } else { Err(v) };
+    match r.as_mut() {
+        Ok(x) => { assert!(ok && *x == v); *x = w; }
+        Err(e) => { assert!(!ok && *e == v); *e = w; }
+    }
+    assert!(r == if ok { Ok(w) } else { Err(w) });
+    let (secs, nanos): (u64, u32) = (kani::any(), kani::any());
+    kani::assume(nanos < 1_000_000_000);
+    let d = core::time::Duration::new(secs, nanos);
+    assert!(d.subsec_nanos() == nanos);
+    assert!(core::time::Duration::MAX.as_secs() == u64::MAX && core::time::Duration::MAX.subsec_nanos() == 999_999_999);
+}

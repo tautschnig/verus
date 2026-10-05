@@ -70,6 +70,18 @@ pub assume_specification[ Duration::saturating_sub ](a: Duration, b: Duration) -
         },
 ;
 
+/// The nanosecond part.
+pub assume_specification[ Duration::subsec_nanos ](d: &Duration) -> (r: u32)
+    ensures
+        r as nat == duration_nanos(*d) % 1_000_000_000,
+;
+
+/// The largest duration.
+pub assume_specification[ Duration::MAX ] -> (r: Duration)
+    ensures
+        duration_nanos(r) == duration_max_nanos(),
+;
+
 pub assume_specification[ Duration::saturating_mul ](d: Duration, n: u32) -> (r: Duration)
     ensures
         duration_nanos(r) == if duration_nanos(d) * (n as nat) <= duration_max_nanos() {

@@ -3517,3 +3517,36 @@ test_verify_one_file! {
         pub trait W { fn send<T: Clone + Sync>(&mut self, t: &T) -> impl core::future::Future<Output = u8> + Send; }
     } => Err(err) => assert_vir_error_msg(err, "in a trait method with type parameters")
 }
+
+test_verify_one_file! {
+    #[test] s28_std_specs verus_code! {
+        use vstd::prelude::*;
+        use vstd::std_specs::time::*;
+        use std::time::Duration;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        fn res(r: &mut Result<u8, u8>) requires *old(r) == Ok::<u8, u8>(1) ensures *final(r) == Ok::<u8, u8>(2) {
+            if let Ok(x) = r.as_mut() { *x = 2; }
+        }
+        fn dur(d: Duration) -> (n: u32) ensures n < 1_000_000_000 {
+            d.subsec_nanos()
+        }
+        fn max_is_max(d: Duration) {
+            let m = Duration::MAX;
+            assert(duration_nanos(d) <= duration_nanos(m));
+        }
+        fn files(p: &std::path::Path) -> std::io::Result<()> {
+            let f = std::fs::OpenOptions::new().write(true).mode(0o600).open(p)?;
+            f.sync_all()?;
+            let _ = p.file_stem();
+            let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o600));
+            Ok(())
+        }
+        fn strs(s: &str) -> Option<(usize, char)> {
+            s.char_indices().nth(3)
+        }
+        fn wrong(r: &mut Result<u8, u8>) requires *old(r) == Err::<u8, u8>(1) {
+            if let Ok(x) = r.as_mut() { *x = 2; }
+            assert(*r == Ok::<u8, u8>(2)); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}

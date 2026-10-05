@@ -263,4 +263,67 @@ pub assume_specification[ <std::io::Stdin as std::io::IsTerminal>::is_terminal ]
 #[verifier::reject_recursive_types(B)]
 pub struct ExIoLines<B>(std::io::Lines<B>);
 
+// ---- S28: more fs/io/path (content-free)
+
+pub assume_specification[ std::fs::File::sync_all ](f: &std::fs::File) -> std::io::Result<()>;
+
+pub assume_specification[ std::fs::DirEntry::file_name ](d: &std::fs::DirEntry) -> OsString;
+
+pub assume_specification[ std::io::Error::last_os_error ]() -> std::io::Error;
+
+pub assume_specification[ Path::file_stem ](p: &Path) -> Option<&OsStr>;
+
+pub assume_specification[ Path::file_name ](p: &Path) -> Option<&OsStr>;
+
+pub assume_specification[ std::env::consts::ARCH ] -> &'static str;
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExPermissions(std::fs::Permissions);
+
+#[verifier::external_trait_specification]
+pub trait ExOpenOptionsExt {
+    type ExternalTraitSpecificationFor: std::os::unix::fs::OpenOptionsExt;
+
+    fn mode(&mut self, mode: u32) -> &mut Self;
+}
+
+#[verifier::external_trait_specification]
+pub trait ExPermissionsExt {
+    type ExternalTraitSpecificationFor: std::os::unix::fs::PermissionsExt;
+
+    fn from_mode(mode: u32) -> Self where Self: Sized;
+}
+
+pub assume_specification<P: AsRef<Path>>[ std::fs::set_permissions::<P> ](p: P, perm: std::fs::Permissions) -> std::io::Result<()>;
+
+#[verifier::external_trait_specification]
+pub trait ExSeek {
+    type ExternalTraitSpecificationFor: std::io::Seek;
+
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64>;
+}
+
+#[verifier::external_type_specification]
+pub struct ExSeekFrom(std::io::SeekFrom);
+
+#[verifier::external_trait_specification]
+pub trait ExBufRead: std::io::Read {
+    type ExternalTraitSpecificationFor: std::io::BufRead;
+
+    fn lines(self) -> std::io::Lines<Self> where Self: Sized;
+}
+
+#[verifier::external_trait_specification]
+#[verifier::allow(undeclared_external_trait)]
+pub trait ExRead {
+    type ExternalTraitSpecificationFor: std::io::Read;
+}
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+#[verifier::reject_recursive_types(T)]
+#[verifier::reject_recursive_types(A)]
+pub struct ExHashSetIntoIter<T, A: core::alloc::Allocator>(std::collections::hash_set::IntoIter<T, A>);
+
 } // verus!

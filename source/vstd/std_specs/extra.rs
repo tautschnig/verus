@@ -362,4 +362,50 @@ pub assume_specification<'a, P: core::str::pattern::Pattern>[ str::trim_end_matc
 pub assume_specification<'a, P: core::str::pattern::Pattern>[ str::ends_with::<P> ](s: &'a str, pat: P) -> bool
     where for<'b> P::Searcher<'b>: core::str::pattern::ReverseSearcher<'b>;
 
+// ------------------------------------------------------------------ S28
+
+/// `RangeInclusive::end` is the end bound.
+pub assume_specification<Idx>[ core::ops::RangeInclusive::<Idx>::end ](r: &core::ops::RangeInclusive<Idx>) -> &Idx;
+
+/// `Result::as_mut`: the same variant, borrowing its payload.
+pub assume_specification<T, E>[ Result::<T, E>::as_mut ](r: &mut Result<T, E>) -> (o: Result<&mut T, &mut E>)
+    ensures
+        *old(r) is Ok <==> o is Ok,
+        o is Ok ==> *o->Ok_0 == old(r)->Ok_0 && *final(r) == Ok::<T, E>(*final(o->Ok_0)),
+        o is Err ==> *o->Err_0 == old(r)->Err_0 && *final(r) == Err::<T, E>(*final(o->Err_0)),
+;
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExCharIndices<'a>(core::str::CharIndices<'a>);
+
+impl<'a> super::iter::IteratorSpecImpl for core::str::CharIndices<'a> {
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool { false }
+    uninterp spec fn remaining(&self) -> Seq<(usize, char)>;
+    uninterp spec fn will_return_none(&self) -> bool;
+    uninterp spec fn decrease(&self) -> Option<nat>;
+    open spec fn peek(&self, index: int) -> Option<(usize, char)> { None }
+}
+
+pub assume_specification<'a>[ str::char_indices ](s: &'a str) -> core::str::CharIndices<'a>;
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+#[verifier::accept_recursive_types(A)]
+pub struct ExOptionIter<'a, A>(core::option::Iter<'a, A>);
+
+impl<'a, A> super::iter::IteratorSpecImpl for core::option::Iter<'a, A> {
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool { false }
+    uninterp spec fn remaining(&self) -> Seq<&'a A>;
+    uninterp spec fn will_return_none(&self) -> bool;
+    uninterp spec fn decrease(&self) -> Option<nat>;
+    open spec fn peek(&self, index: int) -> Option<&'a A> { None }
+}
+
+pub assume_specification<'a, T>[ Option::<T>::iter ](o: &'a Option<T>) -> core::option::Iter<'a, T>;
+
+/// `Box<dyn Error + Send + Sync>::downcast`: content-free (whether the dynamic type is `T`
+/// is not modelled).
+pub assume_specification<T: core::error::Error + 'static>[ <dyn core::error::Error + Send + Sync>::downcast::<T> ](b: alloc::boxed::Box<dyn core::error::Error + Send + Sync>) -> Result<alloc::boxed::Box<T>, alloc::boxed::Box<dyn core::error::Error + Send + Sync>>;
+
 } // verus!
