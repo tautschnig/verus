@@ -1063,3 +1063,34 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_rust_error_msg(err, "overflow evaluating the requirement")
 }
+
+test_verify_one_file! {
+    // calls of external-trait methods on an impl without its own specification use the trait
+    // method's specification (the impl is trusted to satisfy it, as through a generic); for
+    // impls in other crates this is restricted to spec-free trait methods (spec-crates test
+    // tests_pass/future_poll.rs: tokio's oneshot Receiver::poll)
+    #[test] spec_free_external_trait_method_resolved_to_unspecified_impl verus_code! {
+        use vstd::prelude::*;
+        #[verifier::external]
+        pub trait Tr { fn go(&self) -> u8; fn sp(&self) -> u8; }
+        #[verifier::external]
+        pub struct S;
+        #[verifier::external]
+        impl Tr for S { fn go(&self) -> u8 { 1 } fn sp(&self) -> u8 { 2 } }
+        #[verifier::external_type_specification]
+        #[verifier::external_body]
+        pub struct ExS(S);
+        #[verifier::external_trait_specification]
+        pub trait ExTr {
+            type ExternalTraitSpecificationFor: Tr;
+            fn go(&self) -> u8;
+            fn sp(&self) -> (r: u8) ensures r == 2;
+        }
+        fn f(s: &S) -> u8 {
+            s.go()
+        }
+        fn g(s: &S) -> (r: u8) ensures r == 2 {
+            s.sp()
+        }
+    } => Ok(())
+}

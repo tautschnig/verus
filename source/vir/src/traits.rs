@@ -26,6 +26,7 @@ fn demote_one_expr(
     traits: &HashSet<Path>,
     internal_traits: &HashSet<Path>,
     declared_external: &HashSet<Fun>,
+    spec_free_trait_methods: &HashSet<Fun>,
     extension_traits: &HashSet<Path>,
     impl_to_spec_traits: &HashMap<Path, Path>,
     funs: &HashSet<Fun>,
@@ -52,7 +53,7 @@ fn demote_one_expr(
             args,
             post_args,
             body,
-        } if internal_traits.contains(&get_trait(fun))
+        } if (internal_traits.contains(&get_trait(fun)) || spec_free_trait_methods.contains(fun))
             && funs.contains(fun)
             && !funs.contains(resolved_fun)
             && !declared_external.contains(resolved_fun) =>
@@ -245,6 +246,24 @@ pub fn demote_external_traits(
     let funs: HashSet<Fun> = krate.functions.iter().map(|f| f.x.name.clone()).collect();
     // (functions the user marked external: calls to them stay errors)
     let declared_external: HashSet<Fun> = krate.external_fns.iter().cloned().collect();
+    // Methods of external trait specifications that are declared without any specification
+    // (no requires, no ensures; `Future::poll`, `Iterator::try_fold`, ...): a call that
+    // resolves to an impl method without its own specification may use the trait method
+    // instead. The trait method promises nothing, so this assumes nothing beyond what a
+    // generic call already does.
+    let spec_free_trait_methods: HashSet<Fun> = krate
+        .functions
+        .iter()
+        .filter(|f| {
+            matches!(&f.x.kind, FunctionKind::TraitMethodDecl { .. })
+                && f.x.require.is_empty()
+                && f.x.ensure.0.is_empty()
+                && f.x.ensure.1.is_empty()
+                && f.x.returns.is_none()
+                && f.x.mode == crate::ast::Mode::Exec
+        })
+        .map(|f| f.x.name.clone())
+        .collect();
     let mut extension_traits: HashSet<Path> = HashSet::new();
     let mut impl_to_spec_traits: HashMap<Path, Path> = HashMap::new();
     for t in krate.traits.iter() {
@@ -331,6 +350,7 @@ pub fn demote_external_traits(
                     &traits,
                     &internal_traits,
                     &declared_external,
+                    &spec_free_trait_methods,
                     &extension_traits,
                     &impl_to_spec_traits,
                     &funs,
@@ -341,7 +361,8 @@ pub fn demote_external_traits(
             &|_state, typ| match &**typ {
                 // (see the first case of demote_one_expr)
                 TypX::FnDef(fun, typs, Some(res_fun))
-                    if internal_traits.contains(&get_trait(fun))
+                    if (internal_traits.contains(&get_trait(fun))
+                        || spec_free_trait_methods.contains(fun))
                         && funs.contains(fun)
                         && !funs.contains(res_fun)
                         && !declared_external.contains(res_fun) =>
