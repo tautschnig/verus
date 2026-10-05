@@ -3258,3 +3258,42 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] error_source verus_code! {
+        use vstd::prelude::*;
+        #[derive(Debug)]
+        pub struct E { inner: std::io::Error }
+        impl std::fmt::Display for E {
+            #[verifier::external_body]
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { Ok(()) }
+        }
+        impl std::error::Error for E {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> { Some(&self.inner) }
+        }
+        fn dyn_chain(e: &dyn std::error::Error) -> usize {
+            match e.source() { Some(_) => 1, None => 0 }
+        }
+        fn content_free(e: &E) {
+            let s = std::error::Error::source(e);
+            assert(s is Some); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    #[test] error_source_impl_cannot_extend verus_code! {
+        use vstd::prelude::*;
+        #[derive(Debug)]
+        pub struct E;
+        impl std::fmt::Display for E {
+            #[verifier::external_body]
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { Ok(()) }
+        }
+        impl std::error::Error for E {
+            fn source(&self) -> (r: Option<&(dyn std::error::Error + 'static)>)
+                ensures r is None
+            { None }
+        }
+    } => Err(err) => assert_vir_error_msg(err, "impls_cannot_extend_spec")
+}

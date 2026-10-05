@@ -214,11 +214,17 @@ pub assume_specification[ char::from_u32 ](i: u32) -> (c: Option<char>)
         c is Some ==> c.unwrap() as u32 == i,
 ;
 
-// `core::error::Error`: declared so it can be used in bounds and as `dyn Error`; its
-// methods (`source`, `description`, `cause`) have no specifications.
+// `core::error::Error`: declared so it can be used in bounds and as `dyn Error`.
+// `source` returns `dyn Error`, so its signature depends on the trait itself; the
+// `impls_cannot_extend_spec` mode drops the trait --> method edge (sound for exec methods
+// whose impls cannot add ensures), which removes the cycle. `source` has no specification;
+// `description` and `cause` (deprecated) are not declared.
 #[verifier::external_trait_specification]
 pub trait ExError: core::fmt::Debug + core::fmt::Display {
     type ExternalTraitSpecificationFor: core::error::Error;
+
+    #[verifier::impls_cannot_extend_spec]
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)>;
 }
 
 pub assume_specification<T>[ bool::then_some::<T> ](b: bool, t: T) -> (r: Option<T>)
