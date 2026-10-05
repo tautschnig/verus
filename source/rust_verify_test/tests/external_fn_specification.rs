@@ -1644,6 +1644,32 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
+    #[test] const_in_generic_impl verus_code! {
+        #[verifier::external]
+        pub struct S<T>(T);
+        #[verifier::external]
+        impl<T> S<T> {
+            pub const C: u8 = 7;
+        }
+        #[verifier::external_type_specification]
+        #[verifier::external_body]
+        #[verifier::reject_recursive_types(T)]
+        pub struct ExS<T>(S<T>);
+
+        pub assume_specification<T>[ S::<T>::C ] -> (c: u8) ensures c == 7;
+
+        fn test() {
+            let x = S::<u64>::C;
+            assert(x == 7);
+        }
+        fn test2() {
+            let x = S::<bool>::C;
+            assert(x == 8); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
     #[test] const_in_generic_impl_rejected verus_code! {
         #[verifier::external]
         pub struct S<T>(T);
@@ -1657,5 +1683,5 @@ test_verify_one_file! {
         pub struct ExS<T>(S<T>);
 
         pub assume_specification[ S::<u8>::C ] -> (c: u8) ensures c == 7;
-    } => Err(err) => assert_vir_error_msg(err, "external specification for a constant declared in a generic impl")
+    } => Err(err) => assert_vir_error_msg(err, "must declare the same generic parameters as the impl")
 }

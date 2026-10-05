@@ -1027,22 +1027,38 @@ fn handle_external_fn<'tcx>(
     if is_const {
         let substs1_early = get_substs_early(ty1, sig.span)?;
         let poly_sig1 = ctxt.tcx.fn_sig(id);
-        let poly_sig1x = poly_sig1.instantiate(ctxt.tcx, substs1_early);
-        if substs1_early.len() + poly_sig1.skip_binder().bound_vars().len() != 0 {
+        let n_external = ctxt.tcx.generics_of(external_id).count();
+        if poly_sig1.skip_binder().bound_vars().len() != 0 {
             return err_span(
                 sig.span,
                 "generics are not allowed in external specification for const",
             );
         }
-        // A constant declared in a generic impl (`impl<T> S<T> { const C: .. }`) is lowered
-        // at its uses to a call with the impl's type arguments, which a parameterless
-        // specification cannot accept (the generated AIR would be ill-typed).
-        if ctxt.tcx.generics_of(external_id).count() > 0 {
+        // A constant declared in a generic impl (`impl<Tz: TimeZone> DateTime<Tz> { const
+        // MAX_UTC: .. }`) is lowered at its uses to a call with the impl's generic arguments.
+        // Its specification must declare the same generics, in the same order
+        // (`assume_specification<Tz: TimeZone>[ DateTime::<Tz>::MAX_UTC ] -> ..`); its
+        // generics are matched to the impl's by position.
+        if substs1_early.len() != n_external {
             return err_span(
                 sig.span,
-                "external specification for a constant declared in a generic impl or trait is not supported",
+                if n_external == 0 {
+                    "generics are not allowed in external specification for const"
+                } else {
+                    "external specification for a constant declared in a generic impl or trait must declare the same generic parameters as the impl, in the same order"
+                },
             );
         }
+        let substs_ext = rustc_middle::ty::GenericArgs::identity_for_item(ctxt.tcx, external_id);
+        if substs1_early.iter().zip(substs_ext.iter()).any(|(a, b)| {
+            std::mem::discriminant(&a.kind()) != std::mem::discriminant(&b.kind())
+        }) {
+            return err_span(
+                sig.span,
+                "external specification for a constant: generic parameters do not match the impl's",
+            );
+        }
+        let poly_sig1x = poly_sig1.instantiate(ctxt.tcx, substs_ext);
         let sig1 = poly_sig1x.skip_binder();
         use rustc_middle::ty::FnSig;
         let FnSig { inputs_and_output: io1, fn_sig_kind: _ } = &sig1;
