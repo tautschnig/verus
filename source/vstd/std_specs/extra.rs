@@ -172,8 +172,6 @@ pub assume_specification<'a, P: core::str::pattern::Pattern>[ str::trim_start_ma
 
 pub assume_specification<'a, P: core::str::pattern::Pattern>[ str::replace::<P> ](s: &'a str, from: P, to: &str) -> alloc::string::String;
 
-// `rfind`, `trim_end_matches` and `Split` are not specified: their types mention
-// `Pattern::Searcher<'a>` (a generic associated type), which Verus does not support.
 
 #[verifier::external_trait_specification]
 pub trait ExToString {
@@ -278,5 +276,90 @@ impl<A> super::iter::IteratorSpecImpl for core::option::IntoIter<A> {
 
 /// Float to `Duration`: content-free, like float arithmetic.
 pub assume_specification[ core::time::Duration::try_from_secs_f64 ](secs: f64) -> Result<core::time::Duration, core::time::TryFromFloatSecsError>;
+
+// ------------------------------------------------------------------ str::Pattern (W7)
+
+#[verifier::external_trait_specification]
+pub trait ExPattern: Sized {
+    type ExternalTraitSpecificationFor: core::str::pattern::Pattern;
+
+    type Searcher<'a>: core::str::pattern::Searcher<'a>;
+}
+
+#[verifier::external_trait_specification]
+pub trait ExSearcher<'a> {
+    type ExternalTraitSpecificationFor: core::str::pattern::Searcher<'a>;
+}
+
+#[verifier::external_trait_specification]
+pub trait ExReverseSearcher<'a>: core::str::pattern::Searcher<'a> {
+    type ExternalTraitSpecificationFor: core::str::pattern::ReverseSearcher<'a>;
+}
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExStrSearcher<'a, 'b>(core::str::pattern::StrSearcher<'a, 'b>);
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExCharSearcher<'a>(core::str::pattern::CharSearcher<'a>);
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExCharSliceSearcher<'a, 'b>(core::str::pattern::CharSliceSearcher<'a, 'b>);
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExCharArraySearcher<'a, const N: usize>(core::str::pattern::CharArraySearcher<'a, N>);
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExCharArrayRefSearcher<'a, 'b, const N: usize>(core::str::pattern::CharArrayRefSearcher<'a, 'b, N>);
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+#[verifier::reject_recursive_types(F)]
+pub struct ExCharPredicateSearcher<'a, F: FnMut(char) -> bool>(core::str::pattern::CharPredicateSearcher<'a, F>);
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+#[verifier::reject_recursive_types(P)]
+pub struct ExSplit<'a, P: core::str::pattern::Pattern>(core::str::Split<'a, P>);
+
+pub assume_specification<'a, P: core::str::pattern::Pattern>[ str::split::<P> ](s: &'a str, pat: P) -> core::str::Split<'a, P>;
+
+/// `Split` and `SplitWhitespace` do not obey the prophetic laws here (their items are not
+/// modelled).
+impl<'a, P: core::str::pattern::Pattern> super::iter::IteratorSpecImpl for core::str::Split<'a, P> {
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool { false }
+    uninterp spec fn remaining(&self) -> Seq<&'a str>;
+    uninterp spec fn will_return_none(&self) -> bool;
+    uninterp spec fn decrease(&self) -> Option<nat>;
+    open spec fn peek(&self, index: int) -> Option<&'a str> { None }
+}
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExSplitWhitespace<'a>(core::str::SplitWhitespace<'a>);
+
+impl<'a> super::iter::IteratorSpecImpl for core::str::SplitWhitespace<'a> {
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool { false }
+    uninterp spec fn remaining(&self) -> Seq<&'a str>;
+    uninterp spec fn will_return_none(&self) -> bool;
+    uninterp spec fn decrease(&self) -> Option<nat>;
+    open spec fn peek(&self, index: int) -> Option<&'a str> { None }
+}
+
+pub assume_specification<'a>[ str::split_whitespace ](s: &'a str) -> core::str::SplitWhitespace<'a>;
+
+/// Searches from the end: content-free.
+pub assume_specification<'a, P: core::str::pattern::Pattern>[ str::rfind::<P> ](s: &'a str, pat: P) -> Option<usize>
+    where for<'b> P::Searcher<'b>: core::str::pattern::ReverseSearcher<'b>;
+
+pub assume_specification<'a, P: core::str::pattern::Pattern>[ str::trim_end_matches::<P> ](s: &'a str, pat: P) -> &'a str
+    where for<'b> P::Searcher<'b>: core::str::pattern::ReverseSearcher<'b>;
+
+pub assume_specification<'a, P: core::str::pattern::Pattern>[ str::ends_with::<P> ](s: &'a str, pat: P) -> bool
+    where for<'b> P::Searcher<'b>: core::str::pattern::ReverseSearcher<'b>;
 
 } // verus!

@@ -440,13 +440,21 @@ pub(crate) fn translate_trait<'tcx>(
                     let ex_item_id_for = ex_item_id_for.expect("ex_item_id_for");
                     let external_predicates = tcx.item_bounds(ex_item_id_for);
                     let proxy_predicates = tcx.item_bounds(owner_id.to_def_id());
-                    let external_instantiated =
-                        external_predicates.instantiate(tcx, ex_trait_ref_for.args);
+                    // A generic associated type (lifetime parameters only; `type Searcher<'a>`)
+                    // has its own parameters after the trait's.
+                    let own = rustc_middle::ty::GenericArgs::identity_for_item(
+                        tcx,
+                        owner_id.to_def_id(),
+                    );
+                    let parent_count = tcx.generics_of(owner_id.to_def_id()).parent_count;
+                    let item_args = tcx.mk_args_from_iter(
+                        ex_trait_ref_for.args.iter().chain(own.iter().skip(parent_count)),
+                    );
+                    let external_instantiated = external_predicates.instantiate(tcx, item_args);
                     let preds1 = tcx
                         .try_normalize_erasing_regions(typing_env, external_instantiated)
                         .unwrap_or_else(|_| external_instantiated.skip_norm_wip());
-                    let proxy_instantiated =
-                        proxy_predicates.instantiate(tcx, ex_trait_ref_for.args);
+                    let proxy_instantiated = proxy_predicates.instantiate(tcx, item_args);
                     let preds2 = tcx
                         .try_normalize_erasing_regions(typing_env, proxy_instantiated)
                         .unwrap_or_else(|_| proxy_instantiated.skip_norm_wip());

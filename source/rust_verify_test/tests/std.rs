@@ -3489,3 +3489,24 @@ test_verify_one_file! {
         pub fn d1() { need_send(holds_rc()); }
     } => Err(err) => assert!(err.errors.iter().any(|e| e.message.contains("cannot be sent between threads safely")))
 }
+
+test_verify_one_file! {
+    #[test] str_pattern_gat_specs verus_code! {
+        use vstd::prelude::*;
+        fn f(s: &str) -> usize {
+            let mut it = s.split(',');
+            let first = it.next();
+            let mut ws = s.split_whitespace();
+            let _ = ws.nth(1);
+            let _ = s.rfind('.');
+            let _ = s.trim_end_matches('/');
+            let parts: Vec<&str> = s.split(':').collect();
+            if s.ends_with(".json") { 1 } else { 0 }
+        }
+        fn unknown(s: &str) {
+            let mut it = s.split(',');
+            let first = it.next();
+            assert(first is Some); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
