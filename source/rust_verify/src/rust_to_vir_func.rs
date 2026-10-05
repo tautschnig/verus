@@ -1034,6 +1034,15 @@ fn handle_external_fn<'tcx>(
                 "generics are not allowed in external specification for const",
             );
         }
+        // A constant declared in a generic impl (`impl<T> S<T> { const C: .. }`) is lowered
+        // at its uses to a call with the impl's type arguments, which a parameterless
+        // specification cannot accept (the generated AIR would be ill-typed).
+        if ctxt.tcx.generics_of(external_id).count() > 0 {
+            return err_span(
+                sig.span,
+                "external specification for a constant declared in a generic impl or trait is not supported",
+            );
+        }
         let sig1 = poly_sig1x.skip_binder();
         use rustc_middle::ty::FnSig;
         let FnSig { inputs_and_output: io1, fn_sig_kind: _ } = &sig1;

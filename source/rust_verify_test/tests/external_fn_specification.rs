@@ -1642,3 +1642,20 @@ test_verify_one_file! {
         }
     } => Ok(())
 }
+
+test_verify_one_file! {
+    #[test] const_in_generic_impl_rejected verus_code! {
+        #[verifier::external]
+        pub struct S<T>(T);
+        #[verifier::external]
+        impl<T> S<T> {
+            pub const C: u8 = 7;
+        }
+        #[verifier::external_type_specification]
+        #[verifier::external_body]
+        #[verifier::reject_recursive_types(T)]
+        pub struct ExS<T>(S<T>);
+
+        pub assume_specification[ S::<u8>::C ] -> (c: u8) ensures c == 7;
+    } => Err(err) => assert_vir_error_msg(err, "external specification for a constant declared in a generic impl")
+}
