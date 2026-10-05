@@ -123,6 +123,19 @@ pub assume_specification<T: Ord>[ <[T]>::binary_search ](s: &[T], x: &T) -> (r: 
         },
 ;
 
+// ------------------------------------------------------------------ slices: join
+
+/// `[S]::join(sep)` (`Vec<String>`/`[&str]` with a `&str` separator in kraken-cli): content-free.
+#[verifier::external_trait_specification]
+pub trait ExJoin<Separator> {
+    type ExternalTraitSpecificationFor: alloc::slice::Join<Separator>;
+
+    type Output;
+}
+
+pub assume_specification<T, Separator>[ <[T]>::join::<Separator> ](s: &[T], sep: Separator) -> <[T] as alloc::slice::Join<Separator>>::Output
+    where [T]: alloc::slice::Join<Separator>;
+
 // ------------------------------------------------------------------ VecDeque
 
 pub assume_specification<T, A: core::alloc::Allocator>[ alloc::collections::VecDeque::<T, A>::front ](d: &alloc::collections::VecDeque<T, A>) -> (r: Option<&T>)

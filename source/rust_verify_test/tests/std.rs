@@ -3297,3 +3297,19 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_vir_error_msg(err, "impls_cannot_extend_spec")
 }
+
+test_verify_one_file! {
+    #[test] slice_join_content_free verus_code! {
+        use vstd::prelude::*;
+        fn j(v: &Vec<String>) -> String {
+            v.join(",")
+        }
+        fn j2(v: &[&str]) -> String {
+            v.join(", ")
+        }
+        fn unknown(v: &Vec<String>) {
+            let s = v.join(",");
+            assert(s@.len() == 0); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
