@@ -466,6 +466,24 @@ pub trait ExIterator {
             forall |k| #![auto] 0 <= k < self.remaining().len() ==> call_requires(f, (self.remaining()[k], )),
     ;
 
+    /// `nth`: content-free (the iterator state afterwards is unknown).
+    fn nth(&mut self, n: usize) -> Option<Self::Item>;
+
+    /// `partition`: the predicate must be callable on every item; the halves are not modelled.
+    fn partition<B, F>(self, f: F) -> (B, B)
+        where Self: Sized,
+            B: Default + core::iter::Extend<Self::Item>,
+            F: FnMut(&Self::Item) -> bool,
+        requires
+            forall |k| #![auto] 0 <= k < self.remaining().len() ==> call_requires(f, (&self.remaining()[k], )),
+    ;
+
+    /// `flatten` gives an opaque `Flatten`. Its bound mentions `IntoIterator`, whose
+    /// `IntoIter` is an `Iterator`; `impls_cannot_extend_spec` breaks that cycle.
+    #[verifier::impls_cannot_extend_spec]
+    fn flatten(self) -> core::iter::Flatten<Self>
+        where Self: Sized + Iterator, <Self as Iterator>::Item: IntoIterator;
+
     fn rev(self) -> (r: Rev<Self>)
         where Self: Sized,
         ensures
@@ -1151,6 +1169,12 @@ impl <'a, I, T: 'a> IteratorSpecImpl for Cloned<I>
 #[verifier::external_type_specification]
 #[verifier::reject_recursive_types(I)]
 pub struct ExPeekable<I: Iterator>(Peekable<I>);
+
+/// `Flatten` is opaque (no prophetic laws).
+#[verifier::external_type_specification]
+#[verifier::external_body]
+#[verifier::reject_recursive_types(I)]
+pub struct ExFlatten<I: Iterator>(core::iter::Flatten<I>) where I::Item: IntoIterator;
 
 pub uninterp spec fn peekable_post<I: Iterator>(i: I, r: Peekable<I>) -> bool;
 

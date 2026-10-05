@@ -1449,3 +1449,25 @@ fn once_and_max_by_key_hold() {
     let m = *a.iter().max_by_key(|x| **x ^ k).unwrap();
     assert!(a.contains(&m));
 }
+
+/// S27: `String::from(&str)` copies the characters; `slice::from_ref(x)` is `[*x]`;
+/// `Vec::dedup` does not grow the vector and keeps a non-empty one non-empty;
+/// `NonZero::<u64>::MIN` is 1.
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(5)]
+fn s27_specs_hold() {
+    let c: char = kani::any();
+    let mut buf = [0u8; 4];
+    let s: &str = c.encode_utf8(&mut buf);
+    let t = String::from(s);
+    assert!(t.len() == s.len() && t.chars().next() == Some(c));
+    let x: u8 = kani::any();
+    let r = core::slice::from_ref(&x);
+    assert!(r.len() == 1 && r[0] == x);
+    let a: [u8; 3] = kani::any();
+    let mut v = a.to_vec();
+    v.dedup();
+    assert!(v.len() <= 3 && v.len() > 0 && v[0] == a[0]);
+    assert!(core::num::NonZeroU64::MIN.get() == 1 && core::num::NonZeroU8::MIN.get() == 1);
+}

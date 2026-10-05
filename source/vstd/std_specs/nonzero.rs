@@ -200,4 +200,18 @@ nonzero_bit_specs!(u16, u16_trailing_zeros, u16_leading_zeros);
 nonzero_bit_specs!(u32, u32_trailing_zeros, u32_leading_zeros);
 nonzero_bit_specs!(u64, u64_trailing_zeros, u64_leading_zeros);
 
+// `NonZero::<uN>::MIN` is 1 (declared per integer type, so not in a generic impl).
+macro_rules! nonzero_min {
+    ($($t:ty),*) => {
+        $crate::vstd::prelude::verus! {
+            $(
+            pub assume_specification[ core::num::NonZero::<$t>::MIN ] -> (r: core::num::NonZero<$t>)
+                ensures r@ == 1;
+            )*
+        }
+    };
+}
+
+nonzero_min!(u8, u16, u32, u64, u128, usize);
+
 } // verus!

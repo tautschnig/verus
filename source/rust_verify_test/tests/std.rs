@@ -3385,3 +3385,36 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] s27_std_specs verus_code! {
+        use vstd::prelude::*;
+        use std::num::NonZeroU64;
+        fn strings(s: &str) -> (r: String) ensures r@ == s@ {
+            String::from(s)
+        }
+        fn one(x: &u8) -> (r: usize) ensures r == 1 {
+            let s = core::slice::from_ref(x);
+            s.len()
+        }
+        fn dd(v: &mut Vec<u8>) requires old(v)@.len() == 3 ensures final(v)@.len() <= 3, final(v)@.len() > 0 {
+            v.dedup();
+        }
+        fn nz() -> (r: NonZeroU64) ensures r@ == 1 {
+            NonZeroU64::MIN
+        }
+        fn io(e: &std::io::Error) -> bool {
+            matches!(e.kind(), std::io::ErrorKind::NotFound) || e.raw_os_error().is_some()
+        }
+        fn files(p: &std::path::Path) -> std::io::Result<u64> {
+            let f = std::fs::OpenOptions::new().read(true).open(p)?;
+            let m = f.metadata()?;
+            let _ = std::fs::read_dir(p)?;
+            Ok(if m.is_dir() { 0 } else { m.len() })
+        }
+        fn dedup_unknown(v: &mut Vec<u8>) requires old(v)@.len() == 2 {
+            v.dedup();
+            assert(v@.len() == 2); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}

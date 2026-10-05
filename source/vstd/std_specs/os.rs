@@ -133,6 +133,10 @@ pub trait ExIoWrite {
     type ExternalTraitSpecificationFor: std::io::Write;
 
     fn flush(&mut self) -> std::io::Result<()>;
+
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()>;
+
+    fn write_fmt(&mut self, args: core::fmt::Arguments<'_>) -> std::io::Result<()>;
 }
 
 pub assume_specification<S: AsRef<OsStr> + ?Sized>[ Path::new::<S> ](s: &S) -> &Path;
@@ -191,5 +195,72 @@ pub assume_specification[ std::time::SystemTime::now ]() -> std::time::SystemTim
 pub assume_specification[ std::time::SystemTime::duration_since ](t: &std::time::SystemTime, earlier: std::time::SystemTime) -> Result<core::time::Duration, std::time::SystemTimeError>;
 
 pub assume_specification<T>[ <std::sync::OnceLock<T> as From<T>>::from ](t: T) -> std::sync::OnceLock<T>;
+
+// ---- S27: io errors, OpenOptions, directories, paths, writes (content-free)
+
+pub assume_specification[ std::io::Error::kind ](e: &std::io::Error) -> std::io::ErrorKind;
+
+pub assume_specification[ std::io::Error::raw_os_error ](e: &std::io::Error) -> Option<i32>;
+
+pub assume_specification<E: Into<Box<dyn core::error::Error + Send + Sync>>>[ std::io::Error::other::<E> ](error: E) -> std::io::Error;
+
+pub assume_specification[ std::fs::File::metadata ](f: &std::fs::File) -> std::io::Result<std::fs::Metadata>;
+
+pub assume_specification<P: AsRef<Path>>[ std::fs::OpenOptions::open::<P> ](o: &std::fs::OpenOptions, p: P) -> std::io::Result<std::fs::File>;
+
+pub assume_specification<'a>[ std::fs::OpenOptions::read ](o: &'a mut std::fs::OpenOptions, b: bool) -> &'a mut std::fs::OpenOptions;
+
+pub assume_specification<'a>[ std::fs::OpenOptions::write ](o: &'a mut std::fs::OpenOptions, b: bool) -> &'a mut std::fs::OpenOptions;
+
+pub assume_specification<'a>[ std::fs::OpenOptions::append ](o: &'a mut std::fs::OpenOptions, b: bool) -> &'a mut std::fs::OpenOptions;
+
+pub assume_specification<'a>[ std::fs::OpenOptions::create ](o: &'a mut std::fs::OpenOptions, b: bool) -> &'a mut std::fs::OpenOptions;
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExFileType(std::fs::FileType);
+
+pub assume_specification<P: AsRef<Path>>[ std::fs::read_dir::<P> ](p: P) -> std::io::Result<std::fs::ReadDir>;
+
+impl super::iter::IteratorSpecImpl for std::fs::ReadDir {
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool { false }
+    uninterp spec fn remaining(&self) -> Seq<std::io::Result<std::fs::DirEntry>>;
+    uninterp spec fn will_return_none(&self) -> bool;
+    uninterp spec fn decrease(&self) -> Option<nat>;
+    open spec fn peek(&self, index: int) -> Option<std::io::Result<std::fs::DirEntry>> { None }
+}
+
+pub assume_specification[ std::fs::DirEntry::path ](d: &std::fs::DirEntry) -> PathBuf;
+
+pub assume_specification[ std::fs::DirEntry::metadata ](d: &std::fs::DirEntry) -> std::io::Result<std::fs::Metadata>;
+
+pub assume_specification[ std::fs::DirEntry::file_type ](d: &std::fs::DirEntry) -> std::io::Result<std::fs::FileType>;
+
+pub assume_specification[ std::fs::Metadata::is_dir ](m: &std::fs::Metadata) -> bool;
+
+pub assume_specification[ std::fs::Metadata::is_file ](m: &std::fs::Metadata) -> bool;
+
+pub assume_specification[ std::fs::Metadata::file_type ](m: &std::fs::Metadata) -> std::fs::FileType;
+
+pub assume_specification[ std::fs::FileType::is_dir ](t: &std::fs::FileType) -> bool;
+
+pub assume_specification[ std::fs::FileType::is_file ](t: &std::fs::FileType) -> bool;
+
+pub assume_specification[ Path::as_os_str ](p: &Path) -> &OsStr;
+
+pub assume_specification[ OsStr::to_string_lossy ](s: &OsStr) -> alloc::borrow::Cow<'_, str>;
+
+pub assume_specification<T: AsRef<OsStr>>[ OsString::push::<T> ](s: &mut OsString, t: T);
+
+pub assume_specification[ std::time::UNIX_EPOCH ] -> std::time::SystemTime;
+
+pub assume_specification[ std::env::consts::OS ] -> &'static str;
+
+pub assume_specification[ <std::io::Stdin as std::io::IsTerminal>::is_terminal ](s: &std::io::Stdin) -> bool;
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+#[verifier::reject_recursive_types(B)]
+pub struct ExIoLines<B>(std::io::Lines<B>);
 
 } // verus!

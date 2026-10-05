@@ -220,12 +220,6 @@ pub assume_specification<T>[ core::iter::once::<T> ](v: T) -> (iter: core::iter:
         super::iter::IteratorSpec::decrease(&iter) is Some,
 ;
 
-/// `Flatten` is opaque (no prophetic laws).
-#[verifier::external_type_specification]
-#[verifier::external_body]
-#[verifier::reject_recursive_types(I)]
-pub struct ExFlatten<I: Iterator>(core::iter::Flatten<I>) where I::Item: IntoIterator;
-
 #[verifier::external_type_specification]
 #[verifier::external_body]
 #[verifier::accept_recursive_types(T)]
@@ -238,5 +232,51 @@ pub struct ExBTreeSetIntoIter<T, A: core::alloc::Allocator + Clone>(alloc::colle
 pub struct ExPending<T>(core::future::Pending<T>);
 
 pub assume_specification<T>[ core::future::pending::<T> ]() -> core::future::Pending<T>;
+
+// ------------------------------------------------------------------ S27
+
+/// `String::from(&str)` copies the characters.
+pub assume_specification<'a, 'b>[ <alloc::string::String as From<&'a str>>::from ](s: &'b str) -> (r: alloc::string::String)
+    ensures
+        r@ == s@,
+;
+
+/// `slice::from_ref(x)` is the one-element slice `[*x]`.
+pub assume_specification<T>[ core::slice::from_ref::<T> ](x: &T) -> (r: &[T])
+    ensures
+        r@ == seq![*x],
+;
+
+/// `RangeInclusive::start` is the start bound.
+pub assume_specification<Idx>[ core::ops::RangeInclusive::<Idx>::start ](r: &core::ops::RangeInclusive<Idx>) -> (s: &Idx);
+
+/// `Vec::dedup` removes consecutive duplicates: the length does not grow (contents not
+/// modelled).
+pub assume_specification<T: PartialEq, A: core::alloc::Allocator>[ alloc::vec::Vec::<T, A>::dedup ](v: &mut alloc::vec::Vec<T, A>)
+    ensures
+        final(v)@.len() <= old(v)@.len(),
+        old(v)@.len() > 0 ==> final(v)@.len() > 0,
+;
+
+/// `cmp::Reverse` is a transparent newtype.
+#[verifier::external_type_specification]
+#[verifier::reject_recursive_types(T)]
+pub struct ExReverse<T>(core::cmp::Reverse<T>);
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+#[verifier::accept_recursive_types(T)]
+pub struct ExOptionIntoIter<T>(core::option::IntoIter<T>);
+
+impl<A> super::iter::IteratorSpecImpl for core::option::IntoIter<A> {
+    open spec fn obeys_prophetic_iter_laws(&self) -> bool { false }
+    uninterp spec fn remaining(&self) -> Seq<A>;
+    uninterp spec fn will_return_none(&self) -> bool;
+    uninterp spec fn decrease(&self) -> Option<nat>;
+    open spec fn peek(&self, index: int) -> Option<A> { None }
+}
+
+/// Float to `Duration`: content-free, like float arithmetic.
+pub assume_specification[ core::time::Duration::try_from_secs_f64 ](secs: f64) -> Result<core::time::Duration, core::time::TryFromFloatSecsError>;
 
 } // verus!
