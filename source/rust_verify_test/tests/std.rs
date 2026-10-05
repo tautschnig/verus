@@ -3217,3 +3217,44 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] io_fs_time_content_free verus_code! {
+        use vstd::prelude::*;
+        use std::io::{IsTerminal, Write};
+        use std::path::Path;
+        fn files(p: &Path) -> std::io::Result<u64> {
+            let _f = std::fs::File::create(p)?;
+            let m = std::fs::metadata(p)?;
+            let mut o = std::fs::OpenOptions::new();
+            o.truncate(true);
+            let _ = std::fs::remove_dir(Path::new("x"));
+            Ok(m.len())
+        }
+        fn terminal() -> bool {
+            let mut out = std::io::stdout();
+            let _ = out.flush();
+            let _l = out.lock();
+            let mut line = String::new();
+            let _ = std::io::stdin().read_line(&mut line);
+            std::io::stderr().is_terminal()
+        }
+        fn errors() -> std::io::Error {
+            std::io::Error::new(std::io::ErrorKind::Other, "x")
+        }
+        fn times() -> std::time::Duration {
+            let t = std::time::Instant::now();
+            let s = std::time::SystemTime::now();
+            let _ = s.duration_since(std::time::SystemTime::now());
+            t.elapsed()
+        }
+        fn rounding(x: f64) -> f64 {
+            x.fract().ceil().round()
+        }
+        fn nothing_known() {
+            let t = std::time::Instant::now();
+            let d = t.elapsed();
+            assert(vstd::std_specs::time::duration_nanos(d) == 0); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}

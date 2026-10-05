@@ -43,8 +43,8 @@ pub struct ExDirEntry(std::fs::DirEntry);
 #[verifier::external_body]
 pub struct ExIoError(std::io::Error);
 
+/// Transparent (a fieldless enum), so `ErrorKind::Other` etc. can be written.
 #[verifier::external_type_specification]
-#[verifier::external_body]
 pub struct ExIoErrorKind(std::io::ErrorKind);
 
 #[verifier::external_type_specification]
@@ -104,5 +104,92 @@ pub assume_specification<K: AsRef<OsStr>>[ std::env::var::<K> ](key: K) -> Resul
 pub assume_specification<K: AsRef<OsStr>>[ std::env::var_os::<K> ](key: K) -> Option<OsString>;
 
 pub assume_specification[ <std::io::Stdout as std::io::IsTerminal>::is_terminal ](s: &std::io::Stdout) -> bool;
+
+
+// ---- S26: further paths, files, terminal, io (content-free)
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExMetadata(std::fs::Metadata);
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExOpenOptions(std::fs::OpenOptions);
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExTryLockError(std::fs::TryLockError);
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExStdin(std::io::Stdin);
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExStderr(std::io::Stderr);
+
+#[verifier::external_trait_specification]
+pub trait ExIoWrite {
+    type ExternalTraitSpecificationFor: std::io::Write;
+
+    fn flush(&mut self) -> std::io::Result<()>;
+}
+
+pub assume_specification<S: AsRef<OsStr> + ?Sized>[ Path::new::<S> ](s: &S) -> &Path;
+
+pub assume_specification<S: AsRef<OsStr> + ?Sized>[ OsStr::new::<S> ](s: &S) -> &OsStr;
+
+pub assume_specification[ <OsStr as alloc::borrow::ToOwned>::to_owned ](s: &OsStr) -> OsString;
+
+pub assume_specification<P: AsRef<Path>>[ std::fs::File::create::<P> ](p: P) -> std::io::Result<std::fs::File>;
+
+pub assume_specification<P: AsRef<Path>>[ std::fs::remove_dir::<P> ](p: P) -> std::io::Result<()>;
+
+pub assume_specification[ std::fs::Metadata::len ](m: &std::fs::Metadata) -> u64;
+
+pub assume_specification<P: AsRef<Path>>[ std::fs::metadata::<P> ](p: P) -> std::io::Result<std::fs::Metadata>;
+
+pub assume_specification[ std::fs::OpenOptions::new ]() -> std::fs::OpenOptions;
+
+pub assume_specification<'a>[ std::fs::OpenOptions::truncate ](o: &'a mut std::fs::OpenOptions, t: bool) -> &'a mut std::fs::OpenOptions;
+
+pub assume_specification[ std::io::stdin ]() -> std::io::Stdin;
+
+pub assume_specification[ std::io::Stdin::read_line ](s: &std::io::Stdin, buf: &mut String) -> std::io::Result<usize>;
+
+pub assume_specification[ std::io::Stdout::lock ](s: &std::io::Stdout) -> std::io::StdoutLock<'static>;
+
+pub assume_specification[ <std::io::Stdout as std::io::Write>::flush ](s: &mut std::io::Stdout) -> std::io::Result<()>;
+
+pub assume_specification[ <std::io::Stderr as std::io::IsTerminal>::is_terminal ](s: &std::io::Stderr) -> bool;
+
+pub assume_specification<'a>[ <std::io::StdoutLock<'a> as std::io::IsTerminal>::is_terminal ](s: &std::io::StdoutLock<'a>) -> bool;
+
+pub assume_specification[ std::io::stderr ]() -> std::io::Stderr;
+
+pub assume_specification<E: Into<Box<dyn core::error::Error + Send + Sync>>>[ std::io::Error::new::<E> ](kind: std::io::ErrorKind, error: E) -> std::io::Error;
+
+// ---- time: std::time::Instant is opaque; now is arbitrary
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExInstant(std::time::Instant);
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExSystemTime(std::time::SystemTime);
+
+pub assume_specification[ std::time::Instant::now ]() -> std::time::Instant;
+
+pub assume_specification[ std::time::Instant::elapsed ](i: &std::time::Instant) -> core::time::Duration;
+
+/// Saturates at zero (it does not panic).
+pub assume_specification[ std::time::Instant::duration_since ](i: &std::time::Instant, earlier: std::time::Instant) -> core::time::Duration;
+
+pub assume_specification[ std::time::SystemTime::now ]() -> std::time::SystemTime;
+
+pub assume_specification[ std::time::SystemTime::duration_since ](t: &std::time::SystemTime, earlier: std::time::SystemTime) -> Result<core::time::Duration, std::time::SystemTimeError>;
+
+pub assume_specification<T>[ <std::sync::OnceLock<T> as From<T>>::from ](t: T) -> std::sync::OnceLock<T>;
 
 } // verus!
