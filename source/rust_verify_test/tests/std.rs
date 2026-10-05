@@ -3510,3 +3510,10 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] rpitit_generic_method_rejected verus_code! {
+        use vstd::prelude::*;
+        pub trait W { fn send<T: Clone + Sync>(&mut self, t: &T) -> impl core::future::Future<Output = u8> + Send; }
+    } => Err(err) => assert_vir_error_msg(err, "in a trait method with type parameters")
+}

@@ -538,6 +538,17 @@ pub(crate) fn translate_trait<'tcx>(
         ) {
             continue;
         }
+        if tcx
+            .generics_of(assoc_item.def_id)
+            .own_params
+            .iter()
+            .any(|p| !matches!(p.kind, rustc_middle::ty::GenericParamDefKind::Lifetime))
+        {
+            return err_span(
+                trait_span,
+                "Verus does not yet support `-> impl Trait` (or `async fn`) in a trait method with type parameters",
+            );
+        }
         let name = crate::rust_to_vir_base::assoc_item_name(tcx, assoc_item, trait_span)?;
         assoc_typs.push(name);
         let bounds = tcx.item_bounds(assoc_item.def_id).skip_binder();

@@ -185,6 +185,18 @@ fn translate_assoc_type<'tcx>(
     let assoc_def_id = ai.trait_item_def_id().unwrap();
     let bounds = ctxt.tcx.item_bounds(assoc_def_id);
     let assoc_generics = ctxt.tcx.generics_of(assoc_def_id);
+    if assoc_generics
+        .own_params
+        .iter()
+        .any(|p| !matches!(p.kind, rustc_middle::ty::GenericParamDefKind::Lifetime))
+    {
+        // (the associated type of `-> impl Trait` in a trait method with type parameters, or
+        // with an `impl Trait` argument, is generic over those types)
+        return crate::util::err_span(
+            impl_item_span,
+            "Verus does not yet support associated types generic over types (including `-> impl Trait` in a trait method with type parameters)",
+        );
+    }
     let mut assoc_args: Vec<rustc_middle::ty::GenericArg> = ctxt
         .tcx
         .normalize_erasing_regions(
