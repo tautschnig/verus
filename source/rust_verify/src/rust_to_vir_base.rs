@@ -1390,7 +1390,7 @@ pub(crate) fn mid_ty_to_vir_ghost<'tcx>(
                     }
                     // If normalization isn't possible, return a projection type:
                     let assoc_item = tcx.associated_item(def_id);
-                    let name = assoc_item_name(&assoc_item, span)?;
+                    let name = assoc_item_name(tcx, &assoc_item, span)?;
                     // Note: this looks like it would work, but trait_item_def_id is sometimes None:
                     //   use crate::rustc_middle::ty::DefIdTree;
                     //   let trait_def = tcx.parent(assoc_item.trait_item_def_id.expect("..."));
@@ -1578,7 +1578,7 @@ pub(crate) fn mid_ty_to_vir_ghost<'tcx>(
                     }
                     ExistentialPredicate::Projection(proj) => {
                         let assoc_item = tcx.associated_item(proj.def_id);
-                        let name = assoc_item_name(&assoc_item, span)?;
+                        let name = assoc_item_name(tcx, &assoc_item, span)?;
                         // The associated type may be declared by a supertrait of the
                         // principal trait (`dyn Fn(A) -> B` binds `FnOnce::Output`); VIR
                         // resolves the declaring trait by name (vir::traits::find_assoc_typ_owner).
@@ -2167,7 +2167,7 @@ where
                 let substs = pred.projection_term.args;
                 let trait_def_id = pred.projection_term.trait_def_id(tcx);
                 let assoc_item = tcx.associated_item(item_def_id);
-                let name = assoc_item_name(&assoc_item, *span)?;
+                let name = assoc_item_name(tcx, &assoc_item, *span)?;
                 let generic_bound = check_generic_bound(
                     tcx,
                     verus_items,
@@ -2809,7 +2809,7 @@ pub(crate) fn opaque_def_to_vir<'tcx>(
                         let substs = pred.projection_term.args;
                         let trait_def_id = pred.projection_term.trait_def_id(ctxt.tcx);
                         let assoc_item = ctxt.tcx.associated_item(item_def_id);
-                        let name = assoc_item_name(&assoc_item, span)?;
+                        let name = assoc_item_name(ctxt.tcx, &assoc_item, span)?;
                         let generic_bound = check_generic_bound(
                             ctxt.tcx,
                             &ctxt.verus_items,
@@ -3085,17 +3085,52 @@ pub(crate) fn hack_fix_no_lifetime_opaque_ty_issue2541<'tcx>(
     })
 }
 
-/// The name of an associated item, or an unsupported-feature error for the associated types
-/// rustc synthesizes for `-> impl Trait` in traits and `async fn` in traits, which have none.
-pub(crate) fn assoc_item_name(
+/// The RPITIT data of an associated type rustc synthesized for `-> impl Trait` in a trait.
+pub(crate) fn rpitit_info(
+    assoc_item: &rustc_middle::ty::AssocItem,
+) -> Option<rustc_middle::ty::ImplTraitInTraitData> {
+    match assoc_item.kind {
+        rustc_middle::ty::AssocKind::Type {
+            data: rustc_middle::ty::AssocTypeData::Rpitit(d),
+        } => Some(d),
+        _ => None,
+    }
+}
+
+/// The name of an associated item. The associated types rustc synthesizes for `-> impl Trait`
+/// (and `async fn`) in traits have no name; they get `VERUS_RPITIT__<method>__<n>`, where `n`
+/// is the position among that method's synthesized types. The trait's item and each impl's
+/// item get the same name (the impl's is derived from the trait item it implements).
+pub(crate) fn assoc_item_name<'tcx>(
+    tcx: rustc_middle::ty::TyCtxt<'tcx>,
     assoc_item: &rustc_middle::ty::AssocItem,
     span: Span,
 ) -> Result<vir::ast::Ident, VirErr> {
-    match assoc_item.opt_name() {
-        Some(name) => Ok(Arc::new(name.to_string())),
-        None => unsupported_err!(
-            span,
-            "return-position `impl Trait` in a trait, or `async fn` in a trait"
-        ),
+    if let Some(name) = assoc_item.opt_name() {
+        return Ok(Arc::new(name.to_string()));
     }
+    let trait_item_id = match crate::rust_to_vir_base::rpitit_info(assoc_item) {
+        Some(rustc_middle::ty::ImplTraitInTraitData::Trait { .. }) => Some(assoc_item.def_id),
+        Some(rustc_middle::ty::ImplTraitInTraitData::Impl { .. }) => assoc_item.trait_item_def_id(),
+        None => None,
+    };
+    if let Some(trait_item_id) = trait_item_id {
+        let trait_item = tcx.associated_item(trait_item_id);
+        if let Some(rustc_middle::ty::ImplTraitInTraitData::Trait { fn_def_id, .. }) =
+            crate::rust_to_vir_base::rpitit_info(&trait_item)
+        {
+            let idx = tcx
+                .associated_types_for_impl_traits_in_associated_fn(fn_def_id)
+                .iter()
+                .position(|d| *d == trait_item_id)
+                .unwrap_or(0);
+            return Ok(Arc::new(format!(
+                "{}{}__{}",
+                vir::def::RPITIT_ASSOC_PREFIX,
+                tcx.item_name(fn_def_id),
+                idx
+            )));
+        }
+    }
+    unsupported_err!(span, "return-position `impl Trait` in a trait, or `async fn` in a trait")
 }

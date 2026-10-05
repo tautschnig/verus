@@ -3418,3 +3418,41 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] rpitit_and_async_fn_in_trait verus_code! {
+        use vstd::prelude::*;
+        pub trait Transport {
+            fn connect(&self) -> impl core::future::Future<Output = u8> + Send;
+            async fn close(&self) -> bool;
+            fn names(&self) -> impl Iterator<Item = u8>;
+        }
+        pub struct T;
+        impl Transport for T {
+            async fn connect(&self) -> u8 { 1 }
+            async fn close(&self) -> bool { true }
+            fn names(&self) -> impl Iterator<Item = u8> { Vec::<u8>::new().into_iter() }
+        }
+        async fn go<X: Transport>(t: &X) -> u8 {
+            let _ = t.close().await;
+            t.connect().await
+        }
+        fn need_send<F: Send>(f: F) {}
+        fn spawnable(t: &'static T) { need_send(t.connect()); }
+        fn unknown(t: &T) {
+            let mut it = t.names();
+            let x = it.next();
+            assert(x is None); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    #[test] rpitit_spec_rejected verus_code! {
+        use vstd::prelude::*;
+        pub trait Tr {
+            fn f(&self) -> (r: impl Iterator<Item = u8>)
+                ensures true;
+        }
+    } => Err(err) => assert_vir_error_msg(err, "Verus does not yet support specifications on trait methods returning `impl Trait`")
+}

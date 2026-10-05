@@ -112,6 +112,7 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
+    // opaque return types in trait declarations are supported (RPITIT)
     #[test] test_no_opaque_types_from_traits verus_code! {
     use vstd::prelude::*;
     trait DummyTraitA{}
@@ -119,7 +120,12 @@ test_verify_one_file! {
     trait DummyTraitB {
         fn foo(&self) -> impl DummyTraitA;
     }
-    } => Err(err) => assert_vir_error_msg(err, "Verus does not yet support Opaque types in trait def")
+    struct S;
+    impl DummyTraitB for S {
+        fn foo(&self) -> impl DummyTraitA { 1u8 }
+    }
+    fn use_it<X: DummyTraitB>(x: &X) { let _ = x.foo(); }
+    } => Ok(())
 }
 
 test_verify_one_file! {

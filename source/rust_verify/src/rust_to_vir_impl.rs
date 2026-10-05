@@ -418,6 +418,37 @@ pub(crate) fn translate_impl<'tcx>(
             errors.push(r);
         }
     }
+    // The associated types rustc synthesizes for the impl's `-> impl Trait` / `async fn`
+    // methods (not HIR impl items): each is the method's opaque return type.
+    if let Some((trait_path, trait_typ_args)) = &trait_path_typ_args {
+        for assoc_item in ctxt.tcx.associated_items(impl_def_id).in_definition_order() {
+            if !matches!(
+                crate::rust_to_vir_base::rpitit_info(assoc_item),
+                Some(rustc_middle::ty::ImplTraitInTraitData::Impl { .. })
+            ) {
+                continue;
+            }
+            let r = (|| {
+                let name =
+                    crate::rust_to_vir_base::assoc_item_name(ctxt.tcx, assoc_item, item.span)?;
+                translate_assoc_type(
+                    ctxt,
+                    name,
+                    impll.generics.span,
+                    Some(&impll.generics),
+                    item.span,
+                    assoc_item.def_id,
+                    impl_def_id,
+                    trait_path.clone(),
+                    trait_typ_args.clone(),
+                )
+            })();
+            match r {
+                Ok(a) => vir.assoc_type_impls.push(a),
+                Err(e) => errors.push(e),
+            }
+        }
+    }
     if errors.len() > 0 { Err(errors) } else { Ok(()) }
 }
 
@@ -719,7 +750,11 @@ pub(crate) fn collect_external_trait_impls<'tcx>(
             for assoc_item in tcx.associated_items(impl_def_id).in_definition_order() {
                 match assoc_item.kind {
                     rustc_middle::ty::AssocKind::Type { .. } => {
-                        let name = Arc::new(assoc_item.ident(tcx).to_string());
+                        let Ok(name) =
+                            crate::rust_to_vir_base::assoc_item_name(tcx, assoc_item, span)
+                        else {
+                            continue 'impls;
+                        };
                         if !trait_map[&trait_path].iter().any(|t| t.x.assoc_typs.contains(&name)) {
                             continue;
                         }

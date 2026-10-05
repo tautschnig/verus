@@ -3,7 +3,7 @@ use quote::{quote, quote_spanned};
 use verus_syn::spanned::Spanned;
 use verus_syn::{
     Expr, FnMode, Ident, ImplItem, ImplItemFn, Item, ItemImpl, ItemTrait, Meta, Path, Stmt, Token,
-    TraitItem, TraitItemFn, Type, TypeParamBound, Visibility,
+    ReturnType, TraitItem, TraitItemFn, Type, TypeParamBound, Visibility,
 };
 use verus_syn::{TraitBound, parse_quote_spanned};
 
@@ -293,6 +293,37 @@ pub(crate) fn split_trait_method(
     fun: &mut TraitItemFn,
     erase_ghost: bool,
 ) {
+    // A method returning `impl Trait` (or an `async fn`) cannot be copied into a spec method:
+    // the copy's body `no_method_body()` diverges, so the copy's opaque return type would be
+    // `()`, which implements no trait. Such a method without a specification needs no spec
+    // method; one with a specification is rejected below.
+    let returns_impl = fun.sig.asyncness.is_some()
+        || match &fun.sig.output {
+            ReturnType::Type(_, _, _, ty) => quote::quote!(#ty).to_string().contains("impl "),
+            ReturnType::Default => false,
+        };
+    let has_spec = {
+        let sp = &fun.sig.spec;
+        sp.requires.is_some()
+            || sp.recommends.is_some()
+            || sp.ensures.is_some()
+            || sp.default_ensures.is_some()
+            || sp.returns.is_some()
+            || sp.decreases.is_some()
+            || sp.invariants.is_some()
+            || sp.unwind.is_some()
+    };
+    if !erase_ghost && fun.default.is_none() && returns_impl && !has_spec {
+        return;
+    }
+    if !erase_ghost && fun.default.is_none() && returns_impl {
+        let span = fun.sig.ident.span();
+        spec_items.push(TraitItem::Verbatim(quote::quote_spanned!(span =>
+            compile_error!("Verus does not yet support specifications on trait methods returning `impl Trait` (or `async fn` in traits)");
+        )));
+        fun.sig.erase_spec_fields();
+        return;
+    }
     if !erase_ghost && fun.default.is_none() {
         // Copy into separate spec method, then remove spec from original method
         use verus_syn::FnArgKind;

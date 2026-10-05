@@ -5004,6 +5004,8 @@ test_verify_one_file! {
 test_verify_one_file! {
     // `-> impl Trait` in a trait: rustc's synthesized associated type has no name, which used
     // to panic in the projection conversion; now it is reported as unsupported
+    // a trait outside verus! with `-> Option<impl Iterator>`, used from verified code: an
+    // ordinary error (undeclared trait), no panic
     #[test] test_rpitit_unsupported_no_panic code! {
         use vstd::prelude::*;
         pub trait T {
@@ -5017,7 +5019,7 @@ test_verify_one_file! {
                 take_v(x.it());
             }
         }
-    } => Err(err) => assert_vir_error_msg(err, "impl Trait` in a trait")
+    } => Err(err) => assert_vir_error_msg(err, "not declared to Verus")
 }
 
 test_verify_one_file! {

@@ -40,6 +40,9 @@ For VIR -> AIR, we use these suffixes:
 // List of prefixes, suffixes, and separators that can appear in generated AIR code
 const SUFFIX_GLOBAL: &str = "?";
 pub const SUFFIX_PARAM: &str = "!";
+/// Prefix of the names given to the associated types rustc synthesizes for `-> impl Trait` in traits
+/// (a valid Rust identifier, since the trait-conflict checker emits it).
+pub const RPITIT_ASSOC_PREFIX: &str = "VERUS_RPITIT__";
 const SUFFIX_LOCAL_STMT: &str = "@";
 const SUFFIX_LOCAL_EXPR: &str = "$";
 const SUFFIX_TYPE_PARAM: &str = "&";

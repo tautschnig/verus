@@ -1565,6 +1565,12 @@ impl Verifier {
                 ),
             ),
             CommandBatch::new("Trait-Bounds", vir::traits::trait_bound_axioms(ctx, &krate.traits)),
+            // (before the associated-type impls: the associated types rustc synthesizes for
+            // `-> impl Trait` in traits are each impl's opaque type)
+            CommandBatch::new(
+                "Opaque-Type-Constructors",
+                vir::opaque_type_to_air::opaque_types_to_air(ctx, &krate.opaque_types),
+            ),
             CommandBatch::new(
                 "Associated-Type-Impls",
                 vir::assoc_types_to_air::assoc_type_impls_to_air(ctx, &krate.assoc_type_impls),
@@ -1572,10 +1578,6 @@ impl Verifier {
             CommandBatch::new(
                 "Dyn-Projections",
                 vir::traits::dyn_projection_axioms(ctx, &krate.traits),
-            ),
-            CommandBatch::new(
-                "Opaque-Type-Constructors",
-                vir::opaque_type_to_air::opaque_types_to_air(ctx, &krate.opaque_types),
             ),
         ];
 
@@ -3247,7 +3249,6 @@ impl Verifier {
 
         let crate_items = crate::external::get_crate_items(&ctxtx).map_err(map_errs_diagnostics)?;
 
-        check_no_opaque_types_in_trait(ctxtx.tcx, &crate_items).map_err(map_err_diagnostics)?;
 
         if !self.args.no_lifetime {
             crate::erase::setup_verus_aware_ids(tcx, &crate_items);
@@ -3518,38 +3519,10 @@ fn delete_dir_if_exists_and_is_dir(dir: &std::path::PathBuf) -> Result<(), VirEr
     })
 }
 
-/// Currently performing an rustc_hir_analysis::check_crate() with trait methods with opaque return types
-/// will cause the thir_body to run before VerusErasureCtxt is initialized.
-/// We disallow opaque types in trait for now.
-fn check_no_opaque_types_in_trait<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    crate_items: &crate::external::CrateItems,
-) -> Result<(), VirErr> {
-    for item in crate_items.items.iter() {
-        if matches!(item.verif, VerifOrExternal::External { .. }) {
-            continue;
-        }
-        match item.id {
-            crate::external::GeneralItemId::TraitItemId(trait_item_id) => {
-                match tcx.hir_trait_item(trait_item_id).kind {
-                    rustc_hir::TraitItemKind::Fn(sig, _) => {
-                        if let rustc_hir::FnRetTy::Return(ty) = sig.decl.output {
-                            if matches!(ty.kind, rustc_hir::TyKind::OpaqueDef { .. }) {
-                                crate::unsupported_err!(
-                                    ty.span,
-                                    "Verus does not yet support Opaque types in trait def"
-                                );
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            _ => {}
-        }
-    }
-    Ok(())
-}
+// Trait methods with opaque return types (`-> impl Trait`, `async fn`) used to be rejected
+// here: checking the crate asks for the hidden types of the impls' methods, whose borrowck
+// cannot run before the erasure context exists. The `type_of_opaque` override above takes
+// those hidden types from HIR type checking instead, so they are allowed.
 
 // TODO: move the callbacks into a different file, like driver.rs
 pub(crate) struct VerifierCallbacksEraseMacro {

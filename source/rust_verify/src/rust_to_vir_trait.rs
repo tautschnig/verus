@@ -521,6 +521,28 @@ pub(crate) fn translate_trait<'tcx>(
             }
         }
     }
+    // The associated types rustc synthesizes for `-> impl Trait` / `async fn` methods
+    // (they are not HIR trait items), with their bounds (`Future<Output = T> + Send`, ...).
+    for assoc_item in tcx.associated_items(trait_def_id).in_definition_order() {
+        if !matches!(
+            crate::rust_to_vir_base::rpitit_info(assoc_item),
+            Some(rustc_middle::ty::ImplTraitInTraitData::Trait { .. })
+        ) {
+            continue;
+        }
+        let name = crate::rust_to_vir_base::assoc_item_name(tcx, assoc_item, trait_span)?;
+        assoc_typs.push(name);
+        let bounds = tcx.item_bounds(assoc_item.def_id).skip_binder();
+        let bounds = bounds.iter().map(|p| (p, trait_span)).collect::<Vec<_>>();
+        let vir_bounds = process_predicate_bounds(
+            tcx,
+            trait_def_id,
+            &ctxt.verus_items,
+            bounds.iter(),
+            tcx.generics_of(trait_def_id),
+        )?;
+        assoc_typs_bounds.extend(vir_bounds);
+    }
     let mut methods = make_trait_decls(methods)?;
     infos.append(&mut methods);
     let mut assoc_typs_bounds = Arc::new(assoc_typs_bounds);

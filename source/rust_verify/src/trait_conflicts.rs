@@ -383,10 +383,35 @@ pub(crate) fn gen_check_trait_impl_conflicts(
             &t.x.typ_bounds,
             None,
         );
+        // The associated types rustc synthesizes for `-> impl Trait` in traits are left out of
+        // the model program: each impl's is an opaque type, which has no model, and they
+        // cannot make impls overlap (they are determined by the impl).
+        let is_rpitit = |a: &Ident| a.starts_with(vir::def::RPITIT_ASSOC_PREFIX);
+        let assoc_typs_kept: Vec<Ident> =
+            t.x.assoc_typs.iter().filter(|a| !is_rpitit(a)).cloned().collect();
+        let assoc_bounds_kept: Vec<vir::ast::GenericBound> = t
+            .x
+            .assoc_typs_bounds
+            .iter()
+            .filter(|b| {
+                let mentions = |ts: &vir::ast::Typs| {
+                    ts.iter().any(|ty| {
+                        matches!(&**ty, vir::ast::TypX::TypParam(x) if is_rpitit(x))
+                            || matches!(&**ty, vir::ast::TypX::Projection { name, .. } if is_rpitit(name))
+                    })
+                };
+                match &***b {
+                    vir::ast::GenericBoundX::Trait(_, ts) => !mentions(ts),
+                    vir::ast::GenericBoundX::TypEquality(_, ts, _, _) => !mentions(ts),
+                    _ => true,
+                }
+            })
+            .cloned()
+            .collect();
         let (a_params, mut a_bounds) =
-            gen_generics(state, &t.x.assoc_typs, &t.x.assoc_typs_bounds, None);
+            gen_generics(state, &Arc::new(assoc_typs_kept.clone()), &Arc::new(assoc_bounds_kept), None);
         used_traits.insert(t.x.name.clone());
-        for a in t.x.assoc_typs.iter() {
+        for a in assoc_typs_kept.iter() {
             used_assoc_typs.insert((t.x.name.clone(), a.clone()));
         }
         let name = state.trait_name(&t.x.name);
