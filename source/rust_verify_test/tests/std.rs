@@ -3192,3 +3192,28 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] hashmap_get_mut verus_code! {
+        use vstd::prelude::*;
+        use std::collections::HashMap;
+        fn bump(m: &mut HashMap<u64, u64>, k: u64)
+            requires old(m)@.contains_key(k), old(m)@[k] < 100,
+            ensures final(m)@ == old(m)@.insert(k, (old(m)@[k] + 1) as u64),
+        {
+            broadcast use vstd::std_specs::hash::group_hash_axioms;
+            assert(vstd::std_specs::hash::obeys_key_model::<u64>());
+            if let Some(v) = m.get_mut(&k) {
+                *v = *v + 1;
+            } else {
+                assert(false);
+            }
+        }
+        fn absent(m: &mut HashMap<u64, u64>, k: u64) requires !old(m)@.contains_key(k) {
+            broadcast use vstd::std_specs::hash::group_hash_axioms;
+            assert(vstd::std_specs::hash::obeys_key_model::<u64>());
+            let r = m.get_mut(&k);
+            assert(r is Some); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}

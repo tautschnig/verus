@@ -1410,6 +1410,32 @@ fn slice_sort_specs_hold() {
     match s.binary_search(&x) { Ok(i) => assert!(i < 3 && s[i] == x), Err(i) => assert!(i <= 3) }
 }
 
+/// `HashMap::get_mut` (HashMap search does not unwind under Kani): for every map over keys
+/// {0,1,2} with values in {0,1} and every key, `None` iff absent (map unchanged); `Some(v)`
+/// with `*v` the old value, and writing `w` through it is `insert(k, w)`.
+#[cfg(test)]
+#[test]
+fn hashmap_get_mut_exec() {
+    use std::collections::HashMap;
+    for mask in 0..27u32 {
+        let mut base = HashMap::new();
+        let mut m2 = mask;
+        for k in 0..3u64 { match m2 % 3 { 0 => {}, d => { base.insert(k, d as u64 - 1); } } m2 /= 3; }
+        for k in 0..4u64 {
+            let mut m = base.clone();
+            match m.get_mut(&k) {
+                None => { assert!(!base.contains_key(&k)); assert!(m == base); }
+                Some(v) => {
+                    assert!(base.get(&k) == Some(v));
+                    *v = 9;
+                    let mut exp = base.clone(); exp.insert(k, 9);
+                    assert!(m == exp);
+                }
+            }
+        }
+    }
+}
+
 /// `iter::once(v)` yields exactly `v`; `max_by_key` returns an element of the iterator.
 #[cfg(kani)]
 #[kani::proof]

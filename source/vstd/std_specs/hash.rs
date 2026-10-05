@@ -825,6 +825,46 @@ pub assume_specification<
         },
 ;
 
+/// `new_m` is `old_m` with the value at the (borrowed) key `k` replaced by `v`. Like
+/// `borrowed_key_removed`, axiomatized for `Key = Q`.
+pub uninterp spec fn borrowed_key_updated<Key, Value, Q: ?Sized>(
+    old_m: Map<Key, Value>,
+    new_m: Map<Key, Value>,
+    k: &Q,
+    v: Value,
+) -> bool;
+
+pub broadcast proof fn axiom_deref_key_updated<Q, Value>(
+    old_m: Map<Q, Value>,
+    new_m: Map<Q, Value>,
+    k: &Q,
+    v: Value,
+)
+    ensures
+        #[trigger] borrowed_key_updated::<Q, Value, Q>(old_m, new_m, k, v) <==> new_m == old_m.insert(*k, v),
+{
+    admit();
+}
+
+pub assume_specification<
+    'a,
+    Key: Borrow<Q> + Hash + Eq,
+    Value,
+    S: BuildHasher,
+    A: Allocator,
+    Q: Hash + Eq + ?Sized,
+>[ HashMap::<Key, Value, S, A>::get_mut::<Q> ](m: &'a mut HashMap<Key, Value, S, A>, k: &Q) -> (result:
+    Option<&'a mut Value>)
+    ensures
+        obeys_key_model::<Key>() && builds_valid_hashers::<S>() ==> match result {
+            Some(v) => {
+                &&& maps_borrowed_key_to_value(old(m)@, k, *v)
+                &&& borrowed_key_updated(old(m)@, final(m)@, k, *final(v))
+            },
+            None => !contains_borrowed_key(old(m)@, k) && final(m)@ == old(m)@,
+        },
+;
+
 pub assume_specification<Key, Value, S, A: Allocator>[ HashMap::<Key, Value, S, A>::clear ](
     m: &mut HashMap<Key, Value, S, A>,
 )
@@ -1452,6 +1492,7 @@ pub broadcast group group_hash_axioms {
     axiom_contains_deref_key,
     axiom_contains_box,
     axiom_deref_key_removed,
+    axiom_deref_key_updated,
     axiom_maps_deref_key_to_value,
     axiom_maps_box_key_to_value,
     axiom_hashmap_deepview_borrow,
