@@ -677,8 +677,12 @@ pub(crate) fn collect_external_trait_impls<'tcx>(
         }
     }
 
-    // Process only the new implementations that could be visible to Verus:
+    // Process only the new implementations that could be visible to Verus.
+    // Impls are collected first and committed after the supertrait check below.
+    let mut pending: Vec<(DefId, TraitImpl, Vec<AssocTypeImpl>)> = Vec::new();
+    let mut skipped: HashSet<DefId> = HashSet::new();
     'impls: for impl_def_id in auto_import_impls {
+        skipped.insert(impl_def_id);
         let trait_ref = tcx.impl_trait_ref(impl_def_id);
         for arg in trait_ref.skip_binder().args.iter() {
             if !crate::rust_to_vir_base::mid_arg_filter_for_external_impls(
@@ -748,9 +752,8 @@ pub(crate) fn collect_external_trait_impls<'tcx>(
                     _ => {}
                 }
             }
-            krate.trait_impls.push(trait_impl);
-            krate.assoc_type_impls.append(&mut assoc_type_impls);
-            collected_impls.insert(impl_def_id);
+            skipped.remove(&impl_def_id);
+            pending.push((impl_def_id, trait_impl, assoc_type_impls));
         } else if let Ok(None) = t_impl_opt {
             // Negative impl; do nothing for now
         } else {
@@ -759,6 +762,47 @@ pub(crate) fn collect_external_trait_impls<'tcx>(
             // so drop it rather than failing.
             // TODO: add a mode for rust_verify_test that fails if this is reached.
         }
+    }
+
+    // An impl of a trait whose supertrait's impl for the same (non-generic) self type was
+    // skipped would be inconsistent: `impl DerefMut for anyhow::Error` without `impl Deref
+    // for anyhow::Error` (skipped because its `Target` is an unsupported `dyn` type) makes
+    // the trait-conflict checker's model program ill-formed. Drop such impls, to a fixpoint.
+    let self_ty_of = |impl_id: DefId| tcx.impl_trait_ref(impl_id).skip_binder().self_ty();
+    // (Only for self types without generic parameters: `Option<T>` of one impl and `Option<T>`
+    // of another compare equal although their `T`s are unrelated.)
+    use rustc_middle::ty::TypeVisitableExt;
+    let mut skipped_pairs: HashSet<(DefId, rustc_middle::ty::Ty<'tcx>)> = skipped
+        .iter()
+        .filter(|i| !self_ty_of(**i).has_param())
+        .map(|i| (tcx.impl_trait_ref(*i).skip_binder().def_id, self_ty_of(*i)))
+        .collect();
+    loop {
+        let before = pending.len();
+        pending.retain(|(impl_id, _, _)| {
+            let trait_id = tcx.impl_trait_ref(*impl_id).skip_binder().def_id;
+            let self_ty = self_ty_of(*impl_id);
+            let drop = !self_ty.has_param()
+                && tcx.explicit_super_predicates_of(trait_id).skip_binder().iter().any(
+                |(clause, _)| {
+                    clause.as_trait_clause().map_or(false, |tc| {
+                        skipped_pairs.contains(&(tc.skip_binder().def_id(), self_ty))
+                    })
+                },
+            );
+            if drop {
+                skipped_pairs.insert((trait_id, self_ty));
+            }
+            !drop
+        });
+        if pending.len() == before {
+            break;
+        }
+    }
+    for (impl_def_id, trait_impl, mut assoc_type_impls) in pending {
+        krate.trait_impls.push(trait_impl);
+        krate.assoc_type_impls.append(&mut assoc_type_impls);
+        collected_impls.insert(impl_def_id);
     }
 
     let mut func_map = HashMap::<Fun, Function>::new();
