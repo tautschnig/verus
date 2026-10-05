@@ -466,7 +466,25 @@ impl<'a, 'tcx> VisitMod<'a, 'tcx> {
                 // For _normal impls_, we just go ahead and mark the impl as verification-aware.
                 // For _trait impls_, this situation would be too complicated, so we error.
 
-                if in_impl.is_trait {
+                if in_impl.is_trait
+                    && state_for_this_item != VerifState::External
+                    && third_party_macro_crate(self.ctxt.tcx, span).is_some()
+                {
+                    // A trait impl generated outside verus! by a third-party macro, whose
+                    // methods carry the verus attributes of the (verified) trait's
+                    // declarations: `#[enum_dispatch(Tr)]` copies `Tr`'s method signatures.
+                    // The impl is the macro's code; leave it, and its items, unverified (an
+                    // external impl of the trait, trusted to satisfy the trait's spec like
+                    // any external impl).
+                    let path_string = format!("{:?}", def_id);
+                    for k in this_item_idx..self.items.len() {
+                        self.items[k].verif = VerifOrExternal::External {
+                            path: None,
+                            path_string: path_string.clone(),
+                            explicit: false,
+                        };
+                    }
+                } else if in_impl.is_trait {
                     self.errors.push(crate::util::err_span_bare(
                         span,
                     "In order to verify any items of this trait impl, the entire impl must be verified. Try wrapping the entire impl in the `verus!` macro.",
@@ -662,6 +680,33 @@ impl<'a> GeneralItem<'a> {
             GeneralItem::TraitItem(_) => false,
         }
     }
+}
+
+/// The crate defining the macro (of any kind) whose expansion produced `span`, if that crate is
+/// not one of core/alloc/std/vstd/Verus's own.
+fn third_party_macro_crate<'tcx>(
+    tcx: rustc_middle::ty::TyCtxt<'tcx>,
+    span: Span,
+) -> Option<rustc_span::Symbol> {
+    let mut ctxt = span.ctxt();
+    while !ctxt.is_root() {
+        let data = ctxt.outer_expn_data();
+        if let rustc_span::hygiene::ExpnKind::Macro(_, _) = data.kind {
+            if let Some(d) = data.macro_def_id {
+                let k = tcx.crate_name(d.krate);
+                if !matches!(
+                    k.as_str(),
+                    "core" | "alloc" | "std" | "vstd" | "verus_builtin" | "verus_builtin_macros"
+                        | "verus_state_machines_macros"
+                ) && !d.is_local()
+                {
+                    return Some(k);
+                }
+            }
+        }
+        ctxt = data.call_site.ctxt();
+    }
+    None
 }
 
 /// The crate defining the derive macro whose expansion produced `span`, if any.

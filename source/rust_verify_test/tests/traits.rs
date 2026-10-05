@@ -5039,3 +5039,16 @@ test_verify_one_file! {
         }
     } => Ok(())
 }
+
+test_verify_one_file! {
+    // a trait impl outside verus! from a local macro_rules! is an ordinary external impl
+    #[test] trait_impl_from_local_macro_outside_verus code! {
+        use vstd::prelude::*;
+        verus! {
+            pub trait T { fn f(&self) -> u8; }
+        }
+        pub struct S;
+        macro_rules! mk { () => { impl T for S { fn f(&self) -> u8 { 1 } } } }
+        mk!();
+    } => Ok(())
+}
