@@ -1493,3 +1493,14 @@ fn s28_specs_hold() {
     assert!(d.subsec_nanos() == nanos);
     assert!(core::time::Duration::MAX.as_secs() == u64::MAX && core::time::Duration::MAX.subsec_nanos() == 999_999_999);
 }
+
+/// S28: `Box::pin(x)` holds `x` (vstd: `*r.pointer() == x`).
+#[cfg(kani)]
+#[kani::proof]
+fn box_pin_holds() {
+    let x: u64 = kani::any();
+    let p: core::pin::Pin<Box<u64>> = Box::pin(x);
+    assert!(*p == x);
+    let p2: core::pin::Pin<Box<u64>> = Box::pin(x);
+    assert!(*core::pin::Pin::into_inner(p2) == x);
+}
