@@ -3607,3 +3607,13 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] hash_map_into_iter_collect verus_code! {
+        use vstd::prelude::*;
+        use std::collections::{HashMap, BTreeMap};
+        fn f(m: HashMap<String, u64>) -> BTreeMap<String, u64> {
+            m.into_iter().collect()
+        }
+    } => Ok(())
+}

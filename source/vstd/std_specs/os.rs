@@ -346,4 +346,12 @@ pub assume_specification[ std::process::id ]() -> u32;
 #[verifier::reject_recursive_types(A)]
 pub struct ExHashSetIntoIter<T, A: core::alloc::Allocator>(std::collections::hash_set::IntoIter<T, A>);
 
+/// `HashMap`'s consuming iterator: opaque, without iterator laws (like `hash_set::IntoIter`).
+#[verifier::external_type_specification]
+#[verifier::external_body]
+#[verifier::reject_recursive_types(K)]
+#[verifier::reject_recursive_types(V)]
+#[verifier::reject_recursive_types(A)]
+pub struct ExHashMapIntoIter<K, V, A: core::alloc::Allocator>(std::collections::hash_map::IntoIter<K, V, A>);
+
 } // verus!
