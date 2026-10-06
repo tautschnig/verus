@@ -1896,7 +1896,9 @@ pub(crate) fn fix_missing_trigger_params_fn(
     // FunctionX typ_params contains both the trait impl type params and the inner function params
     // REVIEW: maybe these should be kept separate in FunctionX;
     // it's inconvenient here to have to split them up and put them back together.
-    let trait_impl = &ctx.impl_map[impl_path];
+    let Some(trait_impl) = ctx.impl_map.get(impl_path) else {
+        panic!("Verus Internal Error: trait impl {:?} missing from the pruned context", impl_path);
+    };
     assert!(*trait_impl.x.typ_params == fn_typ_params[0..trait_impl.x.typ_params.len()]);
     let mut typ_params = trait_impl.x.typ_params.clone();
     let (substitutions, extra_trigger_terms) =
@@ -2584,6 +2586,15 @@ pub fn synthesize_default_extension_impls(
             continue;
         }
         let Some(decls) = spec_decls.get(spec) else { continue };
+        // The synthesized functions are visible exactly where the impl's own methods are (an
+        // impl mentioning a private type is pruned from modules that cannot see it; its
+        // extension must be too).
+        let impl_vis = krate
+            .functions
+            .iter()
+            .find(|f| matches!(&f.x.kind, FunctionKind::TraitMethodImpl { impl_path, .. } if impl_path == &ti.x.impl_path))
+            .map(|f| f.x.visibility.clone())
+            .unwrap_or_else(crate::ast::Visibility::public);
         let Some(tparams) = trait_params.get(spec) else { continue };
         let last = ti.x.impl_path.segments.last().cloned().unwrap_or_else(|| Arc::new(String::new()));
         let impl_path = ti.x.impl_path.pop_segment().push_segment(Arc::new(format!(
@@ -2641,9 +2652,9 @@ pub fn synthesize_default_extension_impls(
                     trait_typ_args: ti.x.trait_typ_args.clone(),
                     inherit_body_from: None,
                 },
-                visibility: crate::ast::Visibility::public(),
-                body_visibility: crate::ast::BodyVisibility::public(),
-                opaqueness: Opaqueness::Revealed { visibility: crate::ast::Visibility::public() },
+                visibility: impl_vis.clone(),
+                body_visibility: crate::ast::BodyVisibility::Visibility(impl_vis.clone()),
+                opaqueness: Opaqueness::Revealed { visibility: impl_vis.clone() },
                 owning_module: ti.x.owning_module.clone(),
                 typ_params: Arc::new(typ_params),
                 typ_bounds: ti.x.typ_bounds.clone(),

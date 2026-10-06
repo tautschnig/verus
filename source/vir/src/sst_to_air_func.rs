@@ -805,8 +805,19 @@ pub fn func_axioms_to_air(
     let is_singular = function.x.attrs.integer_ring;
     match function.x.mode {
         Mode::Spec => {
+            // A spec method of a trait impl that this module's pruning dropped (its trait
+            // arguments mention a type the module cannot see, e.g. `impl TryFromSpecImpl<Wire>
+            // for Manifest` with `Wire` private) may still be reached by its self type. Its
+            // definition axioms need the impl; leave the function uninterpreted here (fewer
+            // facts).
+            let impl_missing = match &function.x.kind {
+                FunctionKind::TraitMethodImpl { impl_path, .. } => {
+                    !ctx.impl_map.contains_key(impl_path)
+                }
+                _ => false,
+            };
             // Body
-            if public_body {
+            if public_body && !impl_missing {
                 if let Some(func_body_sst) = &func_axioms_sst.spec_axioms {
                     func_body_to_air(
                         ctx,
