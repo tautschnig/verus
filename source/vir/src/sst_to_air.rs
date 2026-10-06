@@ -2707,11 +2707,11 @@ fn stm_to_stmts_inner(ctx: &Ctx, state: &mut State, stm: &Stm) -> Result<Vec<Stm
             let is_air_break = *is_break && !loop_info.loop_isolation;
             if !ctx.checking_spec_preconditions() && !is_air_break {
                 assert!(!is_break || !loop_info.some_cond); // AST-to-SST conversion must eliminate the cond
-                if loop_info.is_for_loop && !*is_break {
-                    // At the very least, the syntax macro will need to advance the ghost iterator
-                    // at each continue.
-                    return Err(error(&stm.span, "for-loops do not yet support continue"));
-                }
+                // A `continue` in a for-loop: the desugared loop advances the iterator (and the
+                // ghost index) with `next()` at the *start* of each iteration, and the body
+                // only sees an immutable ghost copy of the iterator, so the state at a
+                // `continue` is the state at the end of the body. The entry invariants (and
+                // the decreases check) are asserted here, as at the end of the body.
                 let invs = if *is_break {
                     loop_info.invs_exit.clone()
                 } else {

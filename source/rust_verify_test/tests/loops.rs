@@ -2331,3 +2331,53 @@ test_verify_one_file_with_options! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] for_loop_continue verus_code! {
+        use vstd::prelude::*;
+        fn count_even(v: &Vec<u64>) -> (n: usize)
+            ensures n <= v.len()
+        {
+            let mut n: usize = 0;
+            for i in 0..v.len()
+                invariant n <= i,
+            {
+                if v[i] % 2 == 1 {
+                    continue;
+                }
+                n += 1;
+            }
+            n
+        }
+        fn nested(v: &Vec<u64>) -> (n: usize)
+            ensures n <= v.len()
+        {
+            let mut n: usize = 0;
+            for i in 0..v.len()
+                invariant n <= i,
+            {
+                let mut k: usize = 0;
+                for j in 0..v.len()
+                    invariant k <= j,
+                {
+                    if v[j] == 0 { continue; }
+                    k += 1;
+                }
+                if i == 3 { continue; }
+                n += 1;
+            }
+            n
+        }
+        fn bad() {
+            let mut m: usize = 0;
+            for i in 0..10usize
+                invariant m == i,
+            {
+                if i == 5 {
+                    continue; // FAILS
+                }
+                m += 1;
+            }
+        }
+    } => Err(err) => assert_one_fails(err)
+}
