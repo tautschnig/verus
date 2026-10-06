@@ -356,4 +356,11 @@ pub assume_specification<T, E, U>[ Result::<T, E>::and::<U> ](r: Result<T, E>, r
         },
 ;
 
+/// `inspect_err(f)`: calls `f` on the error. The result is not stated (content-free); the
+/// precondition makes sure `f`'s requirements hold when it is called.
+pub assume_specification<T, E, F: FnOnce(&E)>[ Result::<T, E>::inspect_err ](result: Result<T, E>, f: F) -> Result<T, E>
+    requires
+        result is Err ==> call_requires(f, (&result->Err_0,)),
+;
+
 } // verus!

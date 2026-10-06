@@ -3601,3 +3601,15 @@ test_verify_one_file_with_options! {
         }
     } => Ok(())
 }
+
+test_verify_one_file! {
+    #[test] result_inspect_err verus_code! {
+        use vstd::prelude::*;
+        fn f(r: Result<u8, u8>) -> Result<u8, u8> {
+            r.inspect_err(|e: &u8| {})
+        }
+        fn g(r: Result<u8, u8>) -> Result<u8, u8> {
+            r.inspect_err(|e: &u8| requires *e == 0 {}) // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
