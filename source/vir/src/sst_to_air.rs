@@ -531,7 +531,9 @@ pub(crate) fn expr_has_typ(ctx: &Ctx, expr: &Expr, typ: &Typ) -> Expr {
 }
 
 pub(crate) fn decoration_for_datatype_mono(ctx: &Ctx, dt: &Dt, monotyps: &MonoTyps) -> Expr {
-    let datatype = ctx.datatype_map.get(dt).unwrap();
+    let Some(datatype) = ctx.datatype_map.get(dt) else {
+        panic!("Verus Internal Error: datatype {:?} missing from the pruned context", dt);
+    };
     match &datatype.x.sized_constraint {
         None => str_var(crate::def::DECORATE_NIL_SIZED),
         Some(constraint) => {
@@ -544,7 +546,9 @@ pub(crate) fn decoration_for_datatype_mono(ctx: &Ctx, dt: &Dt, monotyps: &MonoTy
 }
 
 pub(crate) fn decoration_for_datatype(ctx: &Ctx, dt: &Dt, typs: &Typs) -> Expr {
-    let datatype = ctx.datatype_map.get(dt).unwrap();
+    let Some(datatype) = ctx.datatype_map.get(dt) else {
+        panic!("Verus Internal Error: datatype {:?} missing from the pruned context", dt);
+    };
     match &datatype.x.sized_constraint {
         None => str_var(crate::def::DECORATE_NIL_SIZED),
         Some(constraint) => {

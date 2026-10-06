@@ -1096,3 +1096,34 @@ test_verify_one_file_with_options! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    // kraken-recording `impl TryFrom<SidecarWire> for RecordingManifest`, `SidecarWire`
+    // private: modules that reach the `TryFrom::Error` impls cannot see `SidecarWire`
+    #[test] assoc_type_impl_of_private_datatype verus_code! {
+        use vstd::prelude::*;
+        mod m1 {
+            use vstd::prelude::*;
+            struct Wire { x: u8 }
+            pub struct Manifest { pub x: u8 }
+            impl TryFrom<Wire> for Manifest {
+                type Error = u8;
+                fn try_from(w: Wire) -> Result<Self, Self::Error> { Ok(Manifest { x: w.x }) }
+            }
+            impl vstd::std_specs::convert::TryFromSpecImpl<Wire> for Manifest {
+                open spec fn obeys_try_from_spec() -> bool { false }
+                open spec fn try_from_spec(v: Wire) -> Result<Self, Self::Error> { arbitrary() }
+            }
+        }
+        mod m2 {
+            use vstd::prelude::*;
+            fn g<T: TryFrom<u8>>(x: u8) -> bool {
+                let r: Result<T, <T as TryFrom<u8>>::Error> = T::try_from(x);
+                r.is_ok()
+            }
+            fn h(a: u64) -> bool {
+                u8::try_from(a).is_ok()
+            }
+        }
+    } => Ok(())
+}

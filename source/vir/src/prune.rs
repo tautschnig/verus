@@ -1413,6 +1413,11 @@ pub fn prune_krate_for_module_or_krate(
         f
     };
 
+    let output_datatypes: HashSet<Dt> = datatypes
+        .iter()
+        .filter(|d| state.reached_types.contains(&ReachedType::Datatype(d.x.name.clone())))
+        .map(|d| d.x.name.clone())
+        .collect();
     let kratex = KrateX {
         functions: functions
             .into_iter()
@@ -1436,6 +1441,11 @@ pub fn prune_krate_for_module_or_krate(
             .assoc_type_impls
             .iter()
             .filter(|a| state.reached_assoc_type_impls.contains(&a.x.prune_name()))
+            // An impl that mentions a datatype this module cannot see (a private struct of
+            // another module: `impl TryFrom<SidecarWire> for Manifest`) has no encoding
+            // here; its axiom says nothing about types this module can name, and dropping
+            // an axiom only weakens the context.
+            .filter(|a| assoc_type_impl_datatypes_present(a, &output_datatypes))
             .cloned()
             .collect(),
         traits: traits
@@ -1485,4 +1495,18 @@ pub fn prune_krate_for_module_or_krate(
         dyn_traits: state.dyn_traits,
     };
     (Arc::new(kratex), prune_info)
+}
+
+fn assoc_type_impl_datatypes_present(a: &AssocTypeImpl, present: &HashSet<Dt>) -> bool {
+    let ok = std::cell::Cell::new(true);
+    let ft = |_: &mut (), t: &Typ| {
+        if let TypX::Datatype(dt @ Dt::Path(_), _, _) = &**t {
+            if !present.contains(dt) {
+                ok.set(false);
+            }
+        }
+        Ok(t.clone())
+    };
+    let _ = crate::ast_visitor::map_assoc_type_impl_visitor_env(a, &mut (), &ft);
+    ok.get()
 }
