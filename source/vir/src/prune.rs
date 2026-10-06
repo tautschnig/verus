@@ -1444,8 +1444,9 @@ pub fn prune_krate_for_module_or_krate(
             // An impl that mentions a datatype this module cannot see (a private struct of
             // another module: `impl TryFrom<SidecarWire> for Manifest`) has no encoding
             // here; its axiom says nothing about types this module can name, and dropping
-            // an axiom only weakens the context.
-            .filter(|a| assoc_type_impl_datatypes_present(a, &output_datatypes))
+            // an axiom only weakens the context. (Only per-module pruning: crate-wide pruning
+            // feeds the well-formedness and trait checks, which must see the impl.)
+            .filter(|a| module.is_none() || assoc_type_impl_datatypes_present(a, &output_datatypes))
             .cloned()
             .collect(),
         traits: traits

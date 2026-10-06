@@ -2668,6 +2668,10 @@ test_verify_one_file! {
             #[verifier::external_body]
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { Ok(()) }
         }
+        // (without this impl, `fmt_req` would default to `true`)
+        impl vstd::std_specs::fmt::DebugSpecImpl for Opaque {
+            uninterp spec fn fmt_req(&self, f: &fmt::Formatter<'_>) -> bool;
+        }
         struct W { o: Opaque }
         impl fmt::Debug for W {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
