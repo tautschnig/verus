@@ -3355,8 +3355,18 @@ impl Verifier {
             vir::printer::write_krate(&mut file, &vir_crate, &self.args.log_args.vir_log_option);
         }
 
-        let vir_crate = vir::traits::demote_external_traits(diagnostics, &warning_ctx, &vir_crate)
-            .map_err(map_err_diagnostics)?;
+        let vir_crate = vir::traits::demote_external_traits(
+            diagnostics,
+            &warning_ctx,
+            &path_to_well_known_item,
+            &vir_crate,
+        )
+        .map_err(map_err_diagnostics)?;
+        let vir_crate = vir::traits::synthesize_default_extension_impls(
+            &vir_crate,
+            self.crate_id.as_ref().expect("crate_id"),
+            &mut warning_ctx,
+        );
         let vir_crate = vir::traits::inherit_default_bodies(&vir_crate, &mut warning_ctx)
             .map_err(|e| (vec![e], Vec::new()))?;
 

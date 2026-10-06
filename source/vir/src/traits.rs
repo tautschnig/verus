@@ -2445,3 +2445,171 @@ pub fn set_krate_dyn_compatibility(imported: &Vec<Krate>, krate: &mut crate::ast
         Arc::make_mut(tr).x.dyn_compatible = Some(d);
     }
 }
+
+/// Default specifications for user impls of std traits whose vstd specification uses spec
+/// functions of an extension trait (`From` uses `FromSpec::obeys_from_spec`/`from_spec`,
+/// `Display::fmt` requires `DisplaySpec::fmt_req`, `PartialEq` uses `obeys_eq_spec`, ...).
+///
+/// A user `impl From<X> for Y` with no `impl FromSpecImpl<X> for Y` left those spec functions
+/// uninterpreted: the impl could not prove `obeys_from_spec() ==> ret == from_spec(v)`, and
+/// callers formatting a `Y` could not prove `fmt_req`. For such an impl this pass adds the
+/// missing extension impl, as the user would write it:
+/// - `obeys_*` is `false`. vstd uses them only as hypotheses (`obeys ==> ...`, or a
+///   requirement on the caller), so a false one lets callers assume nothing, and the impl's
+///   obligation is trivial.
+/// - `*_req` (`fmt_req`, `add_req`, `index_req`, ...) is `true`. They are preconditions of the
+///   trait methods, so the impl's body is verified without assuming anything, and callers
+///   have nothing to prove.
+/// - every other spec function is uninterpreted.
+/// The extension trait is a vstd trait and the self type is local, so (coherence) no other
+/// crate can provide the impl; an explicit user impl always wins.
+pub fn synthesize_default_extension_impls(
+    krate: &Krate,
+    crate_id: &crate::ast::CrateId,
+    warning_ctx: &mut crate::context::WarningCtx,
+) -> Krate {
+    use crate::ast::{FunctionX, ItemKind, Opaqueness, TraitImplX};
+    let mut ext_of: HashMap<Path, Path> = HashMap::new(); // origin trait -> spec trait
+    for t in krate.traits.iter() {
+        if let Some((spec, _imp)) = &t.x.external_trait_extension {
+            ext_of.insert(t.x.name.clone(), spec.clone());
+        }
+    }
+    if ext_of.is_empty() {
+        return krate.clone();
+    }
+    let trait_params: HashMap<Path, Vec<Ident>> = krate
+        .traits
+        .iter()
+        .map(|t| (t.x.name.clone(), t.x.typ_params.iter().map(|(x, _)| x.clone()).collect()))
+        .collect();
+    let mut spec_decls: HashMap<Path, Vec<Function>> = HashMap::new();
+    for f in krate.functions.iter() {
+        if let FunctionKind::TraitMethodDecl { trait_path, .. } = &f.x.kind {
+            if f.x.mode == crate::ast::Mode::Spec {
+                spec_decls.entry(trait_path.clone()).or_default().push(f.clone());
+            }
+        }
+    }
+    let local = |p: &Path| &p.krate == crate_id;
+    let mut new_impls: Vec<TraitImpl> = Vec::new();
+    let mut new_funs: Vec<Function> = Vec::new();
+    for ti in krate.trait_impls.iter() {
+        let Some(spec) = ext_of.get(&ti.x.trait_path) else { continue };
+        if !local(&ti.x.impl_path) || ti.x.auto_imported || ti.x.external_trait_blanket {
+            continue;
+        }
+        // Any user impl of the extension for the same self type (even one that matches no
+        // impl, which find_trait_impl_from_extension reports): leave that type alone.
+        let has_user_impl = krate.trait_impls.iter().any(|e| {
+            &e.x.trait_path == spec
+                && crate::ast_util::n_types_equal(
+                    &Arc::new(vec![e.x.trait_typ_args[0].clone()]),
+                    &Arc::new(vec![ti.x.trait_typ_args[0].clone()]),
+                )
+        });
+        if has_user_impl {
+            continue;
+        }
+        let Some(decls) = spec_decls.get(spec) else { continue };
+        let Some(tparams) = trait_params.get(spec) else { continue };
+        let last = ti.x.impl_path.segments.last().cloned().unwrap_or_else(|| Arc::new(String::new()));
+        let impl_path = ti.x.impl_path.pop_segment().push_segment(Arc::new(format!(
+            "{}%default_{}",
+            last,
+            spec.segments.last().map(|s| s.to_string()).unwrap_or_default()
+        )));
+        // Self and the trait's parameters, to the impl's trait arguments
+        let mut substs: HashMap<Ident, Typ> = HashMap::new();
+        substs.insert(crate::def::trait_self_type_param(), ti.x.trait_typ_args[0].clone());
+        for (x, t) in tparams.iter().zip(ti.x.trait_typ_args.iter().skip(1)) {
+            substs.insert(x.clone(), t.clone());
+        }
+        let sub = |t: &Typ| crate::sst_util::subst_typ(&substs, t);
+        for d in decls.iter() {
+            let mname = d.x.name.path.segments.last().unwrap().clone();
+            let body_const = if mname.starts_with("obeys_") {
+                Some(false)
+            } else if mname.ends_with("_req") {
+                Some(true)
+            } else {
+                None
+            };
+            if body_const.is_some() && !matches!(&*d.x.ret.x.typ, TypX::Bool) {
+                continue;
+            }
+            let body = body_const.map(|b| {
+                SpannedTyped::new(
+                    &ti.span,
+                    &Arc::new(TypX::Bool),
+                    ExprX::Const(crate::ast::Constant::Bool(b)),
+                )
+            });
+            let n_trait = 1 + tparams.len();
+            let own_typ_params: Vec<Ident> =
+                d.x.typ_params.iter().skip(n_trait).cloned().collect();
+            let mut typ_params: Vec<Ident> = (*ti.x.typ_params).clone();
+            typ_params.extend(own_typ_params);
+            let params: Vec<crate::ast::Param> = d
+                .x
+                .params
+                .iter()
+                .map(|p| p.new_x(crate::ast::ParamX { typ: sub(&p.x.typ), ..p.x.clone() }))
+                .collect();
+            let ret = d.x.ret.new_x(crate::ast::ParamX { typ: sub(&d.x.ret.x.typ), ..d.x.ret.x.clone() });
+            let mut attrs = (*d.x.attrs).clone();
+            attrs.is_external_body = body.is_none();
+            let fx = FunctionX {
+                name: Arc::new(crate::ast::FunX { path: impl_path.push_segment(mname.clone()) }),
+                proxy: None,
+                kind: FunctionKind::TraitMethodImpl {
+                    method: d.x.name.clone(),
+                    impl_path: impl_path.clone(),
+                    trait_path: spec.clone(),
+                    trait_typ_args: ti.x.trait_typ_args.clone(),
+                    inherit_body_from: None,
+                },
+                visibility: crate::ast::Visibility::public(),
+                body_visibility: crate::ast::BodyVisibility::public(),
+                opaqueness: Opaqueness::Revealed { visibility: crate::ast::Visibility::public() },
+                owning_module: ti.x.owning_module.clone(),
+                typ_params: Arc::new(typ_params),
+                typ_bounds: ti.x.typ_bounds.clone(),
+                params: Arc::new(params),
+                ret,
+                body,
+                attrs: Arc::new(attrs),
+                item_kind: ItemKind::Function,
+                ..d.x.clone()
+            };
+            warning_ctx.fun_warn_configs.insert(fx.name.clone(), None);
+            new_funs.push(Spanned::new(ti.span.clone(), fx));
+        }
+        let mut arg_impls = (*ti.x.trait_typ_arg_impls.x).clone();
+        arg_impls.push(crate::ast::ImplPath::TraitImplPath(ti.x.impl_path.clone()));
+        new_impls.push(Spanned::new(
+            ti.span.clone(),
+            TraitImplX {
+                impl_path,
+                typ_params: ti.x.typ_params.clone(),
+                typ_bounds: ti.x.typ_bounds.clone(),
+                trait_path: spec.clone(),
+                trait_typ_args: ti.x.trait_typ_args.clone(),
+                trait_typ_arg_impls: Spanned::new(
+                    ti.x.trait_typ_arg_impls.span.clone(),
+                    Arc::new(arg_impls),
+                ),
+                owning_module: ti.x.owning_module.clone(),
+                auto_imported: false,
+                external_trait_blanket: false,
+            },
+        ));
+    }
+    if new_impls.is_empty() {
+        return krate.clone();
+    }
+    let mut kratex = (**krate).clone();
+    kratex.functions.extend(new_funs);
+    kratex.trait_impls.extend(new_impls);
+    Arc::new(kratex)
+}

@@ -1094,3 +1094,52 @@ test_verify_one_file! {
         }
     } => Ok(())
 }
+
+test_verify_one_file! {
+    // user impls of std traits without the vstd extension impl get conservative defaults
+    #[test] default_extension_spec_impls verus_code! {
+        use vstd::prelude::*;
+        use vstd::std_specs::convert::FromSpec;
+        use vstd::std_specs::cmp::PartialEqSpec;
+        pub struct W(pub u8);
+        impl From<u8> for W { fn from(x: u8) -> Self { W(x) } }
+        pub struct G<T>(pub T);
+        impl<T> From<T> for G<T> { fn from(x: T) -> Self { G(x) } }
+        pub struct D(pub u8);
+        impl core::fmt::Display for D {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result { write!(f, "{}", self.0) }
+        }
+        pub struct E(pub u8);
+        impl PartialEq for E { fn eq(&self, o: &Self) -> bool { self.0 == o.0 } }
+        pub struct X(pub u8);
+        impl From<u8> for X { fn from(x: u8) -> (r: Self) ensures r.0 == x { X(x) } }
+        impl vstd::std_specs::convert::FromSpecImpl<u8> for X {
+            open spec fn obeys_from_spec() -> bool { true }
+            open spec fn from_spec(v: u8) -> Self { X(v) }
+        }
+        fn use_all(e1: &E, e2: &E) -> String {
+            let w: W = W::from(3);
+            let g: G<u8> = G::from(4u8);
+            let d = D(5);
+            let s = format!("{}", d);
+            let x = X::from(7u8);
+            assert(x.0 == 7);
+            let _b = e1 == e2;
+            s
+        }
+        fn bad1() {
+            let w: W = W::from(3);
+            assert(w.0 == 3); // FAILS
+        }
+        proof fn bad2() {
+            assert(<W as FromSpec<u8>>::obeys_from_spec()); // FAILS
+        }
+        proof fn bad3() {
+            assert(!<W as FromSpec<u8>>::obeys_from_spec());
+        }
+        fn bad4(e1: &E, e2: &E) {
+            let b = e1 == e2;
+            assert(b == (e1.0 == e2.0)); // FAILS
+        }
+    } => Err(err) => assert_fails(err, 3)
+}
