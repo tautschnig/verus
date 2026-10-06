@@ -477,3 +477,27 @@ test_verify_one_file_with_options! {
         }
     } => Ok(())
 }
+
+test_verify_one_file_with_options! {
+    #[test] async_fn_mut_param_captured_by_async_block ["--edition 2024"] => verus_code! {
+        use vstd::prelude::*;
+        async fn f(mut a: Option<u8>) -> bool {
+            let t = async {
+                match a.as_mut() {
+                    Some(x) => { *x = 1; true }
+                    None => false,
+                }
+            };
+            t.await
+        }
+        async fn g(a: Option<u8>) -> bool {
+            let t = async {
+                match a.as_mut() { // FAILS
+                    Some(x) => { *x = 1; true }
+                    None => false,
+                }
+            };
+            t.await
+        }
+    } => Err(err) => assert_rust_error_msg(err, "cannot borrow `a` as mutable, as it is not declared as mutable")
+}
