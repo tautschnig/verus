@@ -273,6 +273,9 @@ pub fn demote_external_traits(
         }
     }
 
+    let fun_map: HashMap<Fun, Function> =
+        krate.functions.iter().map(|f| (f.x.name.clone(), f.clone())).collect();
+    let opaque_paths: HashSet<Path> = krate.opaque_types.iter().map(|o| o.x.name.clone()).collect();
     let mut kratex = (**krate).clone();
     for function in &mut kratex.functions {
         for bound in function.x.typ_bounds.iter() {
@@ -340,6 +343,67 @@ pub fn demote_external_traits(
             *function = Spanned::new(function.span.clone(), functionx);
         }
 
+        // A call that falls back to the trait method (first case of demote_one_expr) has
+        // the unverified impl method's return type; for an `async fn` or `-> impl Trait`
+        // that is the impl's opaque type, which Verus never declared (the impl is not in
+        // VIR). Use the trait method's return type instead (the RPITIT projection, with the
+        // trait's bounds), as for a call through a generic.
+        let opaque_repl: std::cell::RefCell<Vec<(Typ, Typ)>> = std::cell::RefCell::new(vec![]);
+        if let Some(body) = &function.x.body {
+            let _ = crate::ast_visitor::map_expr_visitor(body, &|e: &Expr| {
+                if let ExprX::Call {
+                    target:
+                        CallTarget::Fun(
+                            CallTargetKind::DynamicResolved {
+                                resolved: resolved_fun,
+                                is_trait_default: false,
+                                ..
+                            },
+                            fun,
+                            typs,
+                            _,
+                            _,
+                        ),
+                    ..
+                } = &e.x
+                {
+                    if let TypX::Opaque { def_path, .. } = &*crate::ast_util::undecorate_typ(&e.typ)
+                    {
+                        if (internal_traits.contains(&get_trait(fun))
+                            || spec_free_trait_methods.contains(fun))
+                            && !funs.contains(resolved_fun)
+                            && !declared_external.contains(resolved_fun)
+                            && !opaque_paths.contains(def_path)
+                        {
+                            if let Some(decl) = fun_map.get(fun) {
+                                let tps = &decl.x.typ_params;
+                                let mut substs: HashMap<Ident, Typ> = HashMap::new();
+                                let rest: &[Typ] = if typs.len() == tps.len() + 1 {
+                                    substs.insert(
+                                        crate::def::trait_self_type_param(),
+                                        typs[0].clone(),
+                                    );
+                                    &typs[1..]
+                                } else {
+                                    &typs[..]
+                                };
+                                if rest.len() == tps.len() {
+                                    for (x, t) in tps.iter().zip(rest.iter()) {
+                                        substs.insert(x.clone(), t.clone());
+                                    }
+                                    let r = crate::sst_util::subst_typ(&substs, &decl.x.ret.x.typ);
+                                    let key = crate::ast_util::undecorate_typ(&e.typ);
+                                    opaque_repl.borrow_mut().push((key, r));
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(e.clone())
+            });
+        }
+        let opaque_repl = opaque_repl.into_inner();
+
         let mut map: VisitorScopeMap = ScopeMap::new();
         *function = crate::ast_visitor::map_function_visitor_env(
             &function,
@@ -368,6 +432,14 @@ pub fn demote_external_traits(
                         && !declared_external.contains(res_fun) =>
                 {
                     Ok(Arc::new(TypX::FnDef(fun.clone(), typs.clone(), None)))
+                }
+                TypX::Opaque { .. } => {
+                    for (k, r) in opaque_repl.iter() {
+                        if crate::ast_util::types_equal(k, typ) {
+                            return Ok(r.clone());
+                        }
+                    }
+                    Ok(typ.clone())
                 }
                 _ => Ok(typ.clone()),
             },
