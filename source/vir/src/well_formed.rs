@@ -307,6 +307,61 @@ fn check_path_and_get_function<'a, Emit: EmitError>(
     Ok(f)
 }
 
+/// With widened struct transparency (rust_to_vir_adts::widen_struct_transparency) a struct can
+/// be transparent where some of its fields are not visible. Rust's privacy checks keep exec
+/// code from naming such fields; this check covers the places where Verus requires more than
+/// the current module (bodies of public open spec functions and the like) and so would
+/// otherwise expose a private field.
+fn check_field_access(
+    ctxt: &Ctxt,
+    path: &Path,
+    variant: Option<&crate::ast::Ident>,
+    fields: &[crate::ast::Ident],
+    disallow_private_access: Option<(&Visibility, &str)>,
+    my_module: &Option<Path>,
+    span: &Span,
+    access_type: &str,
+) -> Result<(), VirErr> {
+    let Some(dt) = ctxt.dts.get(path) else { return Ok(()) };
+    let required_vis = if let Some((required_vis, _reason)) = disallow_private_access {
+        required_vis.clone()
+    } else {
+        match my_module {
+            None => return Ok(()),
+            Some(m) => Visibility { restricted_to: Some(m.clone()) },
+        }
+    };
+    for v in dt.x.variants.iter() {
+        if let Some(variant) = variant {
+            if &v.name != variant && !(dt.x.variants.len() == 1 && variant.len() == 0) {
+                continue;
+            }
+        }
+        for field in v.fields.iter() {
+            if !fields.iter().any(|f| f == &field.name) {
+                continue;
+            }
+            if !required_vis.at_least_as_restrictive_as(&field.a.2) {
+                let mut er = error(
+                    span,
+                    format!("disallowed: {:} for an opaque datatype", access_type),
+                )
+                .secondary_label(
+                    &dt.span,
+                    format!("field `{}` of this datatype is not visible here", field.name),
+                );
+                if let Some((_, reason)) = disallow_private_access {
+                    er = er.help(format!(
+                        "because this is a {reason:}, the {access_type:} must be well-formed wherever the {reason:} is visible"
+                    ));
+                }
+                return Err(er);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn check_datatype_access<Emit: EmitError>(
     ctxt: &Ctxt,
     path: &Path,
@@ -509,7 +564,7 @@ fn check_one_expr<Emit: EmitError>(
                 ));
             }
         }
-        ExprX::Ctor(Dt::Path(path), _variant, _fields, _update) => {
+        ExprX::Ctor(Dt::Path(path), variant, fields, update) => {
             check_datatype_access(
                 ctxt,
                 path,
@@ -519,12 +574,30 @@ fn check_one_expr<Emit: EmitError>(
                 "constructor",
                 emit,
             )?;
+            // A constructor determines every field, including those copied from `..update`
+            let all: Vec<crate::ast::Ident> = if update.is_some() {
+                ctxt.dts.get(path).map_or(vec![], |dt| {
+                    dt.x.variants.iter().flat_map(|v| v.fields.iter().map(|f| f.name.clone())).collect()
+                })
+            } else {
+                fields.iter().map(|f| f.name.clone()).collect()
+            };
+            check_field_access(
+                ctxt,
+                path,
+                Some(variant),
+                &all,
+                disallow_private_access,
+                &function.x.owning_module,
+                &expr.span,
+                "constructor",
+            )?;
         }
         ExprX::UnaryOpr(
             UnaryOpr::Field(FieldOpr {
                 datatype: Dt::Path(path),
-                variant: _,
-                field: _,
+                variant,
+                field,
                 get_variant: _,
                 check: _,
             }),
@@ -538,6 +611,16 @@ fn check_one_expr<Emit: EmitError>(
                 &expr.span,
                 "field expression",
                 emit,
+            )?;
+            check_field_access(
+                ctxt,
+                path,
+                Some(variant),
+                &[field.clone()],
+                disallow_private_access,
+                &function.x.owning_module,
+                &expr.span,
+                "field expression",
             )?;
         }
         ExprX::Multi(MultiOp::Chained(ops), _) => {
@@ -868,7 +951,7 @@ fn check_one_place<Emit: EmitError>(
 ) -> Result<(), VirErr> {
     match &place.x {
         PlaceX::Field(
-            FieldOpr { datatype: Dt::Path(path), variant: _, field: _, get_variant: _, check: _ },
+            FieldOpr { datatype: Dt::Path(path), variant, field, get_variant: _, check: _ },
             _,
         ) => {
             check_datatype_access(
@@ -879,6 +962,16 @@ fn check_one_place<Emit: EmitError>(
                 &place.span,
                 "field expression",
                 emit,
+            )?;
+            check_field_access(
+                ctxt,
+                path,
+                Some(variant),
+                &[field.clone()],
+                disallow_private_access,
+                &function.x.owning_module,
+                &place.span,
+                "field expression",
             )?;
         }
         _ => {}
@@ -894,7 +987,7 @@ fn check_one_pattern<Emit: EmitError>(
     emit: &mut Emit,
 ) -> Result<(), VirErr> {
     match &pattern.x {
-        PatternX::Constructor(Dt::Path(path), _id, _binders) => {
+        PatternX::Constructor(Dt::Path(path), id, binders) => {
             check_datatype_access(
                 ctxt,
                 path,
@@ -903,6 +996,17 @@ fn check_one_pattern<Emit: EmitError>(
                 &pattern.span,
                 "pattern constructor",
                 emit,
+            )?;
+            let names: Vec<crate::ast::Ident> = binders.iter().map(|b| b.name.clone()).collect();
+            check_field_access(
+                ctxt,
+                path,
+                Some(id),
+                &names,
+                disallow_private_access,
+                &function.x.owning_module,
+                &pattern.span,
+                "pattern constructor",
             )?;
             Ok(())
         }

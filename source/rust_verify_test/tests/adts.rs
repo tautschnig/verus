@@ -1735,7 +1735,7 @@ test_verify_one_file! {
                 let ghost f1 = a.foo();
             }
         }
-    } => Err(err) => assert_vir_error_msg(err, "disallowed: field expression for an opaque datatype")
+    } => Ok(())
 }
 
 test_verify_one_file! {
@@ -1774,9 +1774,9 @@ test_verify_one_file! {
         use crate::log::*;
         fn main() {
             let mut dev = Device::new(4096);
-            dev.write_byte(0, 0);
+            dev.write_byte(0, 0); // FAILS
         }
-    } => Err(err) => assert_vir_error_msg(err, "disallowed: field expression for an opaque datatype")
+    } => Err(err) => assert_one_fails(err)
 }
 
 test_verify_one_file! {
@@ -2023,4 +2023,71 @@ test_verify_one_file! {
         }
         fn g(n: N) -> (r: u8) requires n is T ensures r == n->T_0 { match n { N::T(x) => x, _ => 0 } }
     } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] struct_with_private_field_transparent_where_public_fields_visible verus_code! {
+        use vstd::prelude::*;
+        mod m {
+            use vstd::prelude::*;
+            pub struct S { pub a: u64, pub b: Vec<u8>, next: u64 }
+            impl S {
+                pub fn new() -> (r: S) ensures r.a == 0, r.b@.len() == 0 { S { a: 0, b: Vec::new(), next: 1 } }
+                pub fn bump(&mut self) ensures final(self).a == old(self).a, final(self).b@ == old(self).b@ { self.next = 2; }
+            }
+        }
+        fn use_it() {
+            let mut s = m::S::new();
+            assert(s.a == 0);
+            s.a = 5;
+            s.b.push(3);
+            assert(s.a == 5 && s.b@.len() == 1);
+            s.bump();
+            assert(s.a == 5 && s.b@ == seq![3u8]);
+            let m::S { a, .. } = s;
+            assert(a == 5);
+        }
+        fn bad() {
+            let mut s = m::S::new();
+            s.a = 5;
+            assert(s.a == 6); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    #[test] struct_with_private_field_public_open_spec_fn_reads_private verus_code! {
+        mod m {
+            pub struct S { pub a: u64, next: u64 }
+            pub open spec fn get(s: S) -> u64 { s.next }
+        }
+    } => Err(err) => assert_vir_error_msg(err, "disallowed: field expression for an opaque datatype")
+}
+
+test_verify_one_file! {
+    #[test] struct_with_private_field_public_open_spec_fn_reads_public verus_code! {
+        mod m {
+            pub struct S { pub a: u64, next: u64 }
+            pub open spec fn get(s: S) -> u64 { s.a }
+        }
+        fn f(s: m::S) {
+            assert(m::get(s) == s.a);
+        }
+    } => Ok(())
+}
+
+test_verify_one_file! {
+    #[test] struct_with_type_invariant_stays_opaque_outside verus_code! {
+        mod m {
+            use vstd::prelude::*;
+            pub struct T { pub a: u64, inner: u64 }
+            impl T {
+                #[verifier::type_invariant]
+                spec fn inv(self) -> bool { self.a <= self.inner }
+            }
+        }
+        fn write(t: &mut m::T) {
+            t.a = 100;
+        }
+    } => Err(err) => assert_vir_error_msg(err, "disallowed: field expression for an opaque datatype")
 }

@@ -852,5 +852,46 @@ pub(crate) fn setup_type_invariants(krate: &mut KrateX) -> Result<(), VirErr> {
         }
     }
 
+    widen_struct_transparency(krate);
     Ok(())
+}
+
+/// A struct whose fields have different visibilities (`pub balances` next to a private
+/// `next_id`) used to be opaque wherever its most restrictive field is not visible, so code
+/// there could not read or write the fields Rust lets it use. Without a type invariant, such a
+/// struct is now transparent wherever its least restrictive field is visible (and the type
+/// itself is). The SMT encoding is then the struct's real definition, so this adds no
+/// assumption; Rust's privacy checks still keep that code from naming, constructing or
+/// matching on the private fields. A struct with a type invariant keeps the old rule: its
+/// invariant is only maintained if code outside the defining module cannot write its fields.
+fn widen_struct_transparency(krate: &mut KrateX) {
+    for dt in krate.datatypes.iter_mut() {
+        if dt.x.user_defined_invariant_fn.is_some() || dt.x.proxy.is_some() {
+            continue;
+        }
+        if dt.x.variants.len() != 1 {
+            continue;
+        }
+        let DatatypeTransparency::WhenVisible(vis) = &dt.x.transparency else {
+            continue;
+        };
+        // Field visibilities (and the type's) are all ancestors of the defining module, so
+        // they are ordered; take the least restrictive.
+        let mut widest: Option<vir::ast::Visibility> = None;
+        for field in dt.x.variants[0].fields.iter() {
+            let fvis = &field.a.2;
+            widest = Some(match widest {
+                None => fvis.clone(),
+                Some(w) => if fvis.at_least_as_restrictive_as(&w) { w } else { fvis.clone() },
+            });
+        }
+        let Some(widest) = widest else { continue };
+        let new_vis = widest.join(&dt.x.visibility);
+        if new_vis.at_least_as_restrictive_as(vis) {
+            continue;
+        }
+        let mut d = (**dt).clone();
+        d.x.transparency = DatatypeTransparency::WhenVisible(new_vis);
+        *dt = Arc::new(d);
+    }
 }
