@@ -312,13 +312,33 @@ pub trait ExBufRead: std::io::Read {
     type ExternalTraitSpecificationFor: std::io::BufRead;
 
     fn lines(self) -> std::io::Lines<Self> where Self: Sized;
+
+    fn read_until(&mut self, byte: u8, buf: &mut alloc::vec::Vec<u8>) -> std::io::Result<usize>;
 }
 
 #[verifier::external_trait_specification]
 #[verifier::allow(undeclared_external_trait)]
 pub trait ExRead {
     type ExternalTraitSpecificationFor: std::io::Read;
+
+    fn read_exact(&mut self, buf: &mut [u8]) -> std::io::Result<()>;
 }
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+#[verifier::reject_recursive_types(R)]
+pub struct ExBufReader<R: ?Sized>(std::io::BufReader<R>);
+
+pub assume_specification<R: std::io::Read>[ std::io::BufReader::<R>::new ](inner: R) -> std::io::BufReader<R>;
+
+/// `std::fs::rename`: content-free (the file system is not modelled).
+pub assume_specification<P: AsRef<std::path::Path>, Q: AsRef<std::path::Path>>[ std::fs::rename ](
+    from: P,
+    to: Q,
+) -> std::io::Result<()>;
+
+/// `std::process::id`: content-free.
+pub assume_specification[ std::process::id ]() -> u32;
 
 #[verifier::external_type_specification]
 #[verifier::external_body]

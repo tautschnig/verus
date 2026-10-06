@@ -34,6 +34,19 @@ pub trait ExIntoFuture {
     type Output;
 
     type IntoFuture: core::future::Future<Output = Self::Output>;
+
+    /// `.await` calls this. Nothing is said about the future (Verus does not model futures).
+    fn into_future(self) -> Self::IntoFuture;
 }
+
+#[verifier::external_type_specification]
+#[verifier::external_body]
+#[verifier::reject_recursive_types(F)]
+pub struct ExPollFn<F>(core::future::PollFn<F>);
+
+/// `poll_fn(f)` (used by `tokio::select!`): content-free.
+pub assume_specification<T, F: FnMut(&mut core::task::Context<'_>) -> core::task::Poll<T>>[
+    core::future::poll_fn
+](f: F) -> core::future::PollFn<F>;
 
 } // verus!

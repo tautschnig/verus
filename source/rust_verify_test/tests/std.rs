@@ -3576,3 +3576,28 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file_with_options! {
+    #[test] s28b_std_specs ["--edition 2024"] => verus_code! {
+        use vstd::prelude::*;
+        use std::io::{BufRead, Read};
+        fn f(path: &std::path::Path, to: &std::path::Path) -> std::io::Result<u32> {
+            let file = std::fs::File::open(path)?;
+            let mut reader = std::io::BufReader::new(file);
+            let mut buf = Vec::new();
+            let _n = reader.read_until(b'\n', &mut buf)?;
+            let mut f2 = std::fs::File::open(path)?;
+            let mut last = [0u8; 1];
+            f2.read_exact(&mut last)?;
+            std::fs::rename(path, to)?;
+            Ok(std::process::id())
+        }
+        async fn g(x: u8) -> u8 {
+            let fut = async move { x };
+            core::future::IntoFuture::into_future(fut).await
+        }
+        fn h() {
+            let _p = core::future::poll_fn(|_cx: &mut core::task::Context<'_>| core::task::Poll::Ready(1u8));
+        }
+    } => Ok(())
+}
