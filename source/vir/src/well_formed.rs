@@ -743,14 +743,6 @@ fn check_one_expr<Emit: EmitError>(
                             "Not supported: pattern containing both an or-pattern (|) and a binding by mutable reference",
                         ));
                     }
-                    if has_guard {
-                        // This is complicated because we need to create a mutable borrow to evaluate
-                        // the test condition, but the mutable borrow is immutable until it ends
-                        return Err(error(
-                            &span,
-                            "Not supported: match arm containing both a match-guard and a binding by mutable reference",
-                        ));
-                    }
                 }
 
                 // Error if the last arm has a guard (this would just be a warning from Rust)

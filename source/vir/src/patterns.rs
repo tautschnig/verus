@@ -20,12 +20,6 @@ pub fn pattern_to_exprs(
     let e = pattern_to_exprs_rec(ctx, pattern, place, &mut pattern_bound_decls, false)?;
 
     for pbd in pattern_bound_decls {
-        if has_guard && pbd.mut_ref {
-            return Err(error(
-                &pattern.span,
-                "Not yet supported: guard pattern when at least one bound var is mutably borrowed",
-            ));
-        }
 
         let ComputedPatternBinding { name, mut_ref, place } = pbd;
 

@@ -3317,15 +3317,92 @@ test_verify_one_file_with_options! {
 }
 
 test_verify_one_file_with_options! {
-    #[test] not_support_pattern_mut_ref_binding_with_guard [] => verus_code! {
+    #[test] pattern_mut_ref_binding_with_guard [] => verus_code! {
         fn test() {
-            let m = (0, 1);
+            let mut m = (0u8, 1u8);
             match m {
-                (ref mut a, b) if b == 1 => { }
+                (ref mut a, b) if b == 1 => { *a = 5; }
                 _ => { }
             }
+            assert(m.0 == 5);
+            match m {
+                (ref mut a, b) if b == 2 => { *a = 6; }
+                _ => { }
+            }
+            assert(m.0 == 5);
+            assert(false); // FAILS
         }
-    } => Err(err) => assert_vir_error_msg(err, "Not supported: match arm containing both a match-guard and a binding by mutable reference")
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file_with_options! {
+    #[test] match_guard_mut_ref_binding_through_reborrow [] => verus_code! {
+        use vstd::prelude::*;
+        pub struct Open { seq: i64, data: Vec<u8> }
+        fn step(current: &mut Option<Open>, seq: i64, x: u8) -> (pushed: bool)
+            ensures
+                pushed ==> *old(current) is Some && (*old(current))->Some_0.seq == seq,
+                pushed ==> *final(current) is Some
+                    && (*final(current))->Some_0.data@ == (*old(current))->Some_0.data@.push(x),
+                !pushed ==> *final(current) == *old(current),
+        {
+            match &mut *current {
+                Some(open) if open.seq == seq => { open.data.push(x); true }
+                _ => false,
+            }
+        }
+        fn bad(current: &mut Option<Open>, seq: i64, x: u8) {
+            match &mut *current {
+                Some(open) if open.seq == seq => { open.data.push(x); }
+                _ => {}
+            }
+            assert(*current == *old(current)); // FAILS
+        }
+        fn bad2(current: &mut Option<Open>, seq: i64) {
+            match &mut *current {
+                Some(open) if open.seq == seq => {}
+                _ => { assert(*current is None); } // FAILS
+            }
+        }
+    } => Err(err) => assert_fails(err, 2)
+}
+
+test_verify_one_file_with_options! {
+    #[test] match_guard_mut_ref_binding_implicit_reborrow_unsupported [] => verus_code! {
+        pub struct Open { seq: i64 }
+        fn implicit(current: &mut Option<Open>, seq: i64) -> bool {
+            match current {
+                Some(open) if open.seq == seq => true,
+                _ => false,
+            }
+        }
+    } => Err(err) => assert_vir_error_msg(err, "match arm containing both a match-guard and a binding by mutable reference, on a `&mut` variable")
+}
+
+test_verify_one_file_with_options! {
+    #[test] match_fallthrough_resolves_scrutinee [] => verus_code! {
+        use vstd::prelude::*;
+        pub struct Open { seq: i64, data: Vec<u8> }
+        fn b(current: &mut Option<Open>, seq: i64) {
+            let ghost c0 = *current;
+            match &mut *current {
+                Some(open) if open.seq == seq => { }
+                _ => { }
+            }
+            assert(*current == c0);
+        }
+        fn c(current: &mut Option<Open>, k: u8) {
+            let ghost c0 = *current;
+            match &mut *current {
+                Some(open) if k == 1 => { open.seq = 1; }
+                Some(open) if k == 2 => { open.seq = 2; }
+                _ => { }
+            }
+            assert(k != 1 && k != 2 ==> *current == c0);
+            assert(k == 2 && c0 is Some ==> (*current)->Some_0.seq == 2);
+            assert(k == 2 ==> *current == c0); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
 }
 
 test_verify_one_file_with_options! {

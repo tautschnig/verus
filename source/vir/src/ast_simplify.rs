@@ -592,9 +592,45 @@ fn simplify_one_expr(
                         &guard.typ,
                         ExprX::MatchGuardFreeze(place.clone(), guard.clone()),
                     );
-                    let test_exp = ExprX::Logical(LogicalOp::And, test_pattern, guard);
-                    let test = SpannedTyped::new(&arm.x.pattern.span, &t_bool, test_exp);
-                    let block = ExprX::Block(Arc::new(decls.clone()), Some(test));
+                    // Bindings by mutable reference are borrowed once for the guard and again
+                    // for the body. Rust lets the guard use them only immutably, so the guard's
+                    // borrow is resolved (final == current) as soon as it is taken. Resolution
+                    // inference has already run, so say so here.
+                    let mut guard_decls = decls.clone();
+                    for d in decls.iter() {
+                        if let StmtX::Decl { pattern, init: Some(init), .. } = &d.x {
+                            if let (PatternX::Var(b), TypX::MutRef(_)) =
+                                (&pattern.x, &*init.typ)
+                            {
+                                let v = SpannedTyped::new(
+                                    &d.span,
+                                    &init.typ,
+                                    ExprX::Var(b.name.clone()),
+                                );
+                                let r = SpannedTyped::new(
+                                    &d.span,
+                                    &t_bool,
+                                    ExprX::UnaryOpr(UnaryOpr::HasResolved(init.typ.clone()), v),
+                                );
+                                let a = crate::ast_util::mk_assume(&d.span, &r);
+                                guard_decls.push(Spanned::new(d.span.clone(), StmtX::Expr(a)));
+                            }
+                        }
+                    }
+                    // The bindings are taken only once the pattern has matched: a borrow of a
+                    // variant's field writes the variant back, so taking it first would make
+                    // the variant test vacuous.
+                    let guard_block = SpannedTyped::new(
+                        &guard.span.clone(),
+                        &t_bool,
+                        ExprX::Block(Arc::new(guard_decls), Some(guard)),
+                    );
+                    let f = SpannedTyped::new(
+                        &arm.x.pattern.span,
+                        &t_bool,
+                        ExprX::Const(Constant::Bool(false)),
+                    );
+                    let block = ExprX::If(test_pattern, guard_block, Some(f));
                     SpannedTyped::new(&arm.x.pattern.span, &t_bool, block)
                 };
                 let test_is_true = matches!(&test.x, ExprX::Const(Constant::Bool(true)));

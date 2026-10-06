@@ -3786,6 +3786,20 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
                     }
                     continue;
                 }
+                // A match guard with bindings by mutable reference is supported when the
+                // scrutinee is an explicit `&mut place` (the guard reads through the binding,
+                // which Rust lets it do only immutably). With an implicit reborrow of a `&mut`
+                // scrutinee (default binding modes) the erased MIR loses the guard's binding.
+                if arm.guard.is_some()
+                    && vir::patterns::pattern_find_mut_binding(&pattern).is_some()
+                    && matches!(bctx.types.expr_ty(expr).kind(), TyKind::Ref(_, _, Mutability::Mut))
+                    && !matches!(expr.kind, ExprKind::AddrOf(BorrowKind::Ref, Mutability::Mut, _))
+                {
+                    unsupported_err!(
+                        arm.pat.span,
+                        "match arm containing both a match-guard and a binding by mutable reference, on a `&mut` variable (write the scrutinee as `&mut *place`)"
+                    );
+                }
                 let guard = match &arm.guard {
                     None => bctx.spanned_typed_new(
                         expr.span,
