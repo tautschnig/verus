@@ -2276,7 +2276,10 @@ fn stm_to_stmts_inner(ctx: &Ctx, state: &mut State, stm: &Stm) -> Result<Vec<Stm
             let (has_ens, resolved_ens, ens_fun, ens_typ_args) = match resolved_method {
                 Some((res_fun, res_typs))
                     if *ctx.funcs_with_ensure_predicate.get(res_fun).unwrap_or_else(|| {
-                        panic!("no ensure-predicate entry for resolved method {:?}", res_fun)
+                        panic!(
+                            "no ensure-predicate entry for resolved method {:?} (module {:?})",
+                            res_fun, ctx.module.x.path
+                        )
                     }) =>
                 {
                     // Use ens predicate for the statically-resolved function

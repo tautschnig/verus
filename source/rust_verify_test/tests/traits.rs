@@ -5052,3 +5052,23 @@ test_verify_one_file! {
         mk!();
     } => Ok(())
 }
+
+test_verify_one_file! {
+    // the inherited default method of a pub(crate) trait is visible where the trait is
+    // (it used to be restricted to the impl's module; callers elsewhere crashed)
+    #[test] inherited_default_of_crate_visible_trait verus_code! {
+        mod vt {
+            pub(crate) trait W: Copy {
+                fn as_wire(&self) -> (r: u8) ensures r == 7 { 7 }
+            }
+            #[derive(Clone, Copy)]
+            pub enum A { X, Y }
+            impl W for A {}
+        }
+        mod user {
+            use crate::vt::*;
+            pub fn f(a: A) -> (r: u8) ensures r == 7 { a.as_wire() }
+            pub fn g(a: A) -> (r: u8) ensures r == 8 { a.as_wire() } // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}

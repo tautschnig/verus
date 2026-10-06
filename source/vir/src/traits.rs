@@ -793,13 +793,13 @@ pub fn inherit_default_bodies(
                 .unwrap();
                 let name =
                     crate::def::trait_inherit_default_name(&default_function.x.name, &impl_path);
+                // The inherited method is callable wherever the trait's method is (Rust's
+                // visibility of a trait method is the trait's). `restricted_to.and(owning
+                // module)` narrowed a `pub(crate)` trait's default method to the module of the
+                // impl, so other modules calling it on the impl's type did not declare it
+                // and crashed ("no ensure-predicate entry for resolved method").
                 let visibility = Visibility {
-                    restricted_to: default_function
-                        .x
-                        .visibility
-                        .restricted_to
-                        .clone()
-                        .and(trait_impl.x.owning_module.clone()),
+                    restricted_to: default_function.x.visibility.restricted_to.clone(),
                 };
                 let f_typ_params = f_typ_params.iter().map(rename_f_typ_param);
                 let typ_params: Vec<Ident> =
