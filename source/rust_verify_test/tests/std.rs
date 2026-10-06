@@ -3617,3 +3617,20 @@ test_verify_one_file! {
         }
     } => Ok(())
 }
+
+test_verify_one_file! {
+    #[test] from_bool_ints verus_code! {
+        use vstd::prelude::*;
+        fn f(a: bool, b: bool) -> (r: usize) ensures r <= 3 {
+            1 + usize::from(a) + usize::from(b)
+        }
+        fn g() {
+            let t = u8::from(true);
+            assert(t == 1u8);
+            let x = i64::from(false);
+            assert(x == 0);
+            let y: u32 = true.into();
+            assert(y == 2); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}

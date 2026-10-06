@@ -146,6 +146,29 @@ macro_rules! impl_from_spec {
     };
 }
 
+macro_rules! impl_from_bool_spec {
+    ([$($to: ty)*]) => {
+        verus!{
+        $(
+        pub assume_specification[ <$to as core::convert::From<bool>>::from ](a: bool) -> (ret: $to);
+
+        impl FromSpecImpl<bool> for $to {
+            open spec fn obeys_from_spec() -> bool {
+                true
+            }
+
+            open spec fn from_spec(v: bool) -> $to {
+                if v { 1 } else { 0 }
+            }
+        }
+        )*
+        }
+    };
+}
+
+// core/src/convert/num.rs `impl_from!(bool => ..)`: `small as Self`, i.e. 1 for true, 0 for false
+impl_from_bool_spec! {[u8 u16 u32 u64 usize u128 i8 i16 i32 i64 isize i128]}
+
 impl_from_spec! {u8 => [u16 u32 u64 usize u128 i16 i32 i64 i128 isize]}
 impl_from_spec! {u16 => [u32 u64 usize u128 i32 i64 i128]}
 impl_from_spec! {u32 => [u64 u128 i64 i128]}

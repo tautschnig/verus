@@ -1504,3 +1504,15 @@ fn box_pin_holds() {
     let p2: core::pin::Pin<Box<u64>> = Box::pin(x);
     assert!(*core::pin::Pin::into_inner(p2) == x);
 }
+
+/// `From<bool>` for the integer types: 1 for true, 0 for false (vstd `from_spec`).
+#[cfg(kani)]
+#[kani::proof]
+fn from_bool_holds() {
+    let b: bool = kani::any();
+    let e: u8 = if b { 1 } else { 0 };
+    assert!(u8::from(b) == e && u16::from(b) == e as u16 && u32::from(b) == e as u32);
+    assert!(u64::from(b) == e as u64 && usize::from(b) == e as usize && u128::from(b) == e as u128);
+    assert!(i8::from(b) == e as i8 && i16::from(b) == e as i16 && i32::from(b) == e as i32);
+    assert!(i64::from(b) == e as i64 && isize::from(b) == e as isize && i128::from(b) == e as i128);
+}
