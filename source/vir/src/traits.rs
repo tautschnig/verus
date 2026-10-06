@@ -1938,6 +1938,7 @@ pub fn merge_external_traits(krate: Krate) -> Result<Krate, VirErr> {
                     typ_params,
                     typ_bounds,
                     assoc_typs,
+                    assoc_typs_own_params,
                     assoc_typs_bounds,
                     mut methods,
                     is_unsafe,
@@ -1958,6 +1959,13 @@ pub fn merge_external_traits(krate: Krate) -> Result<Krate, VirErr> {
                     }
                 }
                 let assoc_typs = Arc::new(assoc_typs);
+                let mut assoc_typs_own_params = (*assoc_typs_own_params).clone();
+                for p in t.x.assoc_typs_own_params.iter() {
+                    if !assoc_typs_own_params.contains(p) {
+                        assoc_typs_own_params.push(p.clone());
+                    }
+                }
+                let assoc_typs_own_params = Arc::new(assoc_typs_own_params);
                 let mut typ_bounds = (*typ_bounds).clone();
                 for b in t.x.typ_bounds.iter() {
                     if !typ_bounds.iter().any(|b2| generic_bounds_equal(b, b2)) {
@@ -1992,6 +2000,7 @@ pub fn merge_external_traits(krate: Krate) -> Result<Krate, VirErr> {
                     typ_params,
                     typ_bounds,
                     assoc_typs,
+                    assoc_typs_own_params,
                     assoc_typs_bounds,
                     methods,
                     is_unsafe,

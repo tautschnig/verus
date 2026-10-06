@@ -1041,3 +1041,51 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    #[test] type_generic_associated_type verus_code! {
+        use vstd::prelude::*;
+        pub trait Arr { type At<E>; }
+        impl Arr for u16 { type At<E> = (E, E); }
+        impl Arr for u32 { type At<E> = E; }
+        spec fn id_at<A: Arr, E>(x: A::At<E>) -> A::At<E> { x }
+        proof fn t(p: (u8, u8)) {
+            assert(id_at::<u16, u8>(p) == p);
+        }
+        proof fn t2(p: u8) {
+            assert(id_at::<u32, u8>(p) == p);
+        }
+        fn generic<A: Arr>(x: A::At<u8>) -> (r: A::At<u8>) ensures r == x { x }
+        fn c() {
+            let r = generic::<u16>((1u8, 2u8));
+            assert(r.0 == 1);
+        }
+        proof fn bad<A: Arr>(x: A::At<u8>, y: A::At<u8>) {
+            assert(x == y); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file_with_options! {
+    #[test] rpitit_in_generic_trait_method ["--edition 2024"] => verus_code! {
+        use vstd::prelude::*;
+        pub trait Ser { fn len(&self) -> u8; }
+        impl Ser for u8 { fn len(&self) -> u8 { 1 } }
+        pub trait W {
+            async fn send_frame(&mut self, frame: &impl Ser) -> u8;
+        }
+        pub struct T(u8);
+        impl W for T {
+            async fn send_frame(&mut self, frame: &impl Ser) -> u8 { frame.len() }
+        }
+        async fn use_w<X: W>(w: &mut X) -> u8 {
+            let a = w.send_frame(&3u8).await;
+            a
+        }
+        async fn use_t(t: &mut T) -> u8 {
+            let r = t.send_frame(&3u8).await;
+            assert(r == 1); // FAILS
+            r
+        }
+    } => Err(err) => assert_one_fails(err)
+}

@@ -185,18 +185,25 @@ fn translate_assoc_type<'tcx>(
     let assoc_def_id = ai.trait_item_def_id().unwrap();
     let bounds = ctxt.tcx.item_bounds(assoc_def_id);
     let assoc_generics = ctxt.tcx.generics_of(assoc_def_id);
-    if assoc_generics
-        .own_params
-        .iter()
-        .any(|p| !matches!(p.kind, rustc_middle::ty::GenericParamDefKind::Lifetime))
-    {
-        // (the associated type of `-> impl Trait` in a trait method with type parameters, or
-        // with an `impl Trait` argument, is generic over those types)
-        return crate::util::err_span(
-            impl_item_span,
-            "Verus does not yet support associated types generic over types (including `-> impl Trait` in a trait method with type parameters)",
-        );
+    // An associated type with its own type parameters (`type ArrayType<T> = [T; N]`, or the
+    // type of `-> impl Trait` in a method with type parameters): the axiom quantifies over them
+    // too, and they follow the trait's arguments in the projection.
+    let mut typ_params = typ_params;
+    let mut trait_typ_args = (*trait_typ_args).clone();
+    for p in ctxt.tcx.generics_of(impl_item_id).own_params.iter() {
+        if let rustc_middle::ty::GenericParamDefKind::Type { .. } = p.kind {
+            let param = rustc_middle::ty::ParamTy::new(p.index, p.name);
+            let x = Arc::new(crate::rust_to_vir_base::param_ty_to_vir_name(&param));
+            Arc::make_mut(&mut typ_params).push(x.clone());
+            trait_typ_args.push(Arc::new(vir::ast::TypX::TypParam(x)));
+        } else if !matches!(p.kind, rustc_middle::ty::GenericParamDefKind::Lifetime) {
+            return crate::util::err_span(
+                impl_item_span,
+                "Verus does not yet support associated types generic over constants",
+            );
+        }
     }
+    let trait_typ_args = Arc::new(trait_typ_args);
     let mut assoc_args: Vec<rustc_middle::ty::GenericArg> = ctxt
         .tcx
         .normalize_erasing_regions(
@@ -207,6 +214,12 @@ fn translate_assoc_type<'tcx>(
         .into_iter()
         .collect();
     for p in &assoc_generics.own_params {
+        if let rustc_middle::ty::GenericParamDefKind::Type { .. } = p.kind {
+            let index = assoc_generics.param_def_id_to_index(ctxt.tcx, p.def_id).expect("param_def");
+            let t = rustc_middle::ty::Ty::new_param(ctxt.tcx, index, p.name);
+            assoc_args.push(rustc_middle::ty::GenericArg::from(t));
+            continue;
+        }
         let e = rustc_middle::ty::EarlyParamRegion {
             //def_id: p.def_id,
             index: assoc_generics.param_def_id_to_index(ctxt.tcx, p.def_id).expect("param_def"),
@@ -215,9 +228,19 @@ fn translate_assoc_type<'tcx>(
         let r = rustc_middle::ty::Region::new_early_param(ctxt.tcx, e);
         assoc_args.push(rustc_middle::ty::GenericArg::from(r));
     }
+    let has_own_typ_params = assoc_generics
+        .own_params
+        .iter()
+        .any(|p| matches!(p.kind, rustc_middle::ty::GenericParamDefKind::Type { .. }));
     let inst_bounds = bounds.instantiate(ctxt.tcx, &*assoc_args);
     let typing_env = TypingEnv::post_analysis(ctxt.tcx, impl_item_id);
-    let inst_bounds = ctxt.tcx.normalize_erasing_regions(typing_env, inst_bounds);
+    // The bounds of a type-generic associated type are not part of the trait's VIR
+    // (rust_to_vir_trait), so no impl paths are needed for them.
+    let inst_bounds = if has_own_typ_params {
+        vec![]
+    } else {
+        ctxt.tcx.normalize_erasing_regions(typing_env, inst_bounds).into_iter().collect()
+    };
 
     // Include the instantiated bounds of selected impls, not just the impls themselves.
     let impl_paths = crate::rust_to_vir_base::get_impl_paths_for_clauses(

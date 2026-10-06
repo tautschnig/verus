@@ -27,7 +27,9 @@ pub fn assoc_type_decls_to_air(ctx: &Ctx, traits: &Vec<Trait>) -> Commands {
             let mut push_command = |decoration: bool, index: usize| {
                 let projector = ctx.name_ctxt.projection(decoration, &tr.x.name, name);
                 let mut typs: Vec<air::ast::Typ> = Vec::new();
-                let n = 1 + tr.x.typ_params.len(); // self type + type arguments
+                // self type + type arguments + the associated type's own type parameters
+                let own = tr.x.assoc_typs_own_params.iter().find(|(x, _)| x == name);
+                let n = 1 + tr.x.typ_params.len() + own.map_or(0, |(_, k)| *k);
                 for _ in 0..n {
                     typs.extend(crate::def::types().iter().map(|s| str_typ(s)));
                 }

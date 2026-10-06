@@ -151,6 +151,7 @@ pub(crate) fn translate_trait<'tcx>(
         (generics_params, typ_bounds)
     };
     let mut assoc_typs: Vec<Ident> = Vec::new();
+    let mut assoc_typs_own_params: Vec<(vir::ast::Ident, usize)> = Vec::new();
     let mut assoc_typs_bounds: Vec<GenericBound> = Vec::new();
     let mut methods: Vec<FunctionOrConstInfo> = Vec::new();
     let mut method_names: Vec<Fun> = Vec::new();
@@ -421,20 +422,35 @@ pub(crate) fn translate_trait<'tcx>(
                 );
             }
             TraitItemKind::Type(_generic_bounds, None) => {
-                unsupported_err_unless!(item_generics_params.len() == 0, *span, "trait generics");
-                unsupported_err_unless!(item_typ_bounds.len() == 0, *span, "trait generics");
+                // `type ArrayType<T>`: the projection has `T` after the trait's arguments.
+                // Bounds on the type itself (`ArrayType<T>: AsRef<[T]>`) mention `T`, so they
+                // cannot be stated over the trait's parameters alone; they are dropped, which
+                // only weakens what Verus knows about the type. Bounds on the type's own
+                // parameters (`type At<E: Copy>`) are dropped too: an impl's axiom then holds
+                // for every `E`, including those for which Rust does not define the type, and
+                // no Rust code can observe those.
+                let n_own = item_generics_params.len();
+                unsupported_err_unless!(
+                    n_own > 0 || item_typ_bounds.len() == 0,
+                    *span,
+                    "trait generics"
+                );
                 assoc_typs.push(Arc::new(ident.to_string()));
-
-                let bounds = tcx.item_bounds(trait_item.owner_id.def_id.to_def_id()).skip_binder();
-                let bounds = bounds.iter().map(|p| (p, *span)).collect::<Vec<_>>();
-                let vir_bounds = process_predicate_bounds(
-                    tcx,
-                    trait_def_id,
-                    &ctxt.verus_items,
-                    bounds.iter(),
-                    tcx.generics_of(trait_def_id),
-                )?;
-                assoc_typs_bounds.extend(vir_bounds);
+                if n_own > 0 {
+                    assoc_typs_own_params.push((Arc::new(ident.to_string()), n_own));
+                } else {
+                    let bounds =
+                        tcx.item_bounds(trait_item.owner_id.def_id.to_def_id()).skip_binder();
+                    let bounds = bounds.iter().map(|p| (p, *span)).collect::<Vec<_>>();
+                    let vir_bounds = process_predicate_bounds(
+                        tcx,
+                        trait_def_id,
+                        &ctxt.verus_items,
+                        bounds.iter(),
+                        tcx.generics_of(trait_def_id),
+                    )?;
+                    assoc_typs_bounds.extend(vir_bounds);
+                }
 
                 if let Some(ex_trait_ref_for) = ex_trait_ref_for {
                     let ex_item_id_for = ex_item_id_for.expect("ex_item_id_for");
@@ -538,19 +554,21 @@ pub(crate) fn translate_trait<'tcx>(
         ) {
             continue;
         }
-        if tcx
+        let n_own = tcx
             .generics_of(assoc_item.def_id)
             .own_params
             .iter()
-            .any(|p| !matches!(p.kind, rustc_middle::ty::GenericParamDefKind::Lifetime))
-        {
-            return err_span(
-                trait_span,
-                "Verus does not yet support `-> impl Trait` (or `async fn`) in a trait method with type parameters",
-            );
-        }
+            .filter(|p| !matches!(p.kind, rustc_middle::ty::GenericParamDefKind::Lifetime))
+            .count();
         let name = crate::rust_to_vir_base::assoc_item_name(tcx, assoc_item, trait_span)?;
-        assoc_typs.push(name);
+        assoc_typs.push(name.clone());
+        if n_own > 0 {
+            // `-> impl Trait` in a method with type parameters: the associated type is generic
+            // over them (see the HIR case above); its bounds (`Future<Output = ..> + Send`)
+            // are dropped.
+            assoc_typs_own_params.push((name, n_own));
+            continue;
+        }
         let bounds = tcx.item_bounds(assoc_item.def_id).skip_binder();
         let bounds = bounds.iter().map(|p| (p, trait_span)).collect::<Vec<_>>();
         let vir_bounds = process_predicate_bounds(
@@ -588,6 +606,7 @@ pub(crate) fn translate_trait<'tcx>(
         visibility,
         methods: Arc::new(method_names),
         assoc_typs: Arc::new(assoc_typs),
+        assoc_typs_own_params: Arc::new(assoc_typs_own_params),
         typ_params: generics_params,
         typ_bounds,
         assoc_typs_bounds,

@@ -1934,6 +1934,10 @@ pub struct TraitX {
     pub typ_params: TypPositives,
     pub typ_bounds: GenericBounds,
     pub assoc_typs: Arc<Vec<Ident>>,
+    /// Associated types with their own type parameters (`type ArrayType<T>`, or the type of
+    /// `-> impl Trait` in a method with type parameters), with the number of those
+    /// parameters. A projection of such a type has them after the trait's type arguments.
+    pub assoc_typs_own_params: Arc<Vec<(Ident, usize)>>,
     pub assoc_typs_bounds: GenericBounds,
     pub methods: Arc<Vec<Fun>>,
     pub is_unsafe: bool,

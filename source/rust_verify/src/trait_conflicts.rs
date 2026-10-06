@@ -386,7 +386,12 @@ pub(crate) fn gen_check_trait_impl_conflicts(
         // The associated types rustc synthesizes for `-> impl Trait` in traits are left out of
         // the model program: each impl's is an opaque type, which has no model, and they
         // cannot make impls overlap (they are determined by the impl).
-        let is_rpitit = |a: &Ident| a.starts_with(vir::def::RPITIT_ASSOC_PREFIX);
+        // The same holds for associated types with their own type parameters (generic
+        // associated types), which the model program has no syntax for.
+        let is_rpitit = |a: &Ident| {
+            a.starts_with(vir::def::RPITIT_ASSOC_PREFIX)
+                || t.x.assoc_typs_own_params.iter().any(|(x, _)| x == a)
+        };
         let assoc_typs_kept: Vec<Ident> =
             t.x.assoc_typs.iter().filter(|a| !is_rpitit(a)).cloned().collect();
         let assoc_bounds_kept: Vec<vir::ast::GenericBound> = t
