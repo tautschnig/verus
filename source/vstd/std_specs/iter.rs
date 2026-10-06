@@ -478,10 +478,6 @@ pub trait ExIterator {
             forall |k| #![auto] 0 <= k < self.remaining().len() ==> call_requires(f, (&self.remaining()[k], )),
     ;
 
-    /// `try_fold`: the closure must be callable; the result is not modelled.
-    fn try_fold<B, F, R>(&mut self, init: B, f: F) -> R
-        where Self: Sized, F: FnMut(B, Self::Item) -> R, R: core::ops::Try<Output = B>;
-
     /// `flatten` gives an opaque `Flatten`. Its bound mentions `IntoIterator`, whose
     /// `IntoIter` is an `Iterator`; `impls_cannot_extend_spec` breaks that cycle.
     #[verifier::impls_cannot_extend_spec]
