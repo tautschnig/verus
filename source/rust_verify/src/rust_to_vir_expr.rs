@@ -3770,18 +3770,24 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
                 // a mutable borrow cannot be): split into `A => body, B => body`, in order,
                 // which has the same semantics; as above, not when the body contains
                 // closures or constructor values.
+                // A body with closures is lowered once per alternative; the copies' closure
+                // parameters and return binders are renamed apart (they would otherwise share
+                // names, which resolution inference rejects).
                 if let (None, PatKind::Or(alts)) = (&arm.guard, &arm.pat.kind)
                     && vir::patterns::pattern_find_mut_binding(&pattern).is_some()
-                    && !hir_contains_closure_or_fn_value(bctx, arm.body)
+                    && !hir_contains_fn_value(bctx, arm.body)
                 {
-                    for alt in alts.iter() {
+                    for (k, alt) in alts.iter().enumerate() {
                         let pattern = pattern_to_vir(bctx, alt)?;
                         let guard = bctx.spanned_typed_new(
                             expr.span,
                             &bool_typ(),
                             ExprX::Const(Constant::Bool(true)),
                         );
-                        let body = expr_to_vir_consume(bctx, &arm.body)?;
+                        let mut body = expr_to_vir_consume(bctx, &arm.body)?;
+                        if k > 0 {
+                            body = rename_closure_binders(&body, k)?;
+                        }
                         vir_arms.push(bctx.spanned_new(arm.span, ArmX { pattern, guard, body }));
                     }
                     continue;
@@ -5156,18 +5162,99 @@ fn async_block_to_vir<'tcx>(
     Ok(bctx.spanned_typed_new(span, &future_typ, x))
 }
 
+/// Renames the parameters and return binders of the closures in `body` (a second lowering
+/// of the same HIR, see the or-pattern split in `ExprKind::Match`) so that they differ from the
+/// first lowering's.
+fn rename_closure_binders(body: &vir::ast::Expr, k: usize) -> Result<vir::ast::Expr, VirErr> {
+    use std::collections::HashMap;
+    let names: std::cell::RefCell<HashMap<vir::ast::VarIdent, vir::ast::VarIdent>> =
+        std::cell::RefCell::new(HashMap::new());
+    let _ = vir::ast_visitor::map_expr_visitor(body, &|e: &vir::ast::Expr| {
+        if let ExprX::NonSpecClosure { params, ret, .. } = &e.x {
+            for b in params.iter().chain(std::iter::once(ret)) {
+                let new = vir::ast::VarIdent(
+                    Arc::new(format!("{}%copy{}", b.name.0, k)),
+                    b.name.1.clone(),
+                );
+                names.borrow_mut().insert(b.name.clone(), new);
+            }
+        }
+        Ok(e.clone())
+    })?;
+    let names = names.into_inner();
+    if names.is_empty() {
+        return Ok(body.clone());
+    }
+    let rn = |x: &vir::ast::VarIdent| names.get(x).cloned().unwrap_or_else(|| x.clone());
+    let rb = |b: &vir::ast::VarBinder<vir::ast::Typ>| {
+        Arc::new(vir::ast::VarBinderX { name: rn(&b.name), a: b.a.clone() })
+    };
+    vir::ast_visitor::map_expr_place_visitor(
+        body,
+        &|e: &vir::ast::Expr| {
+            let x = match &e.x {
+                ExprX::Var(x) => ExprX::Var(rn(x)),
+                ExprX::VarAt(x, at) => ExprX::VarAt(rn(x), *at),
+                ExprX::NonSpecClosure {
+                    params,
+                    proof_fn_modes,
+                    body,
+                    requires,
+                    ensures,
+                    ret,
+                    external_spec,
+                } => ExprX::NonSpecClosure {
+                    params: Arc::new(params.iter().map(|b| rb(b)).collect()),
+                    proof_fn_modes: proof_fn_modes.clone(),
+                    body: body.clone(),
+                    requires: requires.clone(),
+                    ensures: ensures.clone(),
+                    ret: rb(ret),
+                    external_spec: external_spec.clone(),
+                },
+                _ => return Ok(e.clone()),
+            };
+            Ok(e.new_x(x))
+        },
+        &|p: &vir::ast::Place| match &p.x {
+            vir::ast::PlaceX::Local(x) => Ok(p.new_x(vir::ast::PlaceX::Local(rn(x)))),
+            _ => Ok(p.clone()),
+        },
+    )
+}
+
+/// Does `e` contain an async block or a constructor used as a function value (`.map(Some)`)?
+/// (Plain closures are fine for the or-pattern split: see `rename_closure_binders`.)
+fn hir_contains_fn_value<'tcx>(bctx: &BodyCtxt<'tcx>, e: &'tcx Expr<'tcx>) -> bool {
+    hir_contains_closure_or_fn_value_impl(bctx, e, false)
+}
+
 /// Does `e` contain a closure, an async block, or a constructor used as a function value
 /// (all lowered to VIR closures with names derived from their HIR ids)?
 fn hir_contains_closure_or_fn_value<'tcx>(bctx: &BodyCtxt<'tcx>, e: &'tcx Expr<'tcx>) -> bool {
+    hir_contains_closure_or_fn_value_impl(bctx, e, true)
+}
+
+fn hir_contains_closure_or_fn_value_impl<'tcx>(
+    bctx: &BodyCtxt<'tcx>,
+    e: &'tcx Expr<'tcx>,
+    closures: bool,
+) -> bool {
     use rustc_hir::intravisit::{self, Visitor};
     struct V<'a, 'tcx> {
         bctx: &'a BodyCtxt<'tcx>,
         found: bool,
+        closures: bool,
     }
     impl<'a, 'tcx> Visitor<'tcx> for V<'a, 'tcx> {
         fn visit_expr(&mut self, e: &'tcx Expr<'tcx>) {
             match &e.kind {
-                ExprKind::Closure(..) => self.found = true,
+                ExprKind::Closure(c)
+                    if self.closures
+                        || !matches!(c.kind, rustc_hir::ClosureKind::Closure) =>
+                {
+                    self.found = true
+                }
                 ExprKind::Call(callee, args) if matches!(callee.kind, ExprKind::Path(_)) => {
                     // a called constructor is not a constructor value
                     for a in args.iter() {
@@ -5190,7 +5277,7 @@ fn hir_contains_closure_or_fn_value<'tcx>(bctx: &BodyCtxt<'tcx>, e: &'tcx Expr<'
             intravisit::walk_expr(self, e);
         }
     }
-    let mut v = V { bctx, found: false };
+    let mut v = V { bctx, found: false, closures };
     v.visit_expr(e);
     v.found
 }

@@ -4499,3 +4499,35 @@ test_verify_one_file_with_options! {
         }
     } => Err(err) => assert_fails(err, 1)
 }
+
+test_verify_one_file! {
+    #[test] or_pattern_ref_mut_binding_with_closure verus_code! {
+        use vstd::prelude::*;
+        pub enum Sub { A { v: Vec<u8> }, B { v: Vec<u8> }, C }
+        fn r(s: &mut Sub, k: u8)
+            requires k < 200,
+            ensures
+                *old(s) is A ==> *final(s) is A && (*final(s))->A_v@ == (*old(s))->A_v@.push((k + 1) as u8),
+                *old(s) is B ==> *final(s) is B && (*final(s))->B_v@ == (*old(s))->B_v@.push((k + 1) as u8),
+                *old(s) is C ==> *final(s) is C,
+        {
+            match s {
+                Sub::A { v } | Sub::B { v } => {
+                    let f = |x: u8| -> (y: u8) requires x < 200 ensures y == x + 1 { x + 1 };
+                    v.push(f(k));
+                }
+                Sub::C => {}
+            }
+        }
+        fn bad(s: &mut Sub, k: u8) {
+            match s {
+                Sub::A { v } | Sub::B { v } => {
+                    let f = |x: u8| -> (y: u8) ensures y == x { x };
+                    v.push(f(k));
+                }
+                Sub::C => {}
+            }
+            assert(*s is A ==> (*s)->A_v@.len() == 0); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
