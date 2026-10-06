@@ -1063,6 +1063,13 @@ test_verify_one_file! {
         proof fn bad<A: Arr>(x: A::At<u8>, y: A::At<u8>) {
             assert(x == y); // FAILS
         }
+        pub struct Wr<A: Arr, E>(pub A::At<E>);
+        pub trait Q { spec fn q(&self) -> int; }
+        impl<A: Arr<At<u8> = (u8, u8)>> Q for Wr<A, u8> { open spec fn q(&self) -> int { self.0.0 as int } }
+        impl<E> Q for Wr<u32, E> { open spec fn q(&self) -> int { 7 } }
+        proof fn wr(w: Wr<u16, u8>) {
+            assert(w.q() == w.0.0);
+        }
     } => Err(err) => assert_one_fails(err)
 }
 

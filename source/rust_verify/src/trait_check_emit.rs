@@ -40,7 +40,7 @@ fn typ_args_to_string(
     path: Option<&Id>,
     lifetimes: &Vec<Id>,
     args: &Vec<Typ>,
-    equality: &Option<(Id, Vec<Id>, Typ)>,
+    equality: &Option<(Id, Vec<Typ>, Typ)>,
 ) -> String {
     let mut buf = String::new();
     if let Some(path) = path {
@@ -58,7 +58,7 @@ fn typ_args_to_string(
         }
         if let Some((x, x_args, t)) = equality {
             buf += &x.to_string();
-            buf += &typ_args_to_string(None, x_args, &vec![], &None);
+            buf += &typ_args_to_string(None, &vec![], x_args, &None);
             buf += " = ";
             buf += &t.to_string();
         }
@@ -105,7 +105,7 @@ impl ToString for TypX {
                     "<{} as {}>::{}",
                     self_typ.to_string(),
                     tr.to_string(),
-                    typ_args_to_string(Some(name), assoc_typ_args, &vec![], &None)
+                    typ_args_to_string(Some(name), &vec![], assoc_typ_args, &None)
                 )
             }
             TypX::PointeeMetadata(t) => {

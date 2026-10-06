@@ -14,6 +14,8 @@ pub(crate) struct State {
     /// Traits the generated program declares. A bound on any other trait (one Verus has no
     /// declaration for, e.g. a supertrait from an unverified dependency) is dropped.
     pub(crate) known_traits: Option<std::collections::HashSet<Path>>,
+    /// Associated types with their own type parameters: (trait, name) -> how many
+    pub(crate) assoc_own_params: HashMap<(Path, String), usize>,
 }
 
 impl State {
@@ -28,6 +30,7 @@ impl State {
             datatype_decls: Vec::new(),
             trait_impls: Vec::new(),
             known_traits: None,
+            assoc_own_params: HashMap::new(),
         }
     }
 

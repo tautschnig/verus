@@ -45,7 +45,7 @@ pub(crate) enum TypX {
         // use Datatype(Id, Vec<Typ>) to represent (trait_path, trait_typ_args)
         trait_as_datatype: Typ,
         name: Id,
-        assoc_typ_args: Vec<Id>,
+        assoc_typ_args: Vec<Typ>,
     },
     PointeeMetadata(Typ),
 }
@@ -64,7 +64,7 @@ pub(crate) enum Datatype {
 pub(crate) enum Bound {
     Sized,
     Tuple,
-    Trait { trait_path: Id, args: Vec<Typ>, equality: Option<(Id, Vec<Id>, Typ)> },
+    Trait { trait_path: Id, args: Vec<Typ>, equality: Option<(Id, Vec<Typ>, Typ)> },
 }
 
 // where typ: bound

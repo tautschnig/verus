@@ -452,7 +452,9 @@ pub(crate) fn translate_trait<'tcx>(
                     assoc_typs_bounds.extend(vir_bounds);
                 }
 
-                if let Some(ex_trait_ref_for) = ex_trait_ref_for {
+                // The bounds of a type-generic associated type are not used (see above), so
+                // an external specification need not restate them.
+                if let Some(ex_trait_ref_for) = ex_trait_ref_for.filter(|_| n_own == 0) {
                     let ex_item_id_for = ex_item_id_for.expect("ex_item_id_for");
                     let external_predicates = tcx.item_bounds(ex_item_id_for);
                     let proxy_predicates = tcx.item_bounds(owner_id.to_def_id());

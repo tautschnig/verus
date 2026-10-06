@@ -167,12 +167,16 @@ fn gen_typ(state: &mut State, typ: &vir::ast::Typ) -> Typ {
             }
         }
         vir::ast::TypX::Projection { trait_typ_args, trait_path, name } => {
+            // A generic associated type's own arguments follow the trait's
+            let k = state.assoc_own_params.get(&(trait_path.clone(), name.to_string())).copied();
+            let n = trait_typ_args.len() - k.unwrap_or(0);
             let self_typ = gen_typ(state, &trait_typ_args[0]);
-            let args = gen_typ_slice(state, &trait_typ_args[1..]);
+            let args = gen_typ_slice(state, &trait_typ_args[1..n]);
+            let assoc_typ_args = gen_typ_slice(state, &trait_typ_args[n..]);
             let path = state.trait_name(trait_path);
             let trait_as_datatype = Box::new(TypX::Datatype(path, Vec::new(), args));
             let name = state.typ_param(name.to_string(), None);
-            Box::new(TypX::Projection { self_typ, trait_as_datatype, name, assoc_typ_args: vec![] })
+            Box::new(TypX::Projection { self_typ, trait_as_datatype, name, assoc_typ_args })
         }
         vir::ast::TypX::PointeeMetadata(t) => {
             let t = gen_typ(state, t);
@@ -248,12 +252,15 @@ fn gen_generics(
                 // as "unsized" here in order to catch conflicting assumptions on traits.
             }
             GenericBoundX::TypEquality(path, typs, x, eq_typ) => {
+                let k = state.assoc_own_params.get(&(path.clone(), x.to_string())).copied();
+                let n = typs.len() - k.unwrap_or(0);
+                let own_args = gen_typ_slice(state, &typs[n..]);
                 let typ = gen_typ(state, &typs[0]);
-                let args = gen_typ_slice(state, &typs[1..]);
+                let args = gen_typ_slice(state, &typs[1..n]);
                 let eq_typ = gen_typ(state, eq_typ);
                 let trait_path = state.trait_name(&path);
                 let x = state.typ_param(x.to_string(), None);
-                let equality = Some((x, vec![], eq_typ));
+                let equality = Some((x, own_args, eq_typ));
                 let bound = Bound::Trait { trait_path, args, equality };
                 generic_bounds.push(GenericBound { typ, bound_vars: vec![], bound });
             }
@@ -336,6 +343,11 @@ pub(crate) fn gen_check_trait_impl_conflicts(
     state: &mut State,
 ) {
     state.known_traits = Some(vir_crate.traits.iter().map(|t| t.x.name.clone()).collect());
+    for t in vir_crate.traits.iter() {
+        for (a, k) in t.x.assoc_typs_own_params.iter() {
+            state.assoc_own_params.insert((t.x.name.clone(), a.to_string()), *k);
+        }
+    }
     for d in &vir_crate.datatypes {
         let Dt::Path(path) = &d.x.name else {
             panic!("Verus internal error: gen_check_trait_impl_conflicts expects Dt::Path");
@@ -386,12 +398,7 @@ pub(crate) fn gen_check_trait_impl_conflicts(
         // The associated types rustc synthesizes for `-> impl Trait` in traits are left out of
         // the model program: each impl's is an opaque type, which has no model, and they
         // cannot make impls overlap (they are determined by the impl).
-        // The same holds for associated types with their own type parameters (generic
-        // associated types), which the model program has no syntax for.
-        let is_rpitit = |a: &Ident| {
-            a.starts_with(vir::def::RPITIT_ASSOC_PREFIX)
-                || t.x.assoc_typs_own_params.iter().any(|(x, _)| x == a)
-        };
+        let is_rpitit = |a: &Ident| a.starts_with(vir::def::RPITIT_ASSOC_PREFIX);
         let assoc_typs_kept: Vec<Ident> =
             t.x.assoc_typs.iter().filter(|a| !is_rpitit(a)).cloned().collect();
         let assoc_bounds_kept: Vec<vir::ast::GenericBound> = t
@@ -421,11 +428,19 @@ pub(crate) fn gen_check_trait_impl_conflicts(
         }
         let name = state.trait_name(&t.x.name);
         let mut assoc_typs: Vec<(Id, Vec<GenericParam>, Vec<GenericBound>)> = Vec::new();
-        for x in &a_params {
+        for (x, a) in a_params.iter().zip(assoc_typs_kept.iter()) {
             let (bounds_x, bounds_other) =
                 crate::trait_check_emit::simplify_assoc_typ_bounds(&name, &x.name, a_bounds);
             a_bounds = bounds_other;
-            assoc_typs.push((x.name.clone(), vec![], bounds_x));
+            // A generic associated type's own parameters (no bounds: see rust_to_vir_trait)
+            let k = state.assoc_own_params.get(&(t.x.name.clone(), a.to_string())).copied();
+            let own: Vec<GenericParam> = (0..k.unwrap_or(0))
+                .map(|j| GenericParam {
+                    name: state.typ_param(format!("{}_own{}", a, j), None),
+                    const_typ: None,
+                })
+                .collect();
+            assoc_typs.push((x.name.clone(), own, bounds_x));
         }
         t_bounds.extend(a_bounds);
         let decl =
@@ -463,9 +478,20 @@ pub(crate) fn gen_check_trait_impl_conflicts(
         let mut assoc_typs: Vec<(Id, Vec<GenericParam>, Typ)> = Vec::new();
         for a in &impl_path_to_assoc_typs[&i.x.impl_path] {
             if used_assoc_typs.contains(&(i.x.trait_path.clone(), a.x.name.clone())) {
+                // A generic associated type's own parameters are the last of the impl's
+                // (rust_to_vir_impl::translate_assoc_type)
+                let k = state
+                    .assoc_own_params
+                    .get(&(i.x.trait_path.clone(), a.x.name.to_string()))
+                    .copied()
+                    .unwrap_or(0);
+                let own: Vec<GenericParam> = a.x.typ_params[a.x.typ_params.len() - k..]
+                    .iter()
+                    .map(|x| GenericParam { name: state.typ_param(x.to_string(), None), const_typ: None })
+                    .collect();
                 assoc_typs.push((
                     state.typ_param(a.x.name.to_string(), None),
-                    vec![],
+                    own,
                     gen_typ(state, &a.x.typ),
                 ));
             }
