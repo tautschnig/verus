@@ -4249,10 +4249,15 @@ impl Visitor {
         let ensure = if no_loop_invariant.is_none() {
             let mut auto_ensures: Ensures = parse_quote_spanned_vstd!(vstd, span =>
                 ensures
+                    // (only for iterators that obey the prophetic laws; others promise nothing)
                     #[verus::internal(auto_loop_ensures)]
-                    #vstd::std_specs::iter::IteratorSpec::will_return_none(&#x_iter_name.snapshot.view()),
+                    #vstd::prelude::imply(
+                        #vstd::std_specs::iter::IteratorSpec::obeys_prophetic_iter_laws(&#x_iter_name.iter),
+                        #vstd::std_specs::iter::IteratorSpec::will_return_none(&#x_iter_name.snapshot.view())),
                     #[verus::internal(auto_loop_ensures)]
-                    #vstd::prelude::spec_eq(#x_iter_name.index.view(), #x_iter_name.seq().len()),
+                    #vstd::prelude::imply(
+                        #vstd::std_specs::iter::IteratorSpec::obeys_prophetic_iter_laws(&#x_iter_name.iter),
+                        #vstd::prelude::spec_eq(#x_iter_name.index.view(), #x_iter_name.seq().len())),
                     // the underlying iterator is exhausted (follows from wf(); stated so that a
                     // by-reference iteration, `for x in &mut it`, leaves the fact on `it`)
                     #[verus::internal(auto_loop_ensures)]

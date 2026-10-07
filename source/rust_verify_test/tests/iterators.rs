@@ -762,3 +762,43 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    // `for` over an iterator that does not obey the prophetic laws (a verified user impl, or
+    // an external one): the loop verifies, and nothing is learned about the items
+    #[test] test_for_loop_iterator_without_laws verus_code! {
+        use vstd::prelude::*;
+        pub struct It { n: u8 }
+        impl Iterator for It {
+            type Item = u8;
+            fn next(&mut self) -> Option<u8> {
+                if self.n == 0 { None } else { self.n = self.n - 1; Some(self.n) }
+            }
+        }
+        #[verifier::external_body]
+        pub struct Ext { n: u8 }
+        #[verifier::external]
+        impl Iterator for Ext {
+            type Item = u8;
+            fn next(&mut self) -> Option<u8> { None }
+        }
+        #[verifier::exec_allows_no_decreases_clause]
+        fn f(it: It) -> u32 {
+            let mut c: u32 = 0;
+            for x in it {
+                c = if c < 1000 { c + 1 } else { c };
+            }
+            c
+        }
+        #[verifier::exec_allows_no_decreases_clause]
+        fn g(it: Ext) {
+            for x in it { }
+        }
+        #[verifier::exec_allows_no_decreases_clause]
+        fn h(it: It) {
+            for x in it {
+                assert(x < 255); // FAILS
+            }
+        }
+    } => Err(err) => assert_one_fails(err)
+}

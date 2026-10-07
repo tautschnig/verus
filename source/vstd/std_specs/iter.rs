@@ -1766,13 +1766,17 @@ impl <I: Iterator> VerusForLoopWrapper<I> {
 
     /// These properties are needed for the client code to verify
     #[verifier::prophetic]
+    ///
+    /// For an iterator that does not obey the prophetic laws (`remaining()` says nothing
+    /// about what `next` returns), there is nothing to state: `wf()` is true, and a `for`
+    /// loop over it verifies without learning anything about the items.
     pub open spec fn wf(self) -> bool {
-        &&& 0 <= self.index() <= self.seq().len()
-        &&& self.wf_inner()
-        &&& self.iter.obeys_prophetic_iter_laws() ==> {
-                &&& self.history@.len() == self.index()
-                &&& forall |i| 0 <= i < self.index() ==> #[trigger] self.history@[i] == self.seq()[i]
-            }
+        self.iter.obeys_prophetic_iter_laws() ==> {
+            &&& 0 <= self.index() <= self.seq().len()
+            &&& self.wf_inner()
+            &&& self.history@.len() == self.index()
+            &&& forall |i| 0 <= i < self.index() ==> #[trigger] self.history@[i] == self.seq()[i]
+        }
     }
 
     /// The underlying iterator's remaining elements are the loop's `seq()` from `index()`
@@ -1782,6 +1786,7 @@ impl <I: Iterator> VerusForLoopWrapper<I> {
     pub proof fn lemma_wf_remaining(self)
         requires
             self.wf(),
+            self.iter.obeys_prophetic_iter_laws(),
         ensures
             self.iter.remaining() =~= self.seq().skip(self.index()),
     {
@@ -1821,7 +1826,7 @@ impl <I: Iterator> VerusForLoopWrapper<I> {
             final(self).seq() == old(self).seq(),
             final(self).index() == old(self).index() + if ret is Some { 1int } else { 0 },
             final(self).snapshot == old(self).snapshot,
-            final(self).iter.obeys_prophetic_iter_laws() ==> final(self).wf(),
+            final(self).wf(),
             final(self).iter.obeys_prophetic_iter_laws() && ret is None ==>
                 final(self).snapshot@.will_return_none() && final(self).index() == final(self).seq().len(),
             final(self).iter.obeys_prophetic_iter_laws() ==> (ret matches Some(r) ==>
