@@ -1040,6 +1040,15 @@ fn check_expr_in_pattern(expr: &Expr) -> Result<(), VirErr> {
             check_expr_in_pattern(expr2)
         }
         ExprX::UnaryOpr(UnaryOpr::IntegerTypeBound(..), expr1) => check_expr_in_pattern(expr1),
+        // a byte-string literal pattern at slice type: array_as_slice(b"..")
+        ExprX::Call { target: crate::ast::CallTarget::Fun(_, fun, _, _, _), args, .. }
+            if crate::ast_util::path_as_friendly_rust_name(&fun.path)
+                == "vstd::array::array_as_slice"
+                && args.len() == 1
+                && matches!(&args[0].x, ExprX::Const(crate::ast::Constant::ByteStr(_))) =>
+        {
+            Ok(())
+        }
         _ => Err(error(&expr.span, "Verus Internal Error: bad PatternX::Expr")),
     }
 }

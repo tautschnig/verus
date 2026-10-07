@@ -561,6 +561,59 @@ pub(crate) fn patexpr_to_vir<'tcx>(
     match pat_expr.kind {
         PatExprKind::Lit { lit, negated } => {
             patexpr_unsupported_type_err(bctx, span, pat)?;
+            // A byte-string literal pattern takes the scrutinee's type, which may be a slice
+            // (`match frame_name { b"TALB" => .. }` with `frame_name: &[u8]`). The literal
+            // itself is encoded as an array (`bytes%new_bytelit`), so compare against
+            // `array_as_slice(literal)`; equating the two encodings directly produced
+            // ill-typed AIR.
+            if let rustc_ast::LitKind::ByteStr(bs, _) = &lit.node {
+                let elem = match &*vir::ast_util::undecorate_typ(pat_typ) {
+                    TypX::Primitive(vir::ast::Primitive::Slice, ts) if ts.len() == 1 => {
+                        Some(ts[0].clone())
+                    }
+                    _ => None,
+                };
+                if let Some(elem) = elem {
+                    let n = bs.as_byte_str().len();
+                    let len_typ = Arc::new(TypX::ConstInt(num_bigint::BigInt::from(n)));
+                    let arr_typ = Arc::new(TypX::Primitive(
+                        vir::ast::Primitive::Array,
+                        Arc::new(vec![elem.clone(), len_typ.clone()]),
+                    ));
+                    let ref_arr_typ = Arc::new(TypX::Decorate(
+                        vir::ast::TypDecoration::Ref,
+                        None,
+                        arr_typ,
+                    ));
+                    let c = Constant::ByteStr(Arc::new(bs.as_byte_str().to_vec()));
+                    let arr = bctx.spanned_typed_new(span, &ref_arr_typ, ExprX::Const(c));
+                    // `array_as_slice` (exec, `when_used_as_spec(spec_array_as_slice)`), as for
+                    // the unsizing coercion of an array to a slice
+                    let fun = vir::fun!(CrateId::Vstd => "array", "array_as_slice");
+                    let call_target = CallTarget::Fun(
+                        vir::ast::CallTargetKind::Static,
+                        fun,
+                        Arc::new(vec![elem, len_typ]),
+                        Arc::new(vec![]),
+                        vir::ast::CallTargetAttrs {
+                            autospec: if bctx.in_ghost {
+                                AutospecUsage::IfMarked
+                            } else {
+                                AutospecUsage::Final
+                            },
+                            const_var: false,
+                            assume_external_allowed: false,
+                        },
+                    );
+                    let x = ExprX::Call {
+                        target: call_target,
+                        args: Arc::new(vec![arr]),
+                        post_args: None,
+                        body: None,
+                    };
+                    return Ok(PatternX::Expr(bctx.spanned_typed_new(span, pat_typ, x)));
+                }
+            }
             Ok(PatternX::Expr(lit_to_vir(bctx, span, lit, negated, pat_typ, None)?))
         }
         PatExprKind::Path(qpath) => {
