@@ -333,6 +333,17 @@ pub(crate) fn split_trait_method(
         });
         let pred = parse_quote_spanned!(fun.sig.ident.span() => Self: core::marker::Sized);
         do_split_trait_method!(verus_syn, fun, spec_fun, mk_rust_attr, recv, pred);
+        // The spec method gets a body (`no_method_body()`), so a signature that takes or
+        // returns `Self` by value (`fn subset(&self) -> Self;`, dson `DotStore`) needs
+        // `Self: Sized` there, as for a by-value receiver above. The original method is
+        // unchanged; the trait is not dyn-compatible with such a method anyway.
+        if !(recv.is_some_and(|r| r.colon_token.is_none() && r.reference.is_none()))
+            && sig_uses_self_by_value(&fun.sig)
+        {
+            let pred: verus_syn::WherePredicate =
+                parse_quote_spanned!(fun.sig.ident.span() => Self: core::marker::Sized);
+            spec_fun.sig.generics.make_where_clause().predicates.push(pred);
+        }
         spec_items.push(TraitItem::Fn(spec_fun));
         fun.sig.erase_spec_fields();
     } else if erase_ghost {
@@ -384,4 +395,28 @@ pub(crate) fn split_trait_method_syn(
         // So there's no case for spec, proof as in split_trait_method above
         None
     }
+}
+
+/// Does the signature mention `Self` by value (not behind `&`/`*`, not as `Self::Assoc`)?
+fn sig_uses_self_by_value(sig: &verus_syn::Signature) -> bool {
+    use verus_syn::FnArgKind;
+    let mut tys: Vec<String> = Vec::new();
+    if let ReturnType::Type(_, _, _, ty) = &sig.output {
+        tys.push(quote::quote!(#ty).to_string());
+    }
+    for a in sig.inputs.iter() {
+        if let FnArgKind::Typed(pt) = &a.kind {
+            let ty = &pt.ty;
+            tys.push(quote::quote!(#ty).to_string());
+        }
+    }
+    tys.iter().any(|t| {
+        let toks: Vec<&str> = t.split_whitespace().collect();
+        toks.iter().enumerate().any(|(i, tok)| {
+            *tok == "Self"
+                && toks.get(i + 1) != Some(&"::")
+                && !matches!(i.checked_sub(1).map(|j| toks[j]), Some("&") | Some("mut") | Some("const") | Some("dyn"))
+                && !matches!(i.checked_sub(1).map(|j| toks[j]), Some(t) if t.starts_with('\''))
+        })
+    })
 }

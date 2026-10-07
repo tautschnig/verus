@@ -5072,3 +5072,29 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    // dson `DotStore::subset_for_inflation_from(&self, ..) -> Self` in a trait without a
+    // `Sized` supertrait
+    #[test] trait_method_returning_self_without_sized verus_code! {
+        pub trait DotStore {
+            spec fn n(&self) -> u8;
+            fn subset(&self, k: u8) -> (r: Self)
+                ensures r.n() == k;
+            fn pair(&self, other: Self) -> Self;
+            fn by_ref(&self, other: &Self) -> bool;
+        }
+        pub struct S(pub u8);
+        impl DotStore for S {
+            open spec fn n(&self) -> u8 { self.0 }
+            fn subset(&self, k: u8) -> (r: Self) { S(k) }
+            fn pair(&self, other: Self) -> Self { other }
+            fn by_ref(&self, other: &Self) -> bool { self.0 == other.0 }
+        }
+        fn g<T: DotStore>(t: &T) {
+            let r = t.subset(3);
+            assert(r.n() == 3);
+            assert(r.n() == 4); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
