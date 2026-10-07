@@ -3657,3 +3657,28 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file_with_options! {
+    // explicit panics may happen; other panic conditions and returning paths are still checked
+    #[test] allow_explicit_panics ["--allow-explicit-panics"] => verus_code! {
+        use vstd::prelude::*;
+        fn checked(v: &Vec<u8>, i: usize) -> (r: u8) {
+            assert!(i < v.len());
+            v[i]
+        }
+        fn panics_then(x: u8) -> (r: u8) ensures r == 7 {
+            if x == 0 { panic!("zero") }
+            7
+        }
+        fn returning_path_checked(x: u8) -> (r: u8) ensures r == 7 { // FAILS
+            if x == 0 { panic!("zero") }
+            8
+        }
+        fn unwrap_still_checked(o: Option<u8>) -> u8 {
+            o.unwrap() // FAILS
+        }
+        fn index_still_checked(v: &Vec<u8>) -> u8 {
+            v[0] // FAILS
+        }
+    } => Err(err) => assert_fails(err, 3)
+}

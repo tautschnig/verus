@@ -90,6 +90,7 @@ pub struct ArgsX {
     pub no_erasure_check: bool,
     pub no_auto_recommends_check: bool,
     pub no_cheating: bool,
+    pub allow_explicit_panics: bool,
     pub time: bool,
     pub time_expanded: bool,
     pub output_json: bool,
@@ -146,6 +147,7 @@ impl ArgsX {
             no_erasure_check: Default::default(),
             no_auto_recommends_check: Default::default(),
             no_cheating: Default::default(),
+            allow_explicit_panics: Default::default(),
             time: Default::default(),
             time_expanded: Default::default(),
             output_json: Default::default(),
@@ -331,6 +333,7 @@ pub fn parse_args_with_imports(
     const OPT_NO_ERASURE_CHECK: &str = "no-erasure-check";
     const OPT_NO_AUTO_RECOMMENDS_CHECK: &str = "no-auto-recommends-check";
     const OPT_NO_CHEATING: &str = "no-cheating";
+    const OPT_ALLOW_EXPLICIT_PANICS: &str = "allow-explicit-panics";
     const OPT_TIME: &str = "time";
     const OPT_TIME_EXPANDED: &str = "time-expanded";
     const OPT_OUTPUT_JSON: &str = "output-json";
@@ -540,6 +543,12 @@ pub fn parse_args_with_imports(
         "",
         OPT_NO_CHEATING,
         "Do not allow assume, admit, verifier::external_body, and assume_specification",
+    );
+    opts.optflag(
+        "",
+        OPT_ALLOW_EXPLICIT_PANICS,
+        "Allow explicit panic!/assert!/unreachable! to happen (they are not proved unreachable); \
+         other panics, such as indexing out of bounds or unwrap on None, are still checked",
     );
     opts.optflag("", OPT_TIME, "Measure and report time taken");
     opts.optflag("", OPT_TIME_EXPANDED, "Measure and report time taken with module breakdown");
@@ -754,6 +763,7 @@ pub fn parse_args_with_imports(
         no_erasure_check: matches.opt_present(OPT_NO_ERASURE_CHECK),
         no_auto_recommends_check: matches.opt_present(OPT_NO_AUTO_RECOMMENDS_CHECK),
         no_cheating: matches.opt_present(OPT_NO_CHEATING),
+        allow_explicit_panics: matches.opt_present(OPT_ALLOW_EXPLICIT_PANICS),
         time: matches.opt_present(OPT_TIME) || matches.opt_present(OPT_TIME_EXPANDED),
         time_expanded: matches.opt_present(OPT_TIME_EXPANDED),
         output_json: matches.opt_present(OPT_OUTPUT_JSON),

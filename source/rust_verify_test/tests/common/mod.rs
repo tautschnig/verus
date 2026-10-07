@@ -314,6 +314,8 @@ pub fn run_verus(
             verus_args.push("--no-report-long-running".to_string());
         } else if *option == "--no-cheating" {
             verus_args.push("--no-cheating".to_string());
+        } else if *option == "--allow-explicit-panics" {
+            verus_args.push("--allow-explicit-panics".to_string());
         } else if *option == "--output-json" {
             verus_args.push("--output-json".to_string());
         } else if *option == "vstd" {

@@ -403,12 +403,51 @@ fn fn_call_or_assoc_const_to_vir<'tcx>(
     let impl_paths = get_impl_paths(bctx, f, node_substs, None, const_var, expr.span)?;
     let call_target_attrs =
         vir::ast::CallTargetAttrs { autospec: autospec_usage, assume_external_allowed, const_var };
+    let is_explicit_panic = bctx.ctxt.cmd_line_args.allow_explicit_panics
+        && matches!(
+            vir::ast_util::path_as_friendly_rust_name(&name.path).as_str(),
+            "core::panicking::panic"
+                | "core::panicking::panic_fmt"
+                | "core::panicking::panic_display"
+                | "core::panicking::panic_str_2015"
+                | "core::panicking::assert_failed"
+                | "std::rt::begin_panic"
+                | "std::panicking::begin_panic"
+        );
     let target = CallTarget::Fun(target_kind, name, typ_args, impl_paths, call_target_attrs);
-    Ok(bctx.spanned_typed_new(
+    let call = bctx.spanned_typed_new(
         expr.span,
         &expr_typ()?,
         ExprX::Call { target, args: Arc::new(vir_args), post_args: None, body: call_body },
-    ))
+    );
+    if is_explicit_panic {
+        // --allow-explicit-panics: an explicit `panic!`/`assert!`/`unreachable!` in the code
+        // is allowed to happen. It does not return, so the path through it is cut
+        // (`assume(false)`, which also discharges the callee's `requires false`). Other
+        // panics (indexing, `unwrap`, overflow) are still preconditions.
+        let f = bctx.spanned_typed_new(
+            expr.span,
+            &vir::ast_util::bool_typ(),
+            ExprX::Const(vir::ast::Constant::Bool(false)),
+        );
+        let assume = bctx.spanned_typed_new(
+            expr.span,
+            &vir::ast_util::unit_typ(),
+            ExprX::AssertAssume { is_assume: true, expr: f, msg: None },
+        );
+        let assume = bctx.spanned_typed_new(
+            expr.span,
+            &vir::ast_util::unit_typ(),
+            ExprX::Ghost { alloc_wrapper: false, tracked: false, expr: assume },
+        );
+        let stmt = bctx.spanned_new(expr.span, vir::ast::StmtX::Expr(assume));
+        return Ok(bctx.spanned_typed_new(
+            expr.span,
+            &call.typ.clone(),
+            ExprX::Block(Arc::new(vec![stmt]), Some(call)),
+        ));
+    }
+    Ok(call)
 }
 
 pub(crate) fn const_var_to_vir<'tcx>(
