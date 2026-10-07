@@ -3415,11 +3415,21 @@ pub(crate) fn check_item_const_or_static<'tcx>(
 
     let pre_header = get_pre_header(ctxt, &[], &CheckItemFnEither::BodyId(body_id), is_async)?;
 
+    // verus! marks every `pub(..)` const `open`. A `pub(crate)` const at the crate root
+    // (or `pub(super)`/`pub(self)` that resolves to its own module) is private to that
+    // module, so the "open but not pub" error would reject it; its body is then visible
+    // exactly where the const is, which is what a private (closed) const gives.
+    let is_private = visibility == Visibility { restricted_to: Some(module_path.clone()) };
+    let (publish, open_qualifier) = if is_private && vattrs.publish == Some(AttrPublish::Open) {
+        (None, None)
+    } else {
+        (vattrs.publish, pre_header.open_visibility_qualifier.clone())
+    };
     let (body_visibility, opaqueness) = get_body_visibility_and_fuel(
         span,
         &visibility,
-        vattrs.publish,
-        &pre_header.open_visibility_qualifier,
+        publish,
+        &open_qualifier,
         vattrs.opaque,
         vattrs.opaque_outside_module,
         func_mode,

@@ -439,3 +439,22 @@ test_verify_one_file! {
         fn f() { struct E; unsafe impl Sync for E {} }
     } => Err(err) => assert_vir_error_msg(err, "unsafe impl for `Sync` is not allowed")
 }
+
+test_verify_one_file! {
+    // `pub(crate)` consts at the crate root are private to the root module, which every
+    // module of the crate is in: accepted, and the value is visible in child modules
+    // (dson `DETERMINISTIC_HASHER`, buffrs `BUFFRS_HOME_VAR`)
+    #[test] test_pub_crate_const_at_root verus_code! {
+        pub(crate) const B: u8 = 3;
+        pub(crate) const S: &str = "x";
+        mod m {
+            use vstd::prelude::*;
+            fn g() {
+                assert(crate::B == 3);
+            }
+            fn h() {
+                assert(crate::B == 4); // FAILS
+            }
+        }
+    } => Err(err) => assert_one_fails(err)
+}
