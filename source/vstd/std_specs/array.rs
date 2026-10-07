@@ -188,7 +188,7 @@ impl<'a, T: Copy, const N: usize> super::convert::TryFromSpecImpl<&'a [T]> for [
 
     open spec fn try_from_spec(v: &'a [T]) -> Result<[T; N], core::array::TryFromSliceError> {
         if v@.len() == N {
-            Ok(crate::array::spec_array_from_seq(v@))
+            Ok(super::super::array::spec_array_from_seq(v@))
         } else {
             Err(spec_try_from_slice_error())
         }
@@ -207,7 +207,7 @@ impl<'a, T, const N: usize> super::convert::TryFromSpecImpl<&'a [T]> for &'a [T;
 
     open spec fn try_from_spec(v: &'a [T]) -> Result<&'a [T; N], core::array::TryFromSliceError> {
         if v@.len() == N {
-            Ok(&crate::array::spec_array_from_seq(v@))
+            Ok(&super::super::array::spec_array_from_seq(v@))
         } else {
             Err(spec_try_from_slice_error())
         }
