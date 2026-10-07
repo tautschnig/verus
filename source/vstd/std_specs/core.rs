@@ -323,6 +323,15 @@ pub assume_specification [core::panicking::panic_fmt] (s: core::fmt::Arguments<'
         false,
 ;
 
+/// `panic!` with a single non-literal-format argument in editions before 2021 (and
+/// `std::panic!(msg)`) calls `std::rt::begin_panic(msg)`; like `panic!`, it must be
+/// unreachable in verified code.
+#[cfg(feature = "std")]
+pub assume_specification<M: core::any::Any + Send>[ std::rt::begin_panic::<M> ](msg: M) -> !
+    requires
+        false,
+;
+
 /// The failure path of `assert_eq!` / `assert_ne!` / `assert_matches!`: like `panic!`, it
 /// must be unreachable in verified code. This makes those macros usable as assertions on
 /// exec values (the comparison itself is `PartialEq::eq` on references, so it is only as

@@ -20,6 +20,7 @@
 #![cfg_attr(verus_keep_ghost, feature(freeze))]
 #![cfg_attr(verus_keep_ghost, feature(derive_clone_copy_internals))]
 #![cfg_attr(verus_keep_ghost, feature(derive_eq_internals))]
+#![cfg_attr(all(verus_keep_ghost, feature = "std"), feature(libstd_sys_internals))]
 #![cfg_attr(verus_keep_ghost, feature(slice_index_methods))]
 #![cfg_attr(all(feature = "alloc", verus_keep_ghost), feature(slice_concat_trait))]
 #![cfg_attr(all(feature = "alloc", verus_keep_ghost), feature(liballoc_internals))]

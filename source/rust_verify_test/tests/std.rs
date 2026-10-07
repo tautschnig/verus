@@ -3682,3 +3682,20 @@ test_verify_one_file_with_options! {
         }
     } => Err(err) => assert_fails(err, 3)
 }
+
+test_verify_one_file_with_options! {
+    // `panic!(msg)` in edition 2018 calls `std::rt::begin_panic` (sized-chunks `push_front`)
+    #[test] begin_panic_2018 ["--edition 2018"] => verus_code! {
+        use vstd::prelude::*;
+        fn f(x: u8) -> u8 {
+            let m = "too big";
+            if x > 3 { panic!(m) } // fails: the span is inside std's panic! macro
+            x
+        }
+        fn g(x: u8) -> u8 {
+            let m = "too big";
+            if x > 3 && x < 3 { panic!(m) }
+            x
+        }
+    } => Err(err) => assert_vir_error_msg(err, "precondition not satisfied")
+}
