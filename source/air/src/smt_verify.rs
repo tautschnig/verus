@@ -586,7 +586,23 @@ fn smt_get_model(
     if context.debug && spurious > 0 {
         println!("ignored {} spuriously true assertion label(s) in model", spurious);
     }
-    let chosen = chosen.expect("discovered_error");
+    // If no candidate is confirmed (each isolated check came back `unsat`; possible when the
+    // model's labels only fail jointly, or after a resource-limited check), the query itself
+    // was still satisfiable or unknown, so an error must be reported: fall back to the first
+    // candidate, as before confirmation existed, rather than crash. This affects which
+    // assertion is blamed, not whether one is.
+    let chosen = chosen.or_else(|| {
+        infos.iter().position(|info| {
+            !info.disabled
+                && model_defs.get(&info.label).map(|def| *def.body == "true").unwrap_or(false)
+        })
+    });
+    let Some(chosen) = chosen else {
+        // no assertion label is true in the model: report the failure without a location,
+        // as when no model is available
+        context.state = ContextState::FoundInvalid(infos, None);
+        return ValidityResult::Invalid(None, None, None);
+    };
     let discovered_error = infos[chosen].clone();
     let discovered_assert_id = infos[chosen].assert_id.clone();
 
