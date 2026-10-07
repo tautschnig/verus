@@ -2534,6 +2534,8 @@ pub fn set_krate_dyn_compatibility(imported: &Vec<Krate>, krate: &mut crate::ast
 /// - `*_req` (`fmt_req`, `add_req`, `index_req`, ...) is `true`. They are preconditions of the
 ///   trait methods, so the impl's body is verified without assuming anything, and callers
 ///   have nothing to prove.
+/// - `*_ensures` (`from_iter_ensures`, `extend_ensures`) is `true`. They appear only in the
+///   trait methods' ensures, so the impl has nothing to prove and callers learn nothing.
 /// - every other spec function is uninterpreted.
 /// The extension trait is a vstd trait and the self type is local, so (coherence) no other
 /// crate can provide the impl; an explicit user impl always wins.
@@ -2613,7 +2615,9 @@ pub fn synthesize_default_extension_impls(
             let mname = d.x.name.path.segments.last().unwrap().clone();
             let body_const = if mname.starts_with("obeys_") {
                 Some(false)
-            } else if mname.ends_with("_req") {
+            } else if mname.ends_with("_req") || mname.ends_with("_ensures") {
+                // `*_req` appear only in requires, `*_ensures` only in ensures
+                // (`from_iter_ensures`, `extend_ensures`): true is the weakest choice for both
                 Some(true)
             } else {
                 None
