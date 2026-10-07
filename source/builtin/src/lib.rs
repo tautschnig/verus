@@ -670,7 +670,11 @@ pub fn tracked_exec_borrow<'a, A>(#[verifier::proof] _a: &'a A) -> &'a Tracked<A
 #[cfg_attr(verus_keep_ghost, rustc_diagnostic_item = "verus::verus_builtin::int")]
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy)]
-pub struct int;
+pub struct int {
+    // Not a unit struct: with `use vstd::prelude::*`, a unit struct named `int` would make
+    // every binding named `int` (`fn scale(&self, int: f64)`) a pattern of that struct.
+    _private: (),
+}
 
 // TODO: we should eventually be able to remove this and other int/nat ops,
 // since we now have SpecAdd, etc.
@@ -741,7 +745,11 @@ impl core::cmp::Ord for int {
 #[cfg_attr(verus_keep_ghost, rustc_diagnostic_item = "verus::verus_builtin::nat")]
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy)]
-pub struct nat;
+pub struct nat {
+    // Not a unit struct: with `use vstd::prelude::*`, a unit struct named `nat` would make
+    // every binding named `nat` (`fn scale(&self, nat: f64)`) a pattern of that struct.
+    _private: (),
+}
 
 impl core::ops::Add for nat {
     type Output = Self;
@@ -803,7 +811,11 @@ impl core::cmp::Ord for nat {
 #[cfg_attr(verus_keep_ghost, rustc_diagnostic_item = "verus::verus_builtin::real")]
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy)]
-pub struct real;
+pub struct real {
+    // Not a unit struct: with `use vstd::prelude::*`, a unit struct named `real` would make
+    // every binding named `real` (`fn scale(&self, real: f64)`) a pattern of that struct.
+    _private: (),
+}
 
 impl real {
     /// Returns the largest integer less than or equal to `self` (i.e., floor function).
@@ -1034,11 +1046,11 @@ unsafe impl Integer for isize {
 }
 unsafe impl Integer for int {
     #[cfg_attr(verus_keep_ghost, verifier::external)]
-    const CONST_DEFAULT: Self = int;
+    const CONST_DEFAULT: Self = int { _private: () };
 }
 unsafe impl Integer for nat {
     #[cfg_attr(verus_keep_ghost, verifier::external)]
-    const CONST_DEFAULT: Self = nat;
+    const CONST_DEFAULT: Self = nat { _private: () };
 }
 unsafe impl Integer for char {
     #[cfg_attr(verus_keep_ghost, verifier::external)]
@@ -1058,7 +1070,7 @@ pub unsafe trait Decimal: Copy {
 }
 unsafe impl Decimal for real {
     #[cfg_attr(verus_keep_ghost, verifier::external)]
-    const CONST_DEFAULT: Self = real;
+    const CONST_DEFAULT: Self = real { _private: () };
 }
 unsafe impl Decimal for f32 {
     #[cfg_attr(verus_keep_ghost, verifier::external)]
@@ -1096,7 +1108,7 @@ pub const fn spec_literal_integer<
 #[rustc_diagnostic_item = "verus::verus_builtin::spec_literal_int"]
 #[verifier::spec]
 pub const fn spec_literal_int(_s: &str) -> int {
-    int
+    int { _private: () }
 }
 
 // spec literals of the form "33nat"
@@ -1104,7 +1116,7 @@ pub const fn spec_literal_int(_s: &str) -> int {
 #[rustc_diagnostic_item = "verus::verus_builtin::spec_literal_nat"]
 #[verifier::spec]
 pub const fn spec_literal_nat(_s: &str) -> nat {
-    nat
+    nat { _private: () }
 }
 
 #[cfg(verus_keep_ghost)]

@@ -3638,3 +3638,22 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    // with `use vstd::prelude::*`, bindings may be named like the spec types (sguaba
+    // `fn scale(&self, real: f64)`)
+    #[test] bindings_named_int_nat_real verus_code! {
+        use vstd::prelude::*;
+        pub fn scale(x: u64, real: u64, int: u64, nat: u64) -> (r: u64)
+            ensures real < 2 && int < 2 && nat < 2 ==> r == x / 2 + real + int + nat
+        {
+            if real < 2 && int < 2 && nat < 2 { x / 2 + real + int + nat } else { 0 }
+        }
+        spec fn s(x: int) -> real { x as real }
+        proof fn t() {
+            assert(1int + 2int == 3int);
+            assert(s(2) == 2real);
+            assert(s(2) == 3real); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
