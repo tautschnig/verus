@@ -2091,3 +2091,27 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_vir_error_msg(err, "disallowed: field expression for an opaque datatype")
 }
+
+test_verify_one_file! {
+    // the field accessors Verus generates for enums are doc(hidden): `#![deny(missing_docs)]`
+    // crates (lz4_flex) accept them
+    #[test] enum_accessors_missing_docs verus_code! {
+        /// docs
+        #[deny(missing_docs)]
+        pub mod m {
+            /// An error
+            pub enum E {
+                /// a
+                A {
+                    /// x
+                    x: usize,
+                },
+                /// b
+                B(
+                    /// 0
+                    u8,
+                ),
+            }
+        }
+    } => Ok(())
+}

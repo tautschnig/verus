@@ -182,6 +182,7 @@ pub(crate) fn visit_item_enum_synthesize(
                     quote_spanned_builtin! { verus_builtin, enum_.span() =>
                         #[cfg(verus_keep_ghost)]
                         #[allow(non_snake_case)]
+                        #[doc(hidden)]
                         #[verus::internal(verus_macro)]
                         #[verus::internal(spec)]
                         #[verifier::inline]
@@ -195,6 +196,7 @@ pub(crate) fn visit_item_enum_synthesize(
                     quote_spanned! { enum_.span() =>
                         #[cfg(verus_keep_ghost)]
                         #[allow(non_snake_case)]
+                        #[doc(hidden)]
                         #[verus::internal(verus_macro)]
                         #[verus::internal(spec)]
                         #[verus::internal(get_field_many_variants)]
@@ -251,6 +253,7 @@ pub(crate) fn visit_item_enum_synthesize(
                     #(#cfgs)*
                     #[cfg(verus_keep_ghost)]
                     #[allow(non_snake_case)]
+                        #[doc(hidden)]
                     #[verus::internal(verus_macro)]
                     #[verus::internal(spec)]
                     #[verifier::inline]
