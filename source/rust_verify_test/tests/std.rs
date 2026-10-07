@@ -3699,3 +3699,37 @@ test_verify_one_file_with_options! {
         }
     } => Err(err) => assert_vir_error_msg(err, "precondition not satisfied")
 }
+
+test_verify_one_file! {
+    // byte-string literal patterns on a slice scrutinee (mp3-metadata `match frame_name`)
+    #[test] byte_string_pattern_on_slice verus_code! {
+        use vstd::prelude::*;
+        fn f(frame_name: &[u8]) -> u8 {
+            match frame_name {
+                b"TALB" => 1,
+                b"TIT" | b"TIT2" => 2,
+                _ => 0,
+            }
+        }
+        #[verifier::exec_allows_no_decreases_clause]
+        fn in_loop(buf: &[u8]) -> u8 {
+            let mut pos = 0usize;
+            let mut r = 0u8;
+            while pos < buf.len() && buf.len() - pos >= 4 {
+                let frame_name = &buf[pos..pos + 4];
+                pos = pos + 4;
+                match frame_name {
+                    b"TALB" => { r = 1; }
+                    _ => {}
+                }
+            }
+            r
+        }
+        fn reachable(frame_name: &[u8]) -> u8 {
+            match frame_name {
+                b"TALB" => { assert(false); 1 } // FAILS
+                _ => 0,
+            }
+        }
+    } => Err(err) => assert_one_fails(err)
+}
