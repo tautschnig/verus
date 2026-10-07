@@ -1029,6 +1029,11 @@ pub(crate) fn trait_bounds_to_ast(ctx: &Ctx, span: &Span, typ_bounds: &GenericBo
                 ExprX::NullaryOpr(op)
             }
             GenericBoundX::TypEquality(path, typ_args, name, typ) => {
+                // as for trait bounds above: a trait not declared to Verus has no
+                // projection functions, so the equality cannot be stated
+                if !ctx.trait_map.contains_key(path) {
+                    continue;
+                }
                 let op = crate::ast::NullaryOpr::TypEqualityBound(
                     path.clone(),
                     typ_args.clone(),
@@ -1118,7 +1123,10 @@ pub(crate) fn trait_bounds_to_air(ctx: &Ctx, typ_bounds: &GenericBounds) -> Vec<
                 }
             }
             GenericBoundX::TypEquality(path, typ_args, name, typ) => {
-                bound_exprs.push(typ_equality_bound_to_air(ctx, path, typ_args, name, typ));
+                // skipped for traits not declared to Verus, like their trait bounds
+                if ctx.trait_map.contains_key(path) {
+                    bound_exprs.push(typ_equality_bound_to_air(ctx, path, typ_args, name, typ));
+                }
             }
             GenericBoundX::ConstTyp(c, t) => {
                 bound_exprs.push(const_typ_bound_to_air(ctx, c, t));

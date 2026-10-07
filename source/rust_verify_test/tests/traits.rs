@@ -5127,3 +5127,31 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    // a supertrait bound with an associated-type equality on a trait not declared to Verus
+    // is skipped like the trait bound itself (it crashed with an undeclared projection)
+    #[test] test_typ_equality_bound_of_external_trait verus_code! {
+        mod sink {
+            #[verifier::external]
+            pub trait Sink {
+                type Item;
+                fn close(self) where Self: Sized {}
+            }
+        }
+        mod frames {
+            use vstd::prelude::*;
+            use crate::sink::Sink;
+            pub struct M;
+            #[verifier::allow(undeclared_external_trait)]
+            pub trait CaptureSink: Sink<Item = M> {
+                #[verifier::external_body]
+                fn finalize(self, x: u8) where Self: Sized { self.close() }
+            }
+            #[verifier::allow(undeclared_external_trait)]
+            fn f(x: u8) {
+                assert(x < 255); // FAILS
+            }
+        }
+    } => Err(err) => assert_one_fails(err)
+}
