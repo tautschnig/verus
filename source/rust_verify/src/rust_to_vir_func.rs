@@ -946,7 +946,9 @@ fn handle_external_fn<'tcx>(
             .and_then(|d| ctxt.verus_items.id_to_name.get(&d)),
         Some(VerusItem::External(_))
     );
-    if mode != Mode::Exec && !is_builtin_external {
+    // associated constants have the default const mode (spec + exec)
+    let is_assoc_const = matches!(ctxt.tcx.def_kind(id), rustc_hir::def::DefKind::AssocConst { .. });
+    if mode != Mode::Exec && !is_builtin_external && !is_assoc_const {
         return err_span(
             sig.span,
             format!("an `assume_specification` declaration cannot be marked `{mode:}`"),
@@ -1024,6 +1026,29 @@ fn handle_external_fn<'tcx>(
     let ty1 = ctxt.tcx.type_of(id).skip_binder();
     let ty2 = ctxt.tcx.type_of(external_id).skip_binder();
 
+    if matches!(ctxt.tcx.def_kind(id), rustc_hir::def::DefKind::AssocConst { .. })
+        && matches!(ctxt.tcx.def_kind(external_id), rustc_hir::def::DefKind::AssocConst { .. })
+    {
+        // An associated constant of an external trait specification (`const USIZE: usize;`
+        // in typenum's `Unsigned`): it declares the constant, with no value. Its type must be
+        // the trait's.
+        if ty1 != ty2 {
+            return err_span(
+                sig.span,
+                format!("type mismatch in external trait constant ({ty1} != {ty2})"),
+            );
+        }
+        return Ok((
+            external_path,
+            external_item_visibility,
+            kind,
+            false,
+            Safety::Safe,
+            true,
+            external_id,
+            is_async,
+        ));
+    }
     if is_const {
         let substs1_early = get_substs_early(ty1, sig.span)?;
         let poly_sig1 = ctxt.tcx.fn_sig(id);
@@ -2192,8 +2217,10 @@ pub(crate) fn check_item_fn<'tcx>(
             (publish, Mode::Spec, ItemKind::Const)
         }
         (true, false) => {
-            // In an external const declaration, no returns means exec-only:
-            assert!(mode == Mode::Exec);
+            // In an external const declaration, no returns means exec-only. An associated
+            // const of an external trait specification keeps the default const mode
+            // (spec + exec), as in a local trait.
+            assert!(mode == Mode::Exec || is_external_assoc_const);
             (vattrs.publish.clone(), mode, ItemKind::Const)
         }
         (_, _) => (vattrs.publish.clone(), mode, sig.item_kind()),
@@ -2485,8 +2512,10 @@ pub(crate) fn finish_function<'tcx>(
             ((Arc::new(vec![]), Arc::new(vec![])), None, Some(returns))
         }
         (true, None) => {
-            // In an external const declaration, no returns means exec-only:
-            assert!(mode == Mode::Exec);
+            // In an external const declaration, no returns means exec-only. An associated
+            // const of an external trait specification keeps the default const mode
+            // (spec + exec), as in a local trait.
+            assert!(mode == Mode::Exec || is_external_assoc_const);
             ((ensure0, ensure1), None, body)
         }
         (_, returns) => ((ensure0, ensure1), returns, body),

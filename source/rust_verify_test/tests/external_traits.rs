@@ -1143,3 +1143,45 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_fails(err, 3)
 }
+
+test_verify_one_file! {
+    // an associated const of an external trait (typenum `Unsigned::USIZE`): declared without
+    // value, usable in exec and spec code, the same value in both
+    #[test] external_trait_assoc_const verus_code! {
+        use vstd::prelude::*;
+        #[verifier::external]
+        pub trait Len { const USIZE: usize; }
+        #[verifier::external]
+        pub struct U2;
+        #[verifier::external]
+        impl Len for U2 { const USIZE: usize = 2; }
+        #[verifier::external_type_specification]
+        #[verifier::external_body]
+        pub struct ExU2(U2);
+        #[verifier::external_trait_specification]
+        pub trait ExLen {
+            type ExternalTraitSpecificationFor: Len;
+            const USIZE: usize;
+        }
+        pub struct Chunk<N: Len> { pub right: usize, n: core::marker::PhantomData<N> }
+        impl<N: Len> Chunk<N> {
+            pub const CAPACITY: usize = N::USIZE;
+            #[verifier::external_body]
+            fn force_write(index: usize, chunk: &mut Self) requires index < Self::CAPACITY {}
+            pub fn unit_checked() -> Self {
+                let mut c = Chunk { right: 1, n: core::marker::PhantomData };
+                if Self::CAPACITY >= 1 { Self::force_write(0, &mut c); }
+                c
+            }
+            pub fn unit_unchecked() -> Self {
+                let mut c = Chunk { right: 1, n: core::marker::PhantomData };
+                Self::force_write(0, &mut c); // FAILS
+                c
+            }
+        }
+        fn value_unknown() {
+            let x = <U2 as Len>::USIZE;
+            assert(x == 2); // FAILS
+        }
+    } => Err(err) => assert_fails(err, 2)
+}
