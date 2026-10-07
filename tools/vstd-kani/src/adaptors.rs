@@ -1516,3 +1516,40 @@ fn from_bool_holds() {
     assert!(i8::from(b) == e as i8 && i16::from(b) == e as i16 && i32::from(b) == e as i32);
     assert!(i64::from(b) == e as i64 && isize::from(b) == e as isize && i128::from(b) == e as i128);
 }
+
+/// `<[T; N]>::try_from(&[T])` and `<&[T; N]>::try_from(&[T])`: Ok exactly when
+/// `len == N`, with the slice's elements (vstd `try_from_spec`, `spec_array_from_seq`).
+#[cfg(kani)]
+#[kani::proof]
+fn array_try_from_slice_holds() {
+    let buf: [u8; 4] = kani::any();
+    let n: usize = kani::any();
+    kani::assume(n <= 4);
+    let s = &buf[..n];
+    let r: Result<[u8; 2], _> = s.try_into();
+    assert!(r.is_ok() == (n == 2));
+    if let Ok(a) = r {
+        assert!(a[0] == buf[0] && a[1] == buf[1]);
+    }
+    let q: Result<&[u8; 3], _> = s.try_into();
+    assert!(q.is_ok() == (n == 3));
+    if let Ok(a) = q {
+        assert!(a[0] == buf[0] && a[1] == buf[1] && a[2] == buf[2]);
+    }
+}
+
+/// `overflowing_add`/`overflowing_sub` on unsigned integers: the wrapping result and
+/// whether the exact result is out of range (vstd: `(wrapping_*(x, y), x + y > MAX)`,
+/// `(wrapping_sub(x, y), x < y)`).
+#[cfg(kani)]
+#[kani::proof]
+fn overflowing_unsigned_holds() {
+    let x: u8 = kani::any();
+    let y: u8 = kani::any();
+    assert!(x.overflowing_add(y) == (x.wrapping_add(y), (x as u16) + (y as u16) > u8::MAX as u16));
+    assert!(x.overflowing_sub(y) == (x.wrapping_sub(y), x < y));
+    let a: u64 = kani::any();
+    let b: u64 = kani::any();
+    assert!(a.overflowing_add(b) == (a.wrapping_add(b), (a as u128) + (b as u128) > u64::MAX as u128));
+    assert!(a.overflowing_sub(b) == (a.wrapping_sub(b), a < b));
+}

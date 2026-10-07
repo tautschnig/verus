@@ -172,4 +172,51 @@ pub assume_specification<T, const N: usize>[ <[T; N] as core::iter::IntoIterator
         super::iter::IteratorSpec::decrease(&iter) is Some,
 ;
 
+// [T; N] / &[T; N] from a slice (`slice.try_into()`): Ok exactly when the lengths match
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExTryFromSliceError(core::array::TryFromSliceError);
+
+/// The `TryFromSliceError` value. `TryFromSliceError` is `struct TryFromSliceError(())`,
+/// so it has exactly one value.
+pub uninterp spec fn spec_try_from_slice_error() -> core::array::TryFromSliceError;
+
+impl<'a, T: Copy, const N: usize> super::convert::TryFromSpecImpl<&'a [T]> for [T; N] {
+    open spec fn obeys_try_from_spec() -> bool {
+        true
+    }
+
+    open spec fn try_from_spec(v: &'a [T]) -> Result<[T; N], core::array::TryFromSliceError> {
+        if v@.len() == N {
+            Ok(crate::array::spec_array_from_seq(v@))
+        } else {
+            Err(spec_try_from_slice_error())
+        }
+    }
+}
+
+pub assume_specification<'a, T: Copy, const N: usize>[ <[T; N] as TryFrom<&'a [T]>>::try_from ](
+    s: &[T],
+) -> Result<[T; N], core::array::TryFromSliceError>
+;
+
+impl<'a, T, const N: usize> super::convert::TryFromSpecImpl<&'a [T]> for &'a [T; N] {
+    open spec fn obeys_try_from_spec() -> bool {
+        true
+    }
+
+    open spec fn try_from_spec(v: &'a [T]) -> Result<&'a [T; N], core::array::TryFromSliceError> {
+        if v@.len() == N {
+            Ok(&crate::array::spec_array_from_seq(v@))
+        } else {
+            Err(spec_try_from_slice_error())
+        }
+    }
+}
+
+pub assume_specification<'a, T, const N: usize>[ <&'a [T; N] as TryFrom<&'a [T]>>::try_from ](
+    s: &'a [T],
+) -> Result<&'a [T; N], core::array::TryFromSliceError>
+;
+
 } // verus!

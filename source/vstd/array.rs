@@ -199,6 +199,17 @@ pub broadcast proof fn lemma_array_index_decreases<T, const N: usize>(a: &[T; N]
     lemma_seq_index_decreases(a@, i);
 }
 
+/// The array whose elements are `s`; meaningful when `s.len() == N`
+/// (`<[T; N] as TryFrom<&[T]>>::try_from`).
+pub uninterp spec fn spec_array_from_seq<T, const N: usize>(s: Seq<T>) -> [T; N];
+
+pub broadcast axiom fn axiom_spec_array_from_seq<T, const N: usize>(s: Seq<T>)
+    requires
+        s.len() == N,
+    ensures
+        (#[trigger] spec_array_from_seq::<T, N>(s))@ == s,
+;
+
 pub broadcast group group_array_axioms {
     array_len_matches_n,
     lemma_array_index,
@@ -206,6 +217,7 @@ pub broadcast group group_array_axioms {
     axiom_spec_array_fill_for_copy_type,
     axiom_array_ext_equal,
     axiom_spec_array_update,
+    axiom_spec_array_from_seq,
     axiom_array_has_resolved,
     axiom_array_decreases_to_seq,
     lemma_array_index_decreases,

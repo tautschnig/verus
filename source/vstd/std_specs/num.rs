@@ -153,6 +153,20 @@ macro_rules! num_specs {
 
             #[verifier::allow_in_spec]
             #[cfg(not(verus_verify_core))]
+            pub assume_specification[<$uN>::overflowing_add](x: $uN, y: $uN) -> ($uN, bool)
+                returns ($mod_u::wrapping_add(x, y), x + y > <$uN>::MAX)
+                opens_invariants none
+                no_unwind;
+
+            #[verifier::allow_in_spec]
+            #[cfg(not(verus_verify_core))]
+            pub assume_specification[<$uN>::overflowing_sub](x: $uN, y: $uN) -> ($uN, bool)
+                returns ($mod_u::wrapping_sub(x, y), x < y)
+                opens_invariants none
+                no_unwind;
+
+            #[verifier::allow_in_spec]
+            #[cfg(not(verus_verify_core))]
             pub assume_specification[<$uN>::wrapping_mul](x: $uN, y: $uN) -> $uN
                 returns $mod_u::wrapping_mul(x, y)
                 opens_invariants none

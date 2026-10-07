@@ -3733,3 +3733,38 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    // `slice.try_into()` to `[T; N]` / `&[T; N]` (lz4_flex), and `overflowing_{add,sub}`
+    #[test] array_try_from_slice_and_overflowing verus_code! {
+        use vstd::prelude::*;
+        use core::convert::TryInto;
+        fn read_u16(input: &[u8], pos: usize) -> u16
+            requires pos <= 100, pos + 2 <= input@.len()
+        {
+            let dst = &input[pos..pos + 2];
+            let b: [u8; 2] = dst.try_into().unwrap();
+            assert(b@ == input@.subrange(pos as int, pos + 2));
+            u16::from_le_bytes(b)
+        }
+        fn r16(input: &[u8]) -> u8 requires input@.len() >= 16 {
+            let a: &[u8; 16] = input[0..16].try_into().unwrap();
+            assert(a[15] == input@[15]);
+            a[15]
+        }
+        fn direct(input: &[u8]) {
+            let r = <[u8; 3]>::try_from(input);
+            assert(r is Ok <==> input@.len() == 3);
+        }
+        fn ovf(a: usize, b: usize) -> usize {
+            let (s, o) = a.overflowing_sub(b);
+            let (t, p) = a.overflowing_add(b);
+            assert(p <==> a + b > usize::MAX);
+            if o { assert(a < b); 0 } else { assert(s == a - b); s }
+        }
+        fn bad(input: &[u8]) -> u8 requires input@.len() >= 4 {
+            let a: &[u8; 16] = input[0..4].try_into().unwrap(); // FAILS
+            a[0]
+        }
+    } => Err(err) => assert_one_fails(err)
+}
