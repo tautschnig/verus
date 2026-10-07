@@ -1553,3 +1553,46 @@ fn overflowing_unsigned_holds() {
     assert!(a.overflowing_add(b) == (a.wrapping_add(b), (a as u128) + (b as u128) > u64::MAX as u128));
     assert!(a.overflowing_sub(b) == (a.wrapping_sub(b), a < b));
 }
+
+/// N2 content-carrying specs (vstd `std_specs/extra.rs`, "N2" section).
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(6)]
+fn n2_specs_hold() {
+    use core::borrow::Borrow;
+    use core::cmp::Ordering;
+    // Ordering::is_eq
+    let o: Ordering = match kani::any::<u8>() % 3 { 0 => Ordering::Less, 1 => Ordering::Equal, _ => Ordering::Greater };
+    assert!(o.is_eq() == (o == Ordering::Equal));
+    // Borrow<T> for T is the identity
+    let x: u32 = kani::any();
+    let b: &u32 = <u32 as Borrow<u32>>::borrow(&x);
+    assert!(core::ptr::eq(b, &x));
+    // Result::or, transpose, is_ok_and
+    let r: Result<u8, u8> = if kani::any() { Ok(kani::any()) } else { Err(kani::any()) };
+    let res: Result<u8, u16> = if kani::any() { Ok(kani::any()) } else { Err(kani::any()) };
+    assert!(r.or(res) == match r { Ok(v) => Ok(v), Err(_) => res });
+    let t: Result<Option<u8>, u8> = match kani::any::<u8>() % 3 { 0 => Ok(Some(kani::any())), 1 => Ok(None), _ => Err(kani::any()) };
+    assert!(t.transpose() == match t { Ok(Some(v)) => Some(Ok(v)), Ok(None) => None, Err(e) => Some(Err(e)) });
+    let k: u8 = kani::any();
+    assert!(r.is_ok_and(|v| v > k) == match r { Ok(v) => v > k, Err(_) => false });
+    // VecDeque::is_empty
+    let n: usize = kani::any();
+    kani::assume(n <= 3);
+    let mut d = std::collections::VecDeque::new();
+    for _ in 0..n { d.push_back(0u8); }
+    assert!(d.is_empty() == (d.len() == 0));
+    // partition_point <= len; rotate_left
+    let a: [u8; 4] = kani::any();
+    let m: usize = kani::any();
+    kani::assume(m <= 4);
+    let s = &a[..m];
+    assert!(s.partition_point(|&v| v < k) <= s.len());
+    let mid: usize = kani::any();
+    kani::assume(mid <= 4);
+    let mut rot = a;
+    rot.rotate_left(mid);
+    for i in 0..4 {
+        assert!(rot[i] == a[(i + mid) % 4]);
+    }
+}

@@ -3768,3 +3768,33 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    // N2 std specs (dson, buffrs, left-right)
+    #[test] n2_std_specs verus_code! {
+        use vstd::prelude::*;
+        use std::collections::VecDeque;
+        fn f(r: Result<u8, u8>, s: &mut [u8; 4], d: &VecDeque<u8>) {
+            let o = r.or::<u16>(Err(3));
+            assert(o == match r { Ok(v) => Ok::<u8, u16>(v), Err(_) => Err(3u16) });
+            let t: Result<Option<u8>, u8> = Ok(None);
+            let tt = t.transpose();
+            assert(tt is None);
+            let b = r.is_ok_and(|v: u8| v > 3);
+            assert(b ==> r is Ok);
+            let q = core::cmp::Ordering::Equal.is_eq();
+            assert(q);
+            let e = d.is_empty();
+            assert(e == (d@.len() == 0));
+            let sl: &[u8] = &[1u8, 2, 3];
+            let p = sl.partition_point(|x: &u8| *x < 2);
+            assert(p <= 3);
+            let mut v = vec![1u8, 2, 3];
+            v.as_mut_slice().rotate_left(1);
+            assert(v@ =~= seq![2u8, 3, 1]);
+        }
+        fn g(v: &mut Vec<u8>) {
+            v.as_mut_slice().rotate_left(5); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}

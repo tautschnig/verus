@@ -424,4 +424,142 @@ impl<T, F: FnMut() -> Option<T>> super::iter::IteratorSpecImpl for core::iter::F
 
 pub assume_specification<T, F: FnMut() -> Option<T>>[ core::iter::from_fn::<T, F> ](f: F) -> core::iter::FromFn<F>;
 
+
+// ------------------------------------------------------------------ N2 (dson, buffrs, left-right)
+// Content-carrying: Ordering::is_eq, VecDeque::is_empty, Borrow::borrow (identity),
+// Result::or, Result::transpose, Result::is_ok_and, slice partition_point (bound),
+// slice rotate_left; Kani `n2_specs_hold`, Lean `n2_*` (Internal/StdSpecs.lean).
+
+pub assume_specification[ Ordering::is_eq ](o: Ordering) -> (r: bool)
+    ensures
+        r == (o == Ordering::Equal),
+;
+
+pub assume_specification<T: ?Sized>[ <T as core::borrow::Borrow<T>>::borrow ](t: &T) -> (r: &T)
+    ensures
+        r == t,
+;
+
+pub assume_specification<T, E, F>[ Result::<T, E>::or::<F> ](r: Result<T, E>, res: Result<T, F>) -> (o: Result<T, F>)
+    ensures
+        o == match r { Ok(v) => Ok(v), Err(_) => res },
+;
+
+pub assume_specification<T, E>[ Result::<Option<T>, E>::transpose ](r: Result<Option<T>, E>) -> (o: Option<Result<T, E>>)
+    ensures
+        o == match r { Ok(Some(v)) => Some(Ok(v)), Ok(None) => None, Err(e) => Some(Err(e)) },
+;
+
+pub assume_specification<T, E, F: FnOnce(T) -> bool>[ Result::<T, E>::is_ok_and::<F> ](
+    r: Result<T, E>,
+    f: F,
+) -> (res: bool)
+    requires
+        r matches Ok(v) ==> call_requires(f, (v,)),
+    ensures
+        !(r is Ok) ==> !res,
+        r matches Ok(v) ==> call_ensures(f, (v,), res),
+;
+
+/// The predicate is called on elements of the slice; the result is at most its length.
+pub assume_specification<T, P: FnMut(&T) -> bool>[ <[T]>::partition_point::<P> ](s: &[T], pred: P) -> (r: usize)
+    requires
+        forall|i: int| 0 <= i < s@.len() ==> #[trigger] call_requires(pred, (&s@[i],)),
+    ensures
+        r <= s@.len(),
+;
+
+/// Panics if `mid > len`.
+pub assume_specification<T>[ <[T]>::rotate_left ](s: &mut [T], mid: usize)
+    requires
+        mid <= old(s)@.len(),
+    ensures
+        final(s)@ == old(s)@.subrange(mid as int, old(s)@.len() as int) + old(s)@.subrange(0, mid as int),
+;
+
+/// The key function is called on elements of the slice.
+pub assume_specification<'a, T, B: Ord, F: FnMut(&'a T) -> B>[ <[T]>::binary_search_by_key::<B, F> ](
+    s: &'a [T],
+    b: &B,
+    f: F,
+) -> Result<usize, usize>
+    requires
+        forall|i: int| 0 <= i < s@.len() ==> #[trigger] call_requires(f, (&s@[i],)),
+;
+
+pub assume_specification[ f64::total_cmp ](a: &f64, b: &f64) -> Ordering;
+
+pub assume_specification[ char::is_lowercase ](c: char) -> bool;
+
+pub assume_specification[ char::is_alphabetic ](c: char) -> bool;
+
+#[cfg(feature = "alloc")]
+pub assume_specification[ alloc::string::String::into_bytes ](s: alloc::string::String) -> alloc::vec::Vec<u8>;
+
+#[cfg(feature = "alloc")]
+pub assume_specification<T: ?Sized, A: core::alloc::Allocator>[ alloc::sync::Arc::<T, A>::ptr_eq ](
+    a: &alloc::sync::Arc<T, A>,
+    b: &alloc::sync::Arc<T, A>,
+) -> bool;
+
+#[cfg(feature = "alloc")]
+pub assume_specification<T, A: core::alloc::Allocator>[ alloc::collections::VecDeque::<T, A>::is_empty ](
+    d: &alloc::collections::VecDeque<T, A>,
+) -> (r: bool)
+    ensures
+        r == (d@.len() == 0),
+;
+
+pub assume_specification[ core::num::NonZero::<u32>::saturating_add ](a: core::num::NonZero<u32>, b: u32) -> core::num::NonZero<u32>;
+
+pub assume_specification[ core::num::NonZero::<u64>::saturating_add ](a: core::num::NonZero<u64>, b: u64) -> core::num::NonZero<u64>;
+
+pub assume_specification[ core::num::NonZero::<usize>::saturating_add ](a: core::num::NonZero<usize>, b: usize) -> core::num::NonZero<usize>;
+
+/// The items are formatted by unverified code: their `fmt_req` must hold.
+pub assume_specification<'a, 'b: 'a, 'c, D: core::fmt::Debug, I: IntoIterator<Item = D>>[ core::fmt::DebugList::<'a, 'b>::entries::<D, I> ](
+    d: &'c mut core::fmt::DebugList<'a, 'b>,
+    entries: I,
+) -> &'c mut core::fmt::DebugList<'a, 'b>
+    requires
+        forall|x: &D, f: &core::fmt::Formatter| #[trigger] super::fmt::DebugSpec::fmt_req(x, f),
+;
+
+pub assume_specification<'a, 'b: 'a, 'c, D: core::fmt::Debug, I: IntoIterator<Item = D>>[ core::fmt::DebugSet::<'a, 'b>::entries::<D, I> ](
+    d: &'c mut core::fmt::DebugSet<'a, 'b>,
+    entries: I,
+) -> &'c mut core::fmt::DebugSet<'a, 'b>
+    requires
+        forall|x: &D, f: &core::fmt::Formatter| #[trigger] super::fmt::DebugSpec::fmt_req(x, f),
+;
+
+pub assume_specification<'a, 'b: 'a, 'c, K: core::fmt::Debug, V: core::fmt::Debug, I: IntoIterator<Item = (K, V)>>[ core::fmt::DebugMap::<'a, 'b>::entries::<K, V, I> ](
+    d: &'c mut core::fmt::DebugMap<'a, 'b>,
+    entries: I,
+) -> &'c mut core::fmt::DebugMap<'a, 'b>
+    requires
+        forall|x: &K, f: &core::fmt::Formatter| #[trigger] super::fmt::DebugSpec::fmt_req(x, f),
+        forall|x: &V, f: &core::fmt::Formatter| #[trigger] super::fmt::DebugSpec::fmt_req(x, f),
+;
+
+#[cfg(feature = "std")]
+pub assume_specification[ std::env::current_dir ]() -> std::io::Result<std::path::PathBuf>;
+
+#[cfg(feature = "std")]
+pub assume_specification[ std::thread::yield_now ]();
+
+#[cfg(feature = "std")]
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExStripPrefixError(std::path::StripPrefixError);
+
+#[cfg(feature = "std")]
+pub assume_specification[ std::path::PathBuf::as_path ](p: &std::path::PathBuf) -> &std::path::Path;
+
+#[cfg(feature = "std")]
+pub assume_specification[ std::path::Path::to_str ](p: &std::path::Path) -> Option<&str>;
+
+#[cfg(feature = "std")]
+pub assume_specification[ std::path::Path::is_file ](p: &std::path::Path) -> bool;
+
 } // verus!
