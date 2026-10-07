@@ -1596,3 +1596,44 @@ fn n2_specs_hold() {
         assert!(rot[i] == a[(i + mid) % 4]);
     }
 }
+
+/// vstd `fmt_req_all` axioms for std types: their Debug/Display impls return for every
+/// value (exec test over representative values; `cargo test fmt_std_types_total`).
+#[cfg(test)]
+#[test]
+fn fmt_std_types_total() {
+    use std::fmt::Write;
+    let mut s = String::new();
+    for k in [std::io::ErrorKind::NotFound, std::io::ErrorKind::Other, std::io::ErrorKind::InvalidData] {
+        let e = std::io::Error::from(k);
+        write!(s, "{e} {e:?}").unwrap();
+        let e = std::io::Error::new(k, "msg");
+        write!(s, "{e} {e:?}").unwrap();
+    }
+    for code in [0, 1, 2, 13, 9999, -1] {
+        let e = std::io::Error::from_raw_os_error(code);
+        write!(s, "{e} {e:?}").unwrap();
+    }
+    for d in [std::time::Duration::ZERO, std::time::Duration::MAX, std::time::Duration::from_nanos(1),
+              std::time::Duration::new(u64::MAX, 999_999_999), std::time::Duration::from_secs_f64(1e-9)] {
+        write!(s, "{d:?} {d:#?} {d:.3?} {d:>40?}").unwrap();
+    }
+    for p in ["", "/", "a/b", "\u{fffd}", "x\0y"] {
+        let pb = std::path::PathBuf::from(p);
+        write!(s, "{} {:?}", pb.display(), pb).unwrap();
+    }
+    for t in ["", "x", "99999999999999999999", "-"] {
+        if let Err(e) = t.parse::<u8>() { write!(s, "{e} {e:?}").unwrap(); }
+        if let Err(e) = t.parse::<f64>() { write!(s, "{e} {e:?}").unwrap(); }
+        if let Err(e) = t.parse::<bool>() { write!(s, "{e} {e:?}").unwrap(); }
+    }
+    if let Err(e) = u8::try_from(300u32) { write!(s, "{e} {e:?}").unwrap(); }
+    if let Err(e) = std::str::from_utf8(&[0xff, 0xfe]) { write!(s, "{e} {e:?}").unwrap(); }
+    write!(s, "{} {:?}", std::fmt::Error, std::fmt::Error).unwrap();
+    if let Err(e) = std::time::UNIX_EPOCH.duration_since(std::time::SystemTime::now()) { write!(s, "{e} {e:?}").unwrap(); }
+    for e in [std::env::VarError::NotPresent, std::env::VarError::NotUnicode("x".into())] {
+        write!(s, "{e} {e:?}").unwrap();
+    }
+    write!(s, "{:?} {:?} {:?} {:?}", Some(1u8), None::<u8>, vec![1u8, 2], Box::new(3u8)).unwrap();
+    assert!(!s.is_empty());
+}

@@ -324,6 +324,61 @@ def_type_axiom!(&str, axiom_fmt_req_all_str);
 #[cfg(all(feature = "alloc", not(verus_verify_core)))]
 def_type_axiom!(alloc::string::String, axiom_fmt_req_all_string);
 
+// std types whose Debug/Display impls have no precondition (exec test
+// `fmt_std_types_total` in tools/vstd-kani formats them).
+#[cfg(feature = "std")]
+def_type_axiom!(std::io::Error, axiom_fmt_req_all_io_error);
+
+def_type_axiom!(core::time::Duration, axiom_fmt_req_all_duration);
+
+#[cfg(feature = "std")]
+def_type_axiom!(std::path::Display<'_>, axiom_fmt_req_all_path_display);
+
+def_type_axiom!(core::num::ParseIntError, axiom_fmt_req_all_parse_int_error);
+
+def_type_axiom!(core::num::ParseFloatError, axiom_fmt_req_all_parse_float_error);
+
+def_type_axiom!(core::num::TryFromIntError, axiom_fmt_req_all_try_from_int_error);
+
+def_type_axiom!(core::str::Utf8Error, axiom_fmt_req_all_utf8_error);
+
+def_type_axiom!(core::str::ParseBoolError, axiom_fmt_req_all_parse_bool_error);
+
+def_type_axiom!(core::fmt::Error, axiom_fmt_req_all_fmt_error);
+
+#[cfg(feature = "std")]
+def_type_axiom!(std::time::SystemTimeError, axiom_fmt_req_all_system_time_error);
+
+#[cfg(feature = "std")]
+def_type_axiom!(std::env::VarError, axiom_fmt_req_all_var_error);
+
+#[cfg(feature = "std")]
+def_type_axiom!(std::path::PathBuf, axiom_fmt_req_all_path_buf);
+
+// containers whose Debug formats the elements with their Debug
+pub broadcast axiom fn axiom_fmt_req_all_option<A>()
+    requires
+        fmt_req_all::<A>(),
+    ensures
+        #[trigger] fmt_req_all::<Option<A>>(),
+;
+
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+pub broadcast axiom fn axiom_fmt_req_all_vec<A>()
+    requires
+        fmt_req_all::<A>(),
+    ensures
+        #[trigger] fmt_req_all::<alloc::vec::Vec<A>>(),
+;
+
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+pub broadcast axiom fn axiom_fmt_req_all_box<A>()
+    requires
+        fmt_req_all::<A>(),
+    ensures
+        #[trigger] fmt_req_all::<alloc::boxed::Box<A>>(),
+;
+
 pub broadcast axiom fn axiom_fmt_req_all_ref<A>()
     requires
         fmt_req_all::<A>(),
@@ -383,6 +438,28 @@ pub broadcast group group_fmt_axioms {
     #[cfg(all(feature = "alloc", not(verus_verify_core)))]
     axiom_fmt_req_all_string,
     axiom_fmt_req_all_ref,
+    #[cfg(feature = "std")]
+    axiom_fmt_req_all_io_error,
+    axiom_fmt_req_all_duration,
+    #[cfg(feature = "std")]
+    axiom_fmt_req_all_path_display,
+    axiom_fmt_req_all_parse_int_error,
+    axiom_fmt_req_all_parse_float_error,
+    axiom_fmt_req_all_try_from_int_error,
+    axiom_fmt_req_all_utf8_error,
+    axiom_fmt_req_all_parse_bool_error,
+    axiom_fmt_req_all_fmt_error,
+    #[cfg(feature = "std")]
+    axiom_fmt_req_all_system_time_error,
+    #[cfg(feature = "std")]
+    axiom_fmt_req_all_var_error,
+    #[cfg(feature = "std")]
+    axiom_fmt_req_all_path_buf,
+    axiom_fmt_req_all_option,
+    #[cfg(all(feature = "alloc", not(verus_verify_core)))]
+    axiom_fmt_req_all_vec,
+    #[cfg(all(feature = "alloc", not(verus_verify_core)))]
+    axiom_fmt_req_all_box,
     // traits
     axiom_fmt_req_all_binary,
     axiom_fmt_req_all_debug,

@@ -3798,3 +3798,28 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    // formatting std types and containers of them (fmt_req_all axioms)
+    #[test] fmt_std_types verus_code! {
+        use vstd::prelude::*;
+        fn f(e: std::io::Error, d: std::time::Duration, p: &std::path::Path, v: Vec<Option<u8>>) -> String {
+            let pe = "x".parse::<u8>();
+            let s = format!("{e} {e:?} {d:?} {} {v:?}", p.display());
+            s
+        }
+        struct S;
+        impl std::fmt::Debug for S {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { Ok(()) }
+        }
+        #[verifier::external_body]
+        struct X;
+        #[verifier::external]
+        impl std::fmt::Debug for X {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { Ok(()) }
+        }
+        fn g(x: Vec<X>) -> String {
+            format!("{x:?}") // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
