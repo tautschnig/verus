@@ -334,14 +334,18 @@ def_type_axiom!(core::time::Duration, axiom_fmt_req_all_duration);
 #[cfg(feature = "std")]
 def_type_axiom!(std::path::Display<'_>, axiom_fmt_req_all_path_display);
 
+#[cfg(not(verus_verify_core))]
 def_type_axiom!(core::num::ParseIntError, axiom_fmt_req_all_parse_int_error);
 
+#[cfg(not(verus_verify_core))]
 def_type_axiom!(core::num::ParseFloatError, axiom_fmt_req_all_parse_float_error);
 
 def_type_axiom!(core::num::TryFromIntError, axiom_fmt_req_all_try_from_int_error);
 
+#[cfg(not(verus_verify_core))]
 def_type_axiom!(core::str::Utf8Error, axiom_fmt_req_all_utf8_error);
 
+#[cfg(not(verus_verify_core))]
 def_type_axiom!(core::str::ParseBoolError, axiom_fmt_req_all_parse_bool_error);
 
 def_type_axiom!(core::fmt::Error, axiom_fmt_req_all_fmt_error);
@@ -443,10 +447,14 @@ pub broadcast group group_fmt_axioms {
     axiom_fmt_req_all_duration,
     #[cfg(feature = "std")]
     axiom_fmt_req_all_path_display,
+    #[cfg(not(verus_verify_core))]
     axiom_fmt_req_all_parse_int_error,
+    #[cfg(not(verus_verify_core))]
     axiom_fmt_req_all_parse_float_error,
     axiom_fmt_req_all_try_from_int_error,
+    #[cfg(not(verus_verify_core))]
     axiom_fmt_req_all_utf8_error,
+    #[cfg(not(verus_verify_core))]
     axiom_fmt_req_all_parse_bool_error,
     axiom_fmt_req_all_fmt_error,
     #[cfg(feature = "std")]
