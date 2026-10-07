@@ -605,6 +605,20 @@ where
 
             let trait_function = ctx.func_map[method].clone();
 
+            // The method's own type parameters: the impl may name them differently
+            // (`fn from_iter<I>` implementing vstd's `fn from_iter<T>`). They are the last
+            // ones in both lists.
+            let n_own = trait_function.x.typ_params.len().saturating_sub(typ_params.len());
+            if n_own > 0 && function.x.typ_params.len() >= n_own {
+                let tr_own = &trait_function.x.typ_params[trait_function.x.typ_params.len() - n_own..];
+                let impl_own = &function.x.typ_params[function.x.typ_params.len() - n_own..];
+                for (x, y) in tr_own.iter().zip(impl_own.iter()) {
+                    if x != y && !trait_typ_substs.contains_key(x) {
+                        trait_typ_substs.insert(x.clone(), Arc::new(TypX::TypParam(y.clone())));
+                    }
+                }
+            }
+
             let mut param_renames: HashMap<_, _> = trait_function
                 .x
                 .params

@@ -5098,3 +5098,32 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    // an impl names the method's own type parameters differently from the trait
+    // (sized-chunks `fn from_iter<I>` for vstd's `fn from_iter<T>`); inherited requires and
+    // ensures use the impl's names
+    #[test] impl_method_type_param_renamed verus_code! {
+        use vstd::prelude::*;
+        pub trait Tr {
+            spec fn p<A>(a: A) -> bool;
+            fn f<A>(&self, a: A) -> (r: u8)
+                requires Self::p::<A>(a),
+                ensures r == 1; // FAILS (for Bad)
+        }
+        pub struct S;
+        impl Tr for S {
+            open spec fn p<B>(b: B) -> bool { true }
+            fn f<B>(&self, b: B) -> (r: u8) { 1 }
+        }
+        pub struct Bad;
+        impl Tr for Bad {
+            open spec fn p<B>(b: B) -> bool { true }
+            fn f<B>(&self, b: B) -> (r: u8) { 2 }
+        }
+        pub struct C(pub u8);
+        impl core::iter::FromIterator<u8> for C {
+            fn from_iter<I>(iter: I) -> Self where I: IntoIterator<Item = u8> { C(0) }
+        }
+    } => Err(err) => assert_one_fails(err)
+}
