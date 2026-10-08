@@ -489,6 +489,7 @@ const COMMIT_U8_FUNCTION: &'static str = verus_code_str! {
     }
 };
 
+// (this fork reports these with its own messages; upstream's are about function pointer types)
 test_verify_one_file! {
     #[test] atomic_call_update_in_proof_closure
     COMMIT_U8_FUNCTION.to_owned() + verus_code_str! {
@@ -506,7 +507,7 @@ test_verify_one_file! {
             };
             0
         }
-    } => Err(err) => assert_vir_error_msg(err, "function pointer types")
+    } => Err(err) => assert_vir_error_msg(err, "function must be called in `atomically` block")
 }
 
 test_verify_one_file! {
@@ -519,7 +520,7 @@ test_verify_one_file! {
                 update(2);
             };
         }
-    } => Err(err) => assert_vir_error_msg(err, "function pointer types")
+    } => Err(err) => assert_vir_error_msg(err, "to call a non-static function in ghost code, it must be a spec_fn")
 }
 
 test_verify_one_file! {
