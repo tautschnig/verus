@@ -2859,17 +2859,25 @@ pub fn synthesize_derived_fmt_impls(
         } else {
             root_module.clone()
         };
-        if &dt.krate != crate_id && !crate::datatype_to_air::is_datatype_transparent(&own_mod, d) {
+        if !crate::ast_util::is_visible_to(&d.x.visibility, &own_mod)
+            || !crate::datatype_to_air::is_datatype_transparent(&own_mod, d)
+        {
             continue;
         }
+        let foreign = &dt.krate != crate_id;
         let all_visible = std::cell::Cell::new(true);
         for ft in fields_of(dt) {
             let check = |t: &Typ| {
                 if let TypX::Datatype(Dt::Path(p), _, _) = &**t {
-                    if let Some(fd) = dts.get(p) {
-                        if !crate::ast_util::is_visible_to(&fd.x.visibility, &own_mod) {
-                            all_visible.set(false);
+                    match dts.get(p) {
+                        Some(fd) => {
+                            if !crate::ast_util::is_visible_to(&fd.x.visibility, &own_mod) {
+                                all_visible.set(false);
+                            }
                         }
+                        // a datatype of another crate that this crate does not see
+                        None if foreign => all_visible.set(false),
+                        None => {}
                     }
                 }
                 Ok(t.clone())
