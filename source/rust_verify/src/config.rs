@@ -93,6 +93,7 @@ pub struct ArgsX {
     pub allow_explicit_panics: bool,
     pub closure_param_requires: bool,
     pub counterexample: bool,
+    pub check_drops: bool,
     pub time: bool,
     pub time_expanded: bool,
     pub output_json: bool,
@@ -152,6 +153,7 @@ impl ArgsX {
             allow_explicit_panics: Default::default(),
             closure_param_requires: Default::default(),
             counterexample: Default::default(),
+            check_drops: true,
             time: Default::default(),
             time_expanded: Default::default(),
             output_json: Default::default(),
@@ -340,6 +342,7 @@ pub fn parse_args_with_imports(
     const OPT_ALLOW_EXPLICIT_PANICS: &str = "allow-explicit-panics";
     const OPT_CLOSURE_PARAM_REQUIRES: &str = "closure-param-requires";
     const OPT_COUNTEREXAMPLE: &str = "counterexample";
+    const OPT_NO_CHECK_DROPS: &str = "no-check-drops";
     const OPT_TIME: &str = "time";
     const OPT_TIME_EXPANDED: &str = "time-expanded";
     const OPT_OUTPUT_JSON: &str = "output-json";
@@ -555,6 +558,12 @@ pub fn parse_args_with_imports(
         OPT_ALLOW_EXPLICIT_PANICS,
         "Allow explicit panic!/assert!/unreachable! to happen (they are not proved unreachable); \
          other panics, such as indexing out of bounds or unwrap on None, are still checked",
+    );
+    opts.optflag(
+        "",
+        OPT_NO_CHECK_DROPS,
+        "Do not check the implicit drops of no_unwind and atomic exec functions (found in \
+         rustc's MIR) against unverified Drop impls of the crate",
     );
     opts.optflag(
         "",
@@ -786,6 +795,7 @@ pub fn parse_args_with_imports(
         allow_explicit_panics: matches.opt_present(OPT_ALLOW_EXPLICIT_PANICS),
         closure_param_requires: matches.opt_present(OPT_CLOSURE_PARAM_REQUIRES),
         counterexample: matches.opt_present(OPT_COUNTEREXAMPLE),
+        check_drops: !matches.opt_present(OPT_NO_CHECK_DROPS),
         time: matches.opt_present(OPT_TIME) || matches.opt_present(OPT_TIME_EXPANDED),
         time_expanded: matches.opt_present(OPT_TIME_EXPANDED),
         output_json: matches.opt_present(OPT_OUTPUT_JSON),

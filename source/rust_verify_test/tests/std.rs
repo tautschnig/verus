@@ -3857,3 +3857,26 @@ test_verify_one_file_with_options! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file_with_options! {
+    // implicit drops (from rustc's MIR) of values whose `Drop` impl is not verified, in
+    // no_unwind and atomic functions (upstream #2949, #778)
+    #[test] check_drops_unverified_drop_impls [] => code! {
+        use vstd::prelude::*;
+        struct PanickingDrop;
+        impl Drop for PanickingDrop {
+            fn drop(&mut self) { panic!("unverified Drop panicked"); }
+        }
+        verus! {
+        #[verifier::external_type_specification]
+        struct ExPanickingDrop(PanickingDrop);
+        pub struct Verified { pub x: u8 }
+        impl Drop for Verified {
+            fn drop(&mut self) { }
+        }
+        fn ok_no_unwind(v: Verified) no_unwind { }
+        fn may_unwind_ok(p: PanickingDrop) { }
+        fn bad_no_unwind(p: PanickingDrop) no_unwind { }
+        }
+    } => Err(err) => assert_vir_error_msg(err, "whose `Drop` impl is not verified, in a `no_unwind` function")
+}
