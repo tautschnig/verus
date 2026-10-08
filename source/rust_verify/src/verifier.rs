@@ -3449,14 +3449,6 @@ impl Verifier {
 
         Arc::make_mut(&mut current_vir_crate).arch.word_bits = vir_crate.arch.word_bits;
 
-        crate::import_export::export_crate(
-            &self.args,
-            &self.export_vir_path_via_cargo,
-            crate_metadata,
-            current_vir_crate.clone(),
-        )
-        .map_err(map_err_diagnostics)?;
-
         if self.args.log_all || self.args.log_args.log_vir {
             let mut file = self
                 .create_log_file(None, crate::config::VIR_FILE_SUFFIX)
@@ -3478,7 +3470,51 @@ impl Verifier {
         );
         let derived_fmt = crate::automatic_derive::derived_fmt_impls(&ctxt, &vir_crate);
         let vir_crate =
-            vir::traits::synthesize_derived_fmt_impls(&vir_crate, &derived_fmt, &mut warning_ctx);
+            vir::traits::synthesize_derived_fmt_impls(
+                &vir_crate,
+                self.crate_id.as_ref().expect("crate_id"),
+                &derived_fmt,
+                &mut warning_ctx,
+            );
+        // The synthesized extension impls (and their spec functions) belong to this crate and
+        // are part of what it exports: a downstream crate formatting a `kraken_core::OrderSide`
+        // needs its `fmt_req`. They are not in `current_vir_crate` (built before the
+        // synthesis), so add the ones the merged crate gained.
+        {
+            let have_impls: std::collections::HashSet<_> =
+                current_vir_crate.trait_impls.iter().map(|t| t.x.impl_path.clone()).collect();
+            let have_funs: std::collections::HashSet<_> =
+                current_vir_crate.functions.iter().map(|f| f.x.name.clone()).collect();
+            let krate_id = self.crate_id.as_ref().expect("crate_id");
+            let new_impls: Vec<_> = vir_crate
+                .trait_impls
+                .iter()
+                .filter(|t| &t.x.impl_path.krate == krate_id && !have_impls.contains(&t.x.impl_path))
+                .cloned()
+                .collect();
+            let new_impl_paths: std::collections::HashSet<_> =
+                new_impls.iter().map(|t| t.x.impl_path.clone()).collect();
+            let new_funs: Vec<_> = vir_crate
+                .functions
+                .iter()
+                .filter(|f| {
+                    !have_funs.contains(&f.x.name)
+                        && matches!(&f.x.kind, vir::ast::FunctionKind::TraitMethodImpl { impl_path, .. }
+                            if new_impl_paths.contains(impl_path))
+                })
+                .cloned()
+                .collect();
+            let cur = Arc::make_mut(&mut current_vir_crate);
+            cur.trait_impls.extend(new_impls);
+            cur.functions.extend(new_funs);
+        }
+        crate::import_export::export_crate(
+            &self.args,
+            &self.export_vir_path_via_cargo,
+            crate_metadata,
+            current_vir_crate.clone(),
+        )
+        .map_err(map_err_diagnostics)?;
         let vir_crate = vir::traits::inherit_default_bodies(&vir_crate, &mut warning_ctx)
             .map_err(|e| (vec![e], Vec::new()))?;
 

@@ -486,24 +486,27 @@ fn cleanup_span_ids<'tcx>(ctxt: &Context<'tcx>, span: Span, hir_id: HirId, expr:
     .unwrap()
 }
 
-/// Impls of `core::fmt::Debug`/`Display` for local non-generic datatypes that a derive macro
-/// generated (rustc's `#[derive(Debug)]`, or a third-party derive such as `strum::Display`
-/// or `thiserror::Error`) and that are not in the VIR crate (Verus leaves them unverified).
-/// Returned as `(trait path, datatype path, impl path)` for
-/// `vir::traits::synthesize_derived_fmt_impls`.
+/// Impls of `core::fmt::Debug`/`Display` for non-generic datatypes of the VIR crate (local or
+/// imported from another Verus crate) that a derive macro generated (rustc's
+/// `#[derive(Debug)]`, or a third-party derive such as `strum::Display` or `thiserror::Error`)
+/// and that Verus does not verify. Returned as `(trait path, datatype path, impl path)` for
+/// `vir::traits::synthesize_derived_fmt_impls`; the impl path is the extension impl's path,
+/// in this crate.
 pub(crate) fn derived_fmt_impls<'tcx>(
     ctxt: &crate::context::Context<'tcx>,
     krate: &vir::ast::Krate,
 ) -> Vec<(vir::ast::Path, vir::ast::Path, vir::ast::Path)> {
-    use rustc_hir::def::DefKind;
     let tcx = ctxt.tcx;
     let fmt_traits: Vec<rustc_span::def_id::DefId> = [rustc_span::sym::Debug, rustc_span::sym::Display]
         .into_iter()
         .filter_map(|s| tcx.get_diagnostic_item(s))
         .collect();
-    let known: std::collections::HashSet<vir::ast::Path> =
-        // impls Verus verifies (external impls are recorded too, as `auto_imported`)
-        krate.trait_impls.iter().filter(|ti| !ti.x.auto_imported).map(|ti| ti.x.impl_path.clone()).collect();
+    let known: std::collections::HashSet<vir::ast::Path> = krate
+        .trait_impls
+        .iter()
+        .filter(|ti| !ti.x.auto_imported)
+        .map(|ti| ti.x.impl_path.clone())
+        .collect();
     let dts: std::collections::HashSet<vir::ast::Path> = krate
         .datatypes
         .iter()
@@ -513,42 +516,43 @@ pub(crate) fn derived_fmt_impls<'tcx>(
         })
         .collect();
     let mut out = Vec::new();
-    for local in tcx.hir_crate_items(()).definitions() {
-        let def_id = local.to_def_id();
-        if !matches!(tcx.def_kind(def_id), DefKind::Impl { of_trait: true }) {
-            continue;
+    for tr in fmt_traits.iter() {
+        let impls = tcx.trait_impls_of(*tr);
+        for (_, impl_ids) in impls.non_blanket_impls().iter() {
+            for &impl_id in impl_ids.iter() {
+                if tcx.generics_of(impl_id).count() != 0 {
+                    continue;
+                }
+                let derived = tcx.is_automatically_derived(impl_id)
+                    || crate::external::derive_macro_crate(tcx, tcx.def_span(impl_id)).is_some();
+                if !derived {
+                    continue;
+                }
+                let self_ty = tcx.type_of(impl_id).skip_binder();
+                let rustc_middle::ty::TyKind::Adt(adt, _) = self_ty.kind() else { continue };
+                let Some(dt_path) = crate::rust_to_vir_base::def_id_to_vir_path_option(
+                    tcx,
+                    Some(&ctxt.verus_items),
+                    adt.did(),
+                ) else {
+                    continue;
+                };
+                if !dts.contains(&dt_path) {
+                    continue;
+                }
+                let Some(impl_path) = crate::rust_to_vir_base::def_id_to_vir_path_option(
+                    tcx,
+                    Some(&ctxt.verus_items),
+                    impl_id,
+                ) else {
+                    continue;
+                };
+                if known.contains(&impl_path) {
+                    continue;
+                }
+                out.push((ctxt.def_id_to_vir_path(*tr), dt_path, impl_path));
+            }
         }
-        let trait_ref = tcx.impl_trait_ref(def_id).skip_binder();
-        if !fmt_traits.contains(&trait_ref.def_id) {
-            continue;
-        }
-        if tcx.generics_of(def_id).count() != 0 {
-            continue;
-        }
-        let derived = is_automatically_derived(tcx.hir_attrs(tcx.local_def_id_to_hir_id(local)))
-            || crate::external::derive_macro_crate(tcx, tcx.def_span(def_id)).is_some();
-        if !derived {
-            continue;
-        }
-        let rustc_middle::ty::TyKind::Adt(adt, _) = trait_ref.self_ty().kind() else { continue };
-        if !adt.did().is_local() {
-            continue;
-        }
-        let Some(dt_path) = crate::rust_to_vir_base::def_id_to_vir_path_option(
-            tcx,
-            Some(&ctxt.verus_items),
-            adt.did(),
-        ) else {
-            continue;
-        };
-        if !dts.contains(&dt_path) {
-            continue;
-        }
-        let impl_path = ctxt.def_id_to_vir_path(def_id);
-        if known.contains(&impl_path) {
-            continue;
-        }
-        out.push((ctxt.def_id_to_vir_path(trait_ref.def_id), dt_path, impl_path));
     }
     out
 }

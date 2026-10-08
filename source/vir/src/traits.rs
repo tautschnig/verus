@@ -2730,6 +2730,7 @@ pub fn synthesize_default_extension_impls(
 /// nothing else with a precondition, as for any unverified impl.
 pub fn synthesize_derived_fmt_impls(
     krate: &Krate,
+    crate_id: &crate::ast::CrateId,
     derived: &Vec<(Path, Path, Path)>,
     warning_ctx: &mut crate::context::WarningCtx,
 ) -> Krate {
@@ -2740,6 +2741,7 @@ pub fn synthesize_derived_fmt_impls(
     if derived.is_empty() {
         return krate.clone();
     }
+    let root_module = Arc::new(crate::ast::PathX { krate: crate_id.clone(), segments: Arc::new(vec![]) });
     let mut ext_of: HashMap<Path, Path> = HashMap::new();
     for t in krate.traits.iter() {
         if let Some((spec, _imp)) = &t.x.external_trait_extension {
@@ -2881,12 +2883,20 @@ pub fn synthesize_derived_fmt_impls(
         } else {
             crate::ast_util::conjoin(&span, &conjs)
         };
-        let last = dt.segments.last().cloned().unwrap_or_else(|| Arc::new(String::new()));
-        let impl_path = dt.pop_segment().push_segment(Arc::new(format!(
-            "{}%derived_{}",
-            last,
-            spec.segments.last().map(|s| s.to_string()).unwrap_or_default()
-        )));
+        // in this crate (a datatype of another crate may get its extension impl here, when
+        // that crate did not need one)
+        let impl_path = Arc::new(crate::ast::PathX {
+            krate: crate_id.clone(),
+            segments: Arc::new(
+                std::iter::once(Arc::new("%derived_fmt".to_string()))
+                    .chain(dt.segments.iter().cloned())
+                    .chain(std::iter::once(Arc::new(format!(
+                        "%{}",
+                        spec.segments.last().map(|s| s.to_string()).unwrap_or_default()
+                    ))))
+                    .collect(),
+            ),
+        });
         let trait_typ_args = Arc::new(vec![dt_typ(dt)]);
         let mut substs: HashMap<Ident, Typ> = HashMap::new();
         substs.insert(crate::def::trait_self_type_param(), dt_typ(dt));
@@ -2916,7 +2926,7 @@ pub fn synthesize_derived_fmt_impls(
             visibility: vis.clone(),
             body_visibility: crate::ast::BodyVisibility::Visibility(vis.clone()),
             opaqueness: Opaqueness::Revealed { visibility: vis.clone() },
-            owning_module: d.x.owning_module.clone(),
+            owning_module: Some(root_module.clone()),
             typ_params: Arc::new(own_typ_params),
             typ_bounds: Arc::new(vec![]),
             params: Arc::new(params),
@@ -2940,7 +2950,7 @@ pub fn synthesize_derived_fmt_impls(
                     span.clone(),
                     Arc::new(vec![crate::ast::ImplPath::TraitImplPath(impl_of_trait.clone())]),
                 ),
-                owning_module: d.x.owning_module.clone(),
+                owning_module: Some(root_module.clone()),
                 auto_imported: false,
                 external_trait_blanket: false,
             },
