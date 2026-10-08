@@ -3847,6 +3847,29 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
+    // `&T` formats by delegating to `T` (axiom_fmt_req_ref_*): references to derived and
+    // verified types, nested references; a reference to a type whose `fmt_req` is unknown
+    // still fails
+    #[test] fmt_req_through_references verus_code! {
+        use vstd::prelude::*;
+        #[derive(Debug)]
+        pub struct P { pub x: u8, pub name: String }
+        pub struct V { pub x: u8 }
+        impl std::fmt::Display for V {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.x) }
+        }
+        #[derive(Debug)]
+        pub struct Q { pub o: std::time::Instant }
+        fn a(p: &P) -> String { format!("{:?}", p) }
+        fn b(p: &&P, v: &V) -> String { format!("{:?} {}", p, v) }
+        fn c(x: &&u64) -> String { format!("{:x}", x) }
+        fn d(q: &Q) -> String {
+            format!("{:?}", q) // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
     // derived `Debug` of datatypes private to a module, one containing the other in a
     // `BTreeMap`: the synthesized impls belong to that module, so other modules (here the
     // crate root and `other`) do not see their bodies (this used to panic: "datatype ...

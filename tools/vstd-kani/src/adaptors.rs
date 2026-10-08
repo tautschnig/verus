@@ -1597,6 +1597,52 @@ fn n2_specs_hold() {
     }
 }
 
+/// vstd `axiom_fmt_req_ref_*`: `&T` formats by delegating to `T` (core's `fmt_ref!` impls),
+/// so formatting `&x` panics exactly when formatting `x` does and otherwise prints the same
+/// (exec test; `cargo test fmt_ref_delegates`).
+#[cfg(test)]
+#[test]
+fn fmt_ref_delegates() {
+    use std::fmt;
+    struct P(u8);
+    macro_rules! imp {
+        ($($tr:ident),*) => {$(
+            impl fmt::$tr for P {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    if self.0 == 0 { panic!("fmt precondition violated"); }
+                    write!(f, "{}:{}", stringify!($tr), self.0)
+                }
+            }
+        )*};
+    }
+    imp!(Debug, Display, Binary, Octal, LowerHex, UpperHex, LowerExp, UpperExp);
+    fn run(x: &P) -> Vec<Option<String>> {
+        let fs: Vec<Box<dyn Fn() -> String + '_>> = vec![
+            Box::new(|| format!("{:?}", x)), Box::new(|| format!("{}", x)),
+            Box::new(|| format!("{:b}", x)), Box::new(|| format!("{:o}", x)),
+            Box::new(|| format!("{:x}", x)), Box::new(|| format!("{:X}", x)),
+            Box::new(|| format!("{:e}", x)), Box::new(|| format!("{:E}", x)),
+        ];
+        fs.iter().map(|f| std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).ok()).collect()
+    }
+    fn run_ref(x: &&P) -> Vec<Option<String>> {
+        let fs: Vec<Box<dyn Fn() -> String + '_>> = vec![
+            Box::new(|| format!("{:?}", x)), Box::new(|| format!("{}", x)),
+            Box::new(|| format!("{:b}", x)), Box::new(|| format!("{:o}", x)),
+            Box::new(|| format!("{:x}", x)), Box::new(|| format!("{:X}", x)),
+            Box::new(|| format!("{:e}", x)), Box::new(|| format!("{:E}", x)),
+        ];
+        fs.iter().map(|f| std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).ok()).collect()
+    }
+    for v in [0u8, 1, 255] {
+        let x = P(v);
+        let a = run(&x);
+        let b = run_ref(&&x);
+        assert_eq!(a, b);
+        assert_eq!(a.iter().all(|r| r.is_none()), v == 0);
+    }
+}
+
 /// vstd `fmt_req_all` axioms for std types: their Debug/Display impls return for every
 /// value (exec test over representative values; `cargo test fmt_std_types_total`).
 #[cfg(test)]

@@ -420,6 +420,37 @@ def_trait_axiom!(core::fmt::UpperExp, axiom_fmt_req_all_upper_exp);
 
 def_trait_axiom!(core::fmt::UpperHex, axiom_fmt_req_all_upper_hex);
 
+// `core::fmt` implements these traits for `&T` by delegation (the `fmt_ref!` impls:
+// `$tr::fmt(&**self, f)`), so `&T`'s precondition is implied by `T`'s, value by value.
+// (`Pointer` for `&T` prints the address instead and is not included.)
+macro_rules! def_ref_axiom {
+    ($trait:path, $spec:path, $name: ident) => {
+        $crate::vstd::prelude::verus! {
+            pub broadcast axiom fn $name<A: $trait + ?Sized>(a: &A, f: &Formatter)
+                requires
+                    <A as $spec>::fmt_req(a, f),
+                ensures
+                    #[trigger] <&A as $spec>::fmt_req(&a, f);
+        }
+};
+}
+
+def_ref_axiom!(core::fmt::Binary, BinarySpec, axiom_fmt_req_ref_binary);
+
+def_ref_axiom!(core::fmt::Debug, DebugSpec, axiom_fmt_req_ref_debug);
+
+def_ref_axiom!(core::fmt::Display, DisplaySpec, axiom_fmt_req_ref_display);
+
+def_ref_axiom!(core::fmt::LowerExp, LowerExpSpec, axiom_fmt_req_ref_lower_exp);
+
+def_ref_axiom!(core::fmt::LowerHex, LowerHexSpec, axiom_fmt_req_ref_lower_hex);
+
+def_ref_axiom!(core::fmt::Octal, OctalSpec, axiom_fmt_req_ref_octal);
+
+def_ref_axiom!(core::fmt::UpperExp, UpperExpSpec, axiom_fmt_req_ref_upper_exp);
+
+def_ref_axiom!(core::fmt::UpperHex, UpperHexSpec, axiom_fmt_req_ref_upper_hex);
+
 pub broadcast group group_fmt_axioms {
     // types
     axiom_fmt_req_all_u8,
@@ -478,6 +509,15 @@ pub broadcast group group_fmt_axioms {
     axiom_fmt_req_all_pointer,
     axiom_fmt_req_all_upper_exp,
     axiom_fmt_req_all_upper_hex,
+    // `&T` by delegation
+    axiom_fmt_req_ref_binary,
+    axiom_fmt_req_ref_debug,
+    axiom_fmt_req_ref_display,
+    axiom_fmt_req_ref_lower_exp,
+    axiom_fmt_req_ref_lower_hex,
+    axiom_fmt_req_ref_octal,
+    axiom_fmt_req_ref_upper_exp,
+    axiom_fmt_req_ref_upper_hex,
 }
 
 } // verus!
