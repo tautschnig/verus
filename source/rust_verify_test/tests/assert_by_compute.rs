@@ -1146,3 +1146,55 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_vir_error_msg(err, "failed to simplify down to true")
 }
+
+test_verify_one_file! {
+    // upstream #3088: a callee's parameters are substituted (capture-avoiding), and its body
+    // is evaluated in its own environment
+    #[test] compute_hygiene_quantifier verus_code! {
+        spec fn g(x: int) -> int { x }
+        spec fn f(y: int) -> bool { exists|x: int| #[trigger] g(x) == x && x != y }
+        proof fn bad_quant() {
+            assert(forall|x: int| !#[trigger] f(x)) by(compute); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    #[test] compute_hygiene_closure verus_code! {
+        spec fn apply(f: spec_fn(int) -> int, y: int) -> int { f(0) }
+        proof fn bad_closure(y: int) {
+            assert(apply(|z: int| y, 5) == 5) by(compute_only);
+        }
+    } => Err(err) => assert_vir_error_msg(err, "failed to simplify down to true")
+}
+
+test_verify_one_file! {
+    #[test] compute_hygiene_const_generic verus_code! {
+        spec fn h<const N: u64, const M: u64>() -> int { M as int }
+        proof fn lemma<const N: u64>() ensures h::<5, N>() == 5 {
+            assert(h::<5, N>() == 5) by(compute_only);
+        }
+    } => Err(err) => assert_vir_error_msg(err, "failed to simplify down to true")
+}
+
+test_verify_one_file! {
+    // upstream #3089: the arguments of a call whose body does not simplify are kept
+    #[test] compute_choose_keeps_arguments verus_code! {
+        spec fn g(x: int) -> int { x }
+        spec fn c(a: int) -> int { choose|x: int| #[trigger] g(x) == a }
+        proof fn bad_choose() {
+            assert(c(5) == c(6)) by(compute_only);
+        }
+    } => Err(err) => assert_vir_error_msg(err, "failed to simplify down to true")
+}
+
+test_verify_one_file! {
+    // upstream #3072: an array of closures is not cleaned up to `[]`
+    #[test] compute_array_of_closures verus_code! {
+        spec fn mk1() -> [spec_fn(int) -> int; 1] { [|x: int| x + 1] }
+        spec fn mk2() -> [spec_fn(int) -> int; 1] { [|x: int| x + 2] }
+        proof fn unsound() {
+            assert(mk1() == mk2()) by (compute);
+        }
+    } => Err(err) => assert_vir_error_msg(err, "closure literal that wasn't applied")
+}
