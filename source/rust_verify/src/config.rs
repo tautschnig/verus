@@ -92,6 +92,7 @@ pub struct ArgsX {
     pub no_cheating: bool,
     pub allow_explicit_panics: bool,
     pub closure_param_requires: bool,
+    pub counterexample: bool,
     pub time: bool,
     pub time_expanded: bool,
     pub output_json: bool,
@@ -150,6 +151,7 @@ impl ArgsX {
             no_cheating: Default::default(),
             allow_explicit_panics: Default::default(),
             closure_param_requires: Default::default(),
+            counterexample: Default::default(),
             time: Default::default(),
             time_expanded: Default::default(),
             output_json: Default::default(),
@@ -337,6 +339,7 @@ pub fn parse_args_with_imports(
     const OPT_NO_CHEATING: &str = "no-cheating";
     const OPT_ALLOW_EXPLICIT_PANICS: &str = "allow-explicit-panics";
     const OPT_CLOSURE_PARAM_REQUIRES: &str = "closure-param-requires";
+    const OPT_COUNTEREXAMPLE: &str = "counterexample";
     const OPT_TIME: &str = "time";
     const OPT_TIME_EXPANDED: &str = "time-expanded";
     const OPT_OUTPUT_JSON: &str = "output-json";
@@ -552,6 +555,13 @@ pub fn parse_args_with_imports(
         OPT_ALLOW_EXPLICIT_PANICS,
         "Allow explicit panic!/assert!/unreachable! to happen (they are not proved unreachable); \
          other panics, such as indexing out of bounds or unwrap on None, are still checked",
+    );
+    opts.optflag(
+        "",
+        OPT_COUNTEREXAMPLE,
+        "On a failed function body check, print the values the solver's model gives the \
+         function's inputs (integer, bool and char parameters; length and first elements of \
+         slice and array parameters)",
     );
     opts.optflag(
         "",
@@ -775,6 +785,7 @@ pub fn parse_args_with_imports(
         no_cheating: matches.opt_present(OPT_NO_CHEATING),
         allow_explicit_panics: matches.opt_present(OPT_ALLOW_EXPLICIT_PANICS),
         closure_param_requires: matches.opt_present(OPT_CLOSURE_PARAM_REQUIRES),
+        counterexample: matches.opt_present(OPT_COUNTEREXAMPLE),
         time: matches.opt_present(OPT_TIME) || matches.opt_present(OPT_TIME_EXPANDED),
         time_expanded: matches.opt_present(OPT_TIME_EXPANDED),
         output_json: matches.opt_present(OPT_OUTPUT_JSON),

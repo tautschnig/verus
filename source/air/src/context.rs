@@ -147,6 +147,8 @@ pub struct Context {
     pub(crate) usage_info_enabled: bool,
     pub(crate) check_valid_used: bool,
     pub(crate) solver: SmtSolver,
+    /// Expressions to evaluate in the model of the next failing query (see `Model::observed`)
+    pub(crate) observations: Vec<(String, crate::ast::Expr)>,
     // Cross-checking (design 05 §2): a cvc5 secondary running the identical solver-neutral
     // stream alongside the Z3 primary. The secondary now runs DETACHED on a background worker
     // thread (see solver_set::SecondaryRegistry) so the slower cvc5 solve is off the critical
@@ -244,6 +246,7 @@ impl Context {
             usage_info_enabled: false,
             check_valid_used: false,
             solver,
+            observations: Vec::new(),
             cross_check: CrossCheckPolicy::Off,
             cross_check_registry: None,
             secondary: None,
@@ -834,6 +837,23 @@ impl Context {
             self.pop_name_scope();
             self.smt_log.log_pop();
             self.state = ContextState::ReadyForQuery;
+        }
+    }
+
+    /// Expressions whose values the model of the next failed query should report.
+    pub fn set_observations(&mut self, obs: Vec<(String, crate::ast::Expr)>) {
+        self.observations = obs;
+    }
+
+    /// `eval_expr` that reports a solver error instead of panicking.
+    pub fn try_eval_expr(&mut self, expr: sise::TreeNode) -> Result<String, String> {
+        self.smt_log.log_eval(expr);
+        let smt_data = self.smt_log.take_pipe_data();
+        let smt_output = self.get_smt_process().send_commands(smt_data);
+        if smt_output.len() == 1 && !smt_output[0].starts_with("(error") {
+            Ok(smt_output[0].clone())
+        } else {
+            Err(smt_output.join(" "))
         }
     }
 

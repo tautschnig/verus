@@ -3722,14 +3722,15 @@ pub(crate) fn body_stm_to_air(
     } else {
         let query = Arc::new(QueryX { local: Arc::new(local), assertion });
         let commands = vec![Arc::new(CommandX::CheckValid(query))];
-        state.commands.push(CommandsWithContextX::new(
+        let command = CommandsWithContextX::new(
             ctx.fun.as_ref().expect("function expected here").current_fun.clone(),
             func_span.clone(),
             "function body check".to_string(),
             Arc::new(commands),
             if is_nonlinear { ProverChoice::Nonlinear } else { ProverChoice::DefaultProver },
             is_integer_ring || is_nonlinear,
-        ));
+        );
+        state.commands.push(command);
     }
     // Completeness guard for query families assembled outside the ordinary
     // statement-return path. Entries already attributed under an SST lowering
@@ -3758,6 +3759,14 @@ pub(crate) fn body_stm_to_air(
         });
         for commands in &mut state.commands {
             Arc::make_mut(commands).lowering_provenance = lowering_provenance.clone();
+        }
+    }
+    if ctx.global.counterexamples {
+        // every query of the body (the body itself and each loop) has the parameters as
+        // constants
+        let obs = Arc::new(counterexample_observations(ctx, func_span, params));
+        for command in &mut state.commands {
+            Arc::make_mut(command).observations = obs.clone();
         }
     }
     Ok((state.commands, state.snap_map))
@@ -4021,5 +4030,148 @@ mod provenance_tests {
             .expect("nested AIR assumption should be recorded");
         assert_eq!(recorded.source_chain, vec![frame]);
         assert_eq!(recorded.emitted_at, LoweringSite::Assume(crate::sst::AssumeIntent::UserAssume));
+    }
+}
+
+
+/// `--counterexample`: AIR expressions over a function's parameters whose values in a
+/// model describe the inputs of the failing run: integer, bool and char parameters, and for
+/// slice and array parameters of those, the length and the first elements. They are only
+/// evaluated (`get-value`), never asserted.
+fn counterexample_observations(ctx: &Ctx, span: &Span, params: &Pars) -> Vec<(String, Expr)> {
+    const MAX_ELEMS: u64 = 16;
+    let mut out = vec![];
+    let ectx = ExprCtxt::new();
+    let scalar = |t: &Typ| matches!(&*undecorate_typ(t), TypX::Int(_) | TypX::Bool);
+    for p in params.iter() {
+        let name = crate::def::user_local_name(&p.x.name).to_string();
+        let var = SpannedTyped::new(span, &p.x.typ, ExpX::Var(p.x.name.clone()));
+        let t = undecorate_typ(&p.x.typ);
+        let t = match &*t {
+            TypX::Boxed(x) => undecorate_typ(x),
+            _ => t,
+        };
+        let marker = |kind: &str| -> (String, Expr) {
+            (format!("@param:{name}:{kind}"), air::ast_util::mk_true())
+        };
+        match &*t {
+            TypX::Int(_) | TypX::Bool => {
+                out.push(marker("scalar"));
+                if let Ok(e) = exp_to_expr(ctx, &var, &ectx) {
+                    let boxed = matches!(&*undecorate_typ(&p.x.typ), TypX::Boxed(_));
+                    let e = if boxed { try_unbox(ctx, e.clone(), &t).unwrap_or(e) } else { e };
+                    out.push((name, e));
+                }
+            }
+            TypX::Primitive(prim @ (Primitive::Slice | Primitive::Array), targs)
+                if !targs.is_empty() && scalar(&targs[0]) =>
+            {
+                let kind =
+                    if *prim == Primitive::Slice { ArrayKind::Slice } else { ArrayKind::Array };
+                let is_ref = matches!(&*p.x.typ, TypX::Decorate(crate::ast::TypDecoration::Ref, _, _));
+                out.push(marker(match (kind, is_ref) {
+                    (ArrayKind::Slice, _) => "slice",
+                    (ArrayKind::Array, true) => "array_ref",
+                    (ArrayKind::Array, false) => "array",
+                }));
+                // post-poly SST: the container is boxed
+                let var = if matches!(&*undecorate_typ(&p.x.typ), TypX::Boxed(_)) {
+                    var.clone()
+                } else {
+                    SpannedTyped::new(
+                        span,
+                        &Arc::new(TypX::Boxed(t.clone())),
+                        ExpX::UnaryOpr(UnaryOpr::Box(t.clone()), var.clone()),
+                    )
+                };
+                let int_typ = Arc::new(TypX::Int(IntRange::Int));
+                let len = SpannedTyped::new(span, &int_typ, ExpX::Unary(UnaryOp::Length(kind), var.clone()));
+                if let Ok(e) = exp_to_expr(ctx, &len, &ectx) {
+                    out.push((format!("{name}.len()"), e.clone()));
+                    // prefer a model with a short container (see `smt_get_model`)
+                    out.push((
+                        "@bound".to_string(),
+                        Arc::new(air::ast::ExprX::Binary(air::ast::BinaryOp::Le, e.clone(), air::ast_util::mk_nat(MAX_ELEMS as usize))),
+                    ));
+                }
+                let elem = &targs[0];
+                for k in 0..MAX_ELEMS {
+                    let idx = SpannedTyped::new(
+                        span,
+                        &int_typ,
+                        ExpX::Const(crate::ast_util::const_int_from_u128(k as u128)),
+                    );
+                    let idx = SpannedTyped::new(
+                        span,
+                        &Arc::new(TypX::Boxed(int_typ.clone())),
+                        ExpX::UnaryOpr(UnaryOpr::Box(int_typ.clone()), idx),
+                    );
+                    let ix = SpannedTyped::new(
+                        span,
+                        &Arc::new(TypX::Boxed(elem.clone())),
+                        ExpX::Binary(crate::sst::BinaryOp::Index(kind), var.clone(), idx),
+                    );
+                    if let Ok(e) = exp_to_expr(ctx, &ix, &ectx) {
+                        let e = try_unbox(ctx, e.clone(), elem).unwrap_or(e);
+                        // the element is a value of its type (the model need not say so
+                        // for elements the query does not constrain)
+                        if let TypX::Int(r) = &*undecorate_typ(elem) {
+                            let (lo, hi) = int_range_bounds(ctx, *r);
+                            for (b, is_lo) in [(lo, true), (hi, false)] {
+                                if let Some(b) = b {
+                                    let c = air::ast_util::mk_nat(0usize);
+                                    let _ = c;
+                                    let bn = Arc::new(air::ast::ExprX::Const(air::ast::Constant::Nat(Arc::new(b.to_string()))));
+                                    let bn = if b < 0 {
+                                        Arc::new(air::ast::ExprX::Multi(air::ast::MultiOp::Sub, Arc::new(vec![air::ast_util::mk_nat(0usize), Arc::new(air::ast::ExprX::Const(air::ast::Constant::Nat(Arc::new((-b).to_string()))))])))
+                                    } else { bn };
+                                    let cmp = if is_lo {
+                                        air::ast::ExprX::Binary(air::ast::BinaryOp::Le, bn, e.clone())
+                                    } else {
+                                        air::ast::ExprX::Binary(air::ast::BinaryOp::Le, e.clone(), bn)
+                                    };
+                                    out.push(("@bound".to_string(), Arc::new(cmp)));
+                                }
+                            }
+                        }
+                        out.push((format!("{name}[{k}]"), e));
+                    }
+                }
+            }
+            TypX::MutRef(inner) if scalar(inner) => {
+                // `&mut x`: the referent's value at entry
+                out.push(marker("mutref"));
+                let cur = SpannedTyped::new(
+                    span,
+                    &Arc::new(TypX::Boxed(inner.clone())),
+                    ExpX::Unary(UnaryOp::MutRefCurrent, var.clone()),
+                );
+                if let Ok(e) = exp_to_expr(ctx, &cur, &ectx) {
+                    let e = try_unbox(ctx, e.clone(), inner).unwrap_or(e);
+                    out.push((name, e));
+                }
+            }
+            _ => out.push(marker("other")),
+        }
+    }
+    out
+}
+
+/// Integer bounds of a range, for `--counterexample` (`usize`/`isize` at the configured
+/// width, 64 bits if unspecified).
+fn int_range_bounds(ctx: &Ctx, r: IntRange) -> (Option<i128>, Option<i128>) {
+    let w: u32 = match ctx.global.arch {
+        crate::ast::ArchWordBits::Exactly(b) => b,
+        _ => 64,
+    };
+    match r {
+        IntRange::Int => (None, None),
+        IntRange::Nat => (Some(0), None),
+        IntRange::Char => (Some(0), Some(0x10FFFF)),
+        IntRange::U(b) if b < 127 => (Some(0), Some((1i128 << b) - 1)),
+        IntRange::I(b) if b < 127 => (Some(-(1i128 << (b - 1))), Some((1i128 << (b - 1)) - 1)),
+        IntRange::USize => (Some(0), Some((1i128 << w) - 1)),
+        IntRange::ISize => (Some(-(1i128 << (w - 1))), Some((1i128 << (w - 1)) - 1)),
+        _ => (None, None),
     }
 }

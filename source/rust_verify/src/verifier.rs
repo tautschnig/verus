@@ -814,6 +814,7 @@ impl Verifier {
         context: &CommandContext,
         prover_choice: vir::def::ProverChoice,
         default_prover_failed_assert_ids: &mut Vec<AssertId>,
+        observations: &Vec<(String, air::ast::Expr)>,
     ) -> RunCommandQueriesResult {
         let is_singular = prover_choice == vir::def::ProverChoice::Singular;
         let message_interface = Arc::new(vir::messages::VirMessageInterface {});
@@ -1023,6 +1024,110 @@ impl Verifier {
                             assert!(!self.expand_flag);
                         }
 
+                        if self.args.counterexample && !air_model.observed.is_empty() {
+                            // The model of this failed query: the function's inputs.
+                            let small = air_model.observed.iter().any(|(n, _)| n == "@small");
+                            // a short container is printed as one value; elements past its
+                            // length are not part of the input
+                            let mut lens: HashMap<String, usize> = HashMap::new();
+                            for (name, v) in air_model.observed.iter() {
+                                if let Some(base) = name.strip_suffix(".len()") {
+                                    if let Ok(n) = counterexample_value(v).parse::<usize>() {
+                                        lens.insert(base.to_string(), n);
+                                    }
+                                }
+                            }
+                            let mut lines: Vec<String> = vec![];
+                            let mut elems: HashMap<String, Vec<String>> = HashMap::new();
+                            let mut params: Vec<(String, String)> = vec![];
+                            for (name, v) in air_model.observed.iter() {
+                                if let Some(pk) = name.strip_prefix("@param:") {
+                                    if let Some((pn, k)) = pk.rsplit_once(':') {
+                                        params.push((pn.to_string(), k.to_string()));
+                                    }
+                                    continue;
+                                }
+                                if name == "@small" {
+                                    continue;
+                                }
+                                if let Some((base, rest)) = name.split_once('[') {
+                                    if let (Some(n), Ok(k)) = (lens.get(base), rest.trim_end_matches(']').parse::<usize>()) {
+                                        if k < *n {
+                                            elems.entry(base.to_string()).or_default().push(counterexample_value(v));
+                                        }
+                                        continue;
+                                    }
+                                }
+                                if let Some(base) = name.strip_suffix(".len()") {
+                                    if lens.get(base).map_or(false, |n| *n <= 16) {
+                                        continue; // printed as the elements below
+                                    }
+                                }
+                                lines.push(format!("  {name} = {}", counterexample_value(v)));
+                            }
+                            let mut bases: Vec<&String> = elems.keys().collect();
+                            bases.sort();
+                            for base in bases {
+                                if lens.get(base).map_or(false, |n| *n <= 16) {
+                                    lines.push(format!("  {base} = [{}]", elems[base].join(", ")));
+                                } else {
+                                    lines.push(format!("  {base}[..16] = [{}, ..]", elems[base].join(", ")));
+                                }
+                            }
+                            for (base, n) in lens.iter() {
+                                if *n <= 16 && !elems.contains_key(base) {
+                                    lines.push(format!("  {base} = []"));
+                                }
+                            }
+                            if !small && !lens.is_empty() {
+                                lines.push("  (no model with containers of at most 16 elements)".to_string());
+                            }
+                            // the call, when every input is known: for replaying the run
+                            let scalars: HashMap<&String, String> = air_model
+                                .observed
+                                .iter()
+                                .filter(|(n, _)| !n.starts_with('@') && !n.contains('[') && !n.ends_with(".len()"))
+                                .map(|(n, v)| (n, counterexample_value(v)))
+                                .collect();
+                            let args: Option<Vec<String>> = params
+                                .iter()
+                                .map(|(pn, k)| match k.as_str() {
+                                    "scalar" => scalars.get(pn).cloned(),
+                                    "mutref" => scalars.get(pn).map(|v| format!("&mut {v}")),
+                                    "slice" | "array" | "array_ref" => {
+                                        let n = *lens.get(pn)?;
+                                        if n > 16 {
+                                            return None;
+                                        }
+                                        let es = elems.get(pn).cloned().unwrap_or_default().join(", ");
+                                        Some(match k.as_str() {
+                                            "slice" | "array_ref" => format!("&[{es}]"),
+                                            _ => format!("[{es}]"),
+                                        })
+                                    }
+                                    _ => None,
+                                })
+                                .collect();
+                            if let Some(args) = args {
+                                lines.push(format!(
+                                    "  call: {}({})",
+                                    vir::ast_util::fun_as_friendly_rust_name(&context.fun),
+                                    args.join(", ")
+                                ));
+                            }
+                            reporter.report(
+                                &message(
+                                    MessageLevel::Note,
+                                    format!(
+                                        "counterexample (solver model of the inputs; may be spurious if the proof needs an invariant or a specification):\n{}",
+                                        lines.join("\n")
+                                    ),
+                                    &error.spans.first().cloned().unwrap_or(context.span.clone()),
+                                )
+                                .to_any(),
+                            );
+                        }
+
                         if self.args.debugger {
                             if let Some(source_map) = source_map {
                                 let mut debugger =
@@ -1186,6 +1291,7 @@ impl Verifier {
             prover_choice,
             skip_recommends: _,
             lowering_provenance,
+            observations,
         } = &*commands_with_context;
         let context = context.with_desc_prefix(desc_prefix);
         if air_context.cross_check_enabled() {
@@ -1196,6 +1302,7 @@ impl Verifier {
             air_context.comment(comment);
             air_context.comment(&context.span.as_string);
         }
+        air_context.set_observations((**observations).clone());
         for command in commands.iter() {
             result = result
                 + self.check_result_validity(
@@ -1213,6 +1320,7 @@ impl Verifier {
                     &context,
                     *prover_choice,
                     default_prover_failed_assert_ids,
+                    observations,
                 );
         }
 
@@ -2458,6 +2566,7 @@ impl Verifier {
             self.args.no_bv_simplify,
             self.args.report_long_running,
         )?;
+        global_ctx.counterexamples = self.args.counterexample;
         vir::observer::notify(&self.observer, |o| {
             o.on_krate_pre_simplify(&krate, self.crate_id.as_ref().expect("crate_id"))
         });
@@ -3965,4 +4074,29 @@ impl VerifierCallbacksEraseMacro {
             );
         }
     }
+}
+
+/// The value in a `get-value` response `((e v))`: `v`, with SMT negative numbers
+/// `(- 5)` as `-5`.
+fn counterexample_value(resp: &str) -> String {
+    let r = resp.trim();
+    let r = r.strip_prefix("((").and_then(|r| r.strip_suffix("))")).unwrap_or(r);
+    // the value is the last top-level s-expression of `e v`
+    let bytes: Vec<char> = r.chars().collect();
+    let mut depth = 0i32;
+    let mut start = 0usize;
+    for (i, c) in bytes.iter().enumerate() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ' ' if depth == 0 => start = i + 1,
+            _ => {}
+        }
+    }
+    let v: String = bytes[start..].iter().collect();
+    let v = v.trim().to_string();
+    if let Some(n) = v.strip_prefix("(- ").and_then(|x| x.strip_suffix(")")) {
+        return format!("-{n}");
+    }
+    v
 }

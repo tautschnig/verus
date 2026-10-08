@@ -3845,3 +3845,15 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file_with_options! {
+    // `--counterexample` only adds notes: verdicts are unchanged (scalars, slices, arrays,
+    // `&mut` scalars, loop queries)
+    #[test] counterexample_option_keeps_verdicts ["--counterexample"] => verus_code! {
+        use vstd::prelude::*;
+        fn ok(a: u8, b: u8) -> u8 { a / 2 + b / 2 }
+        fn f(i: &mut u32, buf: &[u8], arr: [u16; 3], flag: bool) -> u8 {
+            if flag && buf.len() > 2 { buf[1] } else { buf[*i as usize] } // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}

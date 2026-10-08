@@ -532,7 +532,7 @@ fn confirm_axiom_label(
 fn smt_get_model(
     context: &mut Context,
     mut infos: Vec<AssertionInfo>,
-    air_model: Model,
+    mut air_model: Model,
 ) -> ValidityResult {
     let mut discovered_additional_info: Vec<ArcDynMessage> = Vec::new();
 
@@ -552,6 +552,21 @@ fn smt_get_model(
     let mut model_defs: HashMap<Ident, ModelDef> = HashMap::new();
     for def in model.iter() {
         model_defs.insert(def.name.clone(), def.clone());
+    }
+    // observations: evaluate now, before any further check-sat replaces this model
+    air_model.observed.clear();
+    if !context.observations.is_empty() {
+        let obs = std::mem::take(&mut context.observations);
+        let printer =
+            crate::printer::Printer::new(context.message_interface.clone(), true, context.solver.clone());
+        for (name, e) in obs.iter().filter(|(n, _)| n != "@bound") {
+            if name.starts_with("@param:") {
+                air_model.observed.push((name.clone(), String::new()));
+            } else if let Ok(v) = context.try_eval_expr(printer.expr_to_node(e)) {
+                air_model.observed.push((name.clone(), v));
+            }
+        }
+        context.observations = obs;
     }
     // Each assertion A_i is encoded as (label_i => A_i), so a violated assertion has
     // label_i = true in the model. The converse does not hold: a label that is
@@ -605,6 +620,51 @@ fn smt_get_model(
     };
     let discovered_error = infos[chosen].clone();
     let discovered_assert_id = infos[chosen].assert_id.clone();
+
+    // observations: look for a model of the same failure with small inputs (`@bound`
+    // observations, e.g. `len <= 16`), so that the reported inputs can be written down and
+    // replayed. Only for reporting: under push/pop, after the verdict is fixed.
+    if context.observations.iter().any(|(n, _)| n == "@bound") {
+        let obs = std::mem::take(&mut context.observations);
+        context.smt_log.log_push();
+        context.smt_log.log_assert(&None, &ident_var(&infos[chosen].label));
+        for (_, b) in obs.iter().filter(|(n, _)| n == "@bound") {
+            context.smt_log.log_assert(&None, b);
+        }
+        if matches!(context.solver, SmtSolver::Z3) {
+            context.smt_log.log_set_option("rlimit", &context.rlimit.to_string());
+        }
+        context.smt_log.log_word("check-sat");
+        if matches!(context.solver, SmtSolver::Z3) {
+            context.smt_log.log_set_option("rlimit", "0");
+        }
+        let smt_data = context.smt_log.take_pipe_data();
+        let smt_output = context.get_smt_process().send_commands(smt_data);
+        // `unknown` (quantifiers) still leaves a model, as for the query itself
+        if smt_output.iter().any(|l| l == "sat" || l == "unknown") {
+            let printer = crate::printer::Printer::new(
+                context.message_interface.clone(),
+                true,
+                context.solver.clone(),
+            );
+            let mut small = vec![];
+            for (name, e) in obs.iter().filter(|(n, _)| n != "@bound") {
+                if name.starts_with("@param:") {
+                    small.push((name.clone(), String::new()));
+                } else if let Ok(v) = context.try_eval_expr(printer.expr_to_node(e)) {
+                    small.push((name.clone(), v));
+                }
+            }
+            if !small.is_empty() {
+                air_model.observed = small;
+                air_model.observed.push(("@small".to_string(), "true".to_string()));
+            }
+        }
+        context.smt_log.log_pop();
+        let smt_data = context.smt_log.take_pipe_data();
+        let _ = context.get_smt_process().send_commands(smt_data);
+        context.observations = obs;
+    }
 
     let mut axiom_infos: Vec<Arc<AxiomInfo>> =
         context.axiom_infos.map().values().cloned().collect();

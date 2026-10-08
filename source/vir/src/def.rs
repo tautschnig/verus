@@ -1037,6 +1037,10 @@ pub struct CommandsWithContextX {
     /// Passive SST-to-AIR provenance for structured AIR statements in these
     /// commands. Canonical verification never reads this sidecar.
     pub lowering_provenance: Arc<crate::observer::LoweringProvenance>,
+    /// `--counterexample`: (description, AIR expression) pairs to evaluate in the model of
+    /// a failed query, describing the function's inputs. Definitional only: they are
+    /// evaluated with `get-value` and never asserted.
+    pub observations: Arc<Vec<(String, air::ast::Expr)>>,
 }
 
 impl CommandsWithContextX {
@@ -1054,6 +1058,7 @@ impl CommandsWithContextX {
             prover_choice,
             skip_recommends,
             lowering_provenance: Arc::new(crate::observer::LoweringProvenance::empty()),
+            observations: Arc::new(vec![]),
         })
     }
 }
