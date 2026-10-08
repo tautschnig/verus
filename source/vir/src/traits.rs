@@ -715,7 +715,10 @@ pub fn inherit_default_bodies(
             if method_impls.contains(&p) {
                 return Err(error(
                     &f.span,
-                    "duplicate specification for this trait method implementation",
+                    format!(
+                        "duplicate specification for this trait method implementation ({})",
+                        crate::ast_util::fun_as_friendly_rust_name(&f.x.name)
+                    ),
                 ));
             }
             method_impls.insert(p);
@@ -2728,6 +2731,9 @@ pub fn synthesize_default_extension_impls(
 /// precondition is that of the field types; `fmt_req_all::<F>()` is how vstd and the spec
 /// crates state that `F`'s impls have none. What is trusted is that the derived code calls
 /// nothing else with a precondition, as for any unverified impl.
+/// The first path segment of the extension impls `synthesize_derived_fmt_impls` adds.
+pub const DERIVED_FMT_SEGMENT: &str = "%derived_fmt";
+
 pub fn synthesize_derived_fmt_impls(
     krate: &Krate,
     crate_id: &crate::ast::CrateId,
@@ -2883,12 +2889,14 @@ pub fn synthesize_derived_fmt_impls(
         } else {
             crate::ast_util::conjoin(&span, &conjs)
         };
-        // in this crate (a datatype of another crate may get its extension impl here, when
-        // that crate did not need one)
+        // In the datatype's crate, under a name that depends only on the datatype and the
+        // trait: a datatype of another crate may get its extension impl in several downstream
+        // crates (when its own crate did not need one), and the copies are then the same item,
+        // which `merge_krates` keeps once.
         let impl_path = Arc::new(crate::ast::PathX {
-            krate: crate_id.clone(),
+            krate: dt.krate.clone(),
             segments: Arc::new(
-                std::iter::once(Arc::new("%derived_fmt".to_string()))
+                std::iter::once(Arc::new(DERIVED_FMT_SEGMENT.to_string()))
                     .chain(dt.segments.iter().cloned())
                     .chain(std::iter::once(Arc::new(format!(
                         "%{}",

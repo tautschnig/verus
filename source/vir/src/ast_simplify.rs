@@ -1768,12 +1768,38 @@ pub fn merge_krates(krates: Vec<Krate>) -> Result<Krate, VirErr> {
             path_as_rust_names,
             arch,
         } = &*k;
-        kratex.functions.extend(functions.clone());
+        // extension impls synthesized for a datatype of another crate may arrive from
+        // several crates (see `traits::synthesize_derived_fmt_impls`): keep one copy
+        let is_derived_fmt = |p: &crate::ast::Path| {
+            p.segments.first().map(|s| s.as_str()) == Some(crate::traits::DERIVED_FMT_SEGMENT)
+        };
+        let have_impls: std::collections::HashSet<crate::ast::Path> = kratex
+            .trait_impls
+            .iter()
+            .filter(|t| is_derived_fmt(&t.x.impl_path))
+            .map(|t| t.x.impl_path.clone())
+            .collect();
+        let trait_impls: Vec<_> = trait_impls
+            .iter()
+            .filter(|t| !have_impls.contains(&t.x.impl_path))
+            .cloned()
+            .collect();
+        let functions: Vec<_> = functions
+            .iter()
+            .filter(|f| match &f.x.kind {
+                crate::ast::FunctionKind::TraitMethodImpl { impl_path, .. } => {
+                    !have_impls.contains(impl_path)
+                }
+                _ => true,
+            })
+            .cloned()
+            .collect();
+        kratex.functions.extend(functions);
         kratex.reveal_groups.extend(reveal_groups.clone());
         kratex.datatypes.extend(datatypes.clone());
         kratex.opaque_types.extend(opaque_types.clone());
         kratex.traits.extend(traits.clone());
-        kratex.trait_impls.extend(trait_impls.clone());
+        kratex.trait_impls.extend(trait_impls);
         kratex.assoc_type_impls.extend(assoc_type_impls.clone());
         kratex.modules.extend(modules.clone());
         kratex.external_fns.extend(external_fns.clone());

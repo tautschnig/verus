@@ -3489,7 +3489,12 @@ impl Verifier {
             let new_impls: Vec<_> = vir_crate
                 .trait_impls
                 .iter()
-                .filter(|t| &t.x.impl_path.krate == krate_id && !have_impls.contains(&t.x.impl_path))
+                .filter(|t| {
+                    (&t.x.impl_path.krate == krate_id
+                        || t.x.impl_path.segments.first().map(|s| s.as_str())
+                            == Some(vir::traits::DERIVED_FMT_SEGMENT))
+                        && !have_impls.contains(&t.x.impl_path)
+                })
                 .cloned()
                 .collect();
             let new_impl_paths: std::collections::HashSet<_> =
