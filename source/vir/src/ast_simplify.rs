@@ -1728,6 +1728,7 @@ pub fn simplify_krate(ctx: &mut GlobalCtx, krate: &Krate) -> Result<Krate, VirEr
         arch: arch.clone(),
     });
     let counterexamples = ctx.counterexamples;
+    let check_compute = ctx.check_compute;
     *ctx = crate::context::GlobalCtx::new(
         &krate,
         ctx.crate_name.clone(),
@@ -1745,6 +1746,7 @@ pub fn simplify_krate(ctx: &mut GlobalCtx, krate: &Krate) -> Result<Krate, VirEr
     )
     .map(|mut g| {
         g.counterexamples = counterexamples;
+        g.check_compute = check_compute;
         g
     })?;
     Ok(krate)

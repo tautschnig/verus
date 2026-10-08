@@ -81,6 +81,8 @@ pub struct GlobalCtx {
     pub report_long_running: bool,
     /// `--counterexample`: record the inputs of a failing function body query
     pub counterexamples: bool,
+    /// `--check-compute`: check every call `by (compute)` evaluates against the SMT encoding
+    pub check_compute: bool,
 }
 
 // Context for verifying one function
@@ -767,6 +769,7 @@ impl GlobalCtx {
             no_bv_simplify,
             report_long_running,
             counterexamples: false,
+            check_compute: false,
         })
     }
 
@@ -800,6 +803,7 @@ impl GlobalCtx {
             no_bv_simplify: self.no_bv_simplify,
             report_long_running: self.report_long_running,
             counterexamples: self.counterexamples,
+            check_compute: self.check_compute,
         }
     }
 

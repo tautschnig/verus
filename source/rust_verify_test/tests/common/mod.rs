@@ -323,6 +323,8 @@ pub fn run_verus(
             verus_args.push("--closure-param-requires".to_string());
         } else if *option == "--counterexample" {
             verus_args.push("--counterexample".to_string());
+        } else if *option == "--check-compute" {
+            verus_args.push("--check-compute".to_string());
         } else if *option == "--output-json" {
             verus_args.push("--output-json".to_string());
         } else if *option == "vstd" {

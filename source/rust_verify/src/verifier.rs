@@ -2567,6 +2567,7 @@ impl Verifier {
             self.args.report_long_running,
         )?;
         global_ctx.counterexamples = self.args.counterexample;
+        global_ctx.check_compute = self.args.check_compute;
         vir::observer::notify(&self.observer, |o| {
             o.on_krate_pre_simplify(&krate, self.crate_id.as_ref().expect("crate_id"))
         });

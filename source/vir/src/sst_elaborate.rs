@@ -126,7 +126,7 @@ fn elaborate_one_stm<D: Diagnostics + ?Sized>(
 ) -> Result<Stm, VirErr> {
     match &stm.x {
         StmX::AssertCompute(id, exp, compute) => {
-            let interp_exp = crate::interpreter::eval_expr(
+            let (interp_exp, trace) = crate::interpreter::eval_expr_with_trace(
                 ctx,
                 exp,
                 Some(diagnostics),
@@ -141,10 +141,32 @@ fn elaborate_one_stm<D: Diagnostics + ?Sized>(
                 "assertion failed",
                 format!("simplified to {}", interp_exp.x.to_user_string(&ctx.global)),
             );
-            match compute {
-                ComputeMode::Z3 => Ok(stm.new_x(StmX::Assert(id.clone(), Some(err), interp_exp))),
-                ComputeMode::ComputeOnly => Ok(stm.new_x(StmX::Block(Arc::new(vec![])))),
+            let main = match compute {
+                ComputeMode::Z3 => stm.new_x(StmX::Assert(id.clone(), Some(err), interp_exp.clone())),
+                ComputeMode::ComputeOnly => stm.new_x(StmX::Block(Arc::new(vec![]))),
+            };
+            if !ctx.global.check_compute {
+                return Ok(main);
             }
+            let (mut stms, skipped) =
+                compute_step_checks(ctx, fun_ssts, stm, exp, &interp_exp, &trace);
+            if trace.unexpressible + skipped > 0 {
+                diagnostics.report(
+                    &crate::messages::warning(
+                        &exp.span,
+                        format!(
+                            "--check-compute: {} of {} by (compute) step(s) not checked (closures, \
+                             bitwise operators, lambdas, variables bound inside the \
+                             expression, or functions outside this query's context)",
+                            trace.unexpressible + skipped,
+                            trace.unexpressible + trace.steps.len() + 1
+                        ),
+                    )
+                    .to_any(),
+                );
+            }
+            stms.push(main);
+            Ok(stm.new_x(StmX::Block(Arc::new(stms))))
         }
         StmX::AssertBitVector { requires, ensures } => {
             if ctx.global.no_bv_simplify {
@@ -344,4 +366,155 @@ pub(crate) fn elaborate_function_bv<'a>(
         }
     }
     Ok(())
+}
+
+/// More distinct steps than this are not checked (reported as unchecked)
+const MAX_COMPUTE_STEP_CHECKS: usize = 2000;
+
+/// `--check-compute`: one isolated SMT check per call the interpreter evaluated, and one for
+/// the final result. Each step `f(args) == r` is checked with `f`'s definition (fuel 1) and the
+/// calls made while evaluating the body assumed (each is a step, checked in turn); the final
+/// check is `exp == result` with the top-level calls assumed. By induction on the steps, the
+/// interpreter's result then follows from Verus's SMT encoding of the same definitions.
+fn compute_step_checks(
+    ctx: &Ctx,
+    fun_ssts: &SstMap,
+    stm: &Stm,
+    exp: &Exp,
+    result: &Exp,
+    trace: &crate::interpreter::ComputeTrace,
+) -> (Vec<Stm>, usize) {
+    use crate::sst::AssumeIntent;
+    // `==` for values; extensional equality for vstd collections, whose interpreter results
+    // (push chains) are equal to the call only extensionally
+    let is_collection = |t: &crate::ast::Typ| match &*crate::ast_util::undecorate_typ(t) {
+        crate::ast::TypX::Datatype(crate::ast::Dt::Path(p), _, _) => {
+            p.krate == crate::ast::CrateId::Vstd
+                && matches!(
+                    p.segments.iter().map(|s| s.as_str()).collect::<Vec<_>>()[..],
+                    ["seq", "Seq"] | ["set", "Set"] | ["map", "Map"]
+                )
+        }
+        _ => false,
+    };
+    let eq = |a: &Exp, b: &Exp| {
+        let x = if is_collection(&a.typ) {
+            ExpX::BinaryOpr(crate::ast::BinaryOpr::ExtEq(true, a.typ.clone()), a.clone(), b.clone())
+        } else {
+            ExpX::Binary(crate::sst::BinaryOp::Eq, a.clone(), b.clone())
+        };
+        SpannedTyped::new(&a.span, &Arc::new(crate::ast::TypX::Bool), x)
+    };
+    // A step is checkable if every function it names is in this query's (pruned) context,
+    // its free variables are in scope at the assertion (free in `exp`; a step evaluated under
+    // a quantifier of `exp` mentions the bound variable), and it uses no operation that the
+    // default integer encoding leaves uninterpreted (bitwise operators: they would need a
+    // bit-vector query) or compares functions (lambdas).
+    let in_scope = crate::sst_util::free_vars_exp(exp);
+    let known = |e: &Exp| {
+        let mut map = crate::sst_visitor::VisitorScopeMap::new();
+        crate::sst_visitor::exp_visitor_check(e, &mut map, &mut |e: &Exp, map| match &e.x {
+            ExpX::Call(CallFun::Fun(f, r), _, _)
+                if !ctx.func_map.contains_key(f)
+                    || r.as_ref().map_or(false, |(g, _)| !ctx.func_map.contains_key(g)) =>
+            {
+                Err(())
+            }
+            ExpX::Var(x) if !map.contains_key(x) && !in_scope.contains_key(x) => Err(()),
+            ExpX::Binary(crate::sst::BinaryOp::Bitwise(..), _, _)
+            | ExpX::Unary(crate::ast::UnaryOp::BitNot(_), _) => Err(()),
+            ExpX::Bind(b, _) if matches!(b.x, crate::sst::BndX::Lambda(..)) => Err(()),
+            _ => Ok(()),
+        })
+        .is_ok()
+    };
+    // ... and the same for the bodies of the functions a step unfolds
+    let body_ok = |f: &crate::ast::Fun| {
+        fun_ssts.get(f).map_or(true, |fs| {
+            fs.x.axioms.spec_axioms.as_ref().map_or(true, |a| {
+                let mut map = crate::sst_visitor::VisitorScopeMap::new();
+                crate::sst_visitor::exp_visitor_check(&a.body_exp, &mut map, &mut |e: &Exp, _| {
+                    match &e.x {
+                        ExpX::Binary(crate::sst::BinaryOp::Bitwise(..), _, _)
+                        | ExpX::Unary(crate::ast::UnaryOp::BitNot(_), _) => Err(()),
+                        _ => Ok(()),
+                    }
+                })
+                .is_ok()
+            })
+        })
+    };
+    let mut out = vec![];
+    let mut skipped = 0usize;
+    let mut add = |funs: &[crate::ast::Fun], facts: &[(Exp, Exp)], goal: Exp, what: String| {
+        if !known(&goal)
+            || facts.iter().any(|(c, r)| !known(c) || !known(r))
+            || !funs.iter().all(|f| body_ok(f))
+        {
+            skipped += 1;
+            return;
+        }
+        let mut b: Vec<Stm> = vec![];
+        for f in funs {
+            // fuel exists for spec functions with a body in this context (`context.rs`);
+            // a body the interpreter used but the context lacks makes the check fail, which is
+            // the correct outcome
+            let has_fuel = ctx.func_map.get(f).map_or(false, |g| {
+                g.x.mode == crate::ast::Mode::Spec && g.x.body.is_some()
+            });
+            if has_fuel {
+                b.push(stm.new_x(StmX::Fuel(f.clone(), 1)));
+            }
+        }
+        for (c, r) in facts {
+            b.push(stm.new_x(StmX::Assume(AssumeIntent::CheckedCondition, eq(c, r))));
+        }
+        let msg = error_with_label(
+            &exp.span,
+            "by (compute) step not confirmed by the SMT encoding (--check-compute)",
+            what,
+        );
+        b.push(stm.new_x(StmX::Assert(None, Some(msg), goal)));
+        out.push(stm.new_x(StmX::DeadEnd(stm.new_x(StmX::Block(Arc::new(b))))));
+    };
+    // identical steps (same call, same result, up to spans) need one check: a step's
+    // children are themselves steps, so either copy's children suffice
+    let key = |e: &Exp| {
+        let e = crate::sst_visitor::map_exp_visitor(e, &mut |e: &Exp| {
+            SpannedTyped::new(&ctx.global.no_span, &e.typ, e.x.clone())
+        });
+        format!("{:?}", e.x)
+    };
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut capped = 0usize;
+    for st in trace.steps.iter() {
+        if !seen.insert(format!("{}\u{0}{}", key(&st.call), key(&st.result))) {
+            continue;
+        }
+        if seen.len() > MAX_COMPUTE_STEP_CHECKS {
+            capped += 1;
+            continue;
+        }
+        add(
+            &st.funs,
+            &st.children,
+            eq(&st.call, &st.result),
+            format!(
+                "{} == {}",
+                st.call.x.to_user_string(&ctx.global),
+                st.result.x.to_user_string(&ctx.global)
+            ),
+        );
+    }
+    add(
+        &[],
+        &trace.top,
+        eq(exp, result),
+        format!(
+            "{} == {}",
+            exp.x.to_user_string(&ctx.global),
+            result.x.to_user_string(&ctx.global)
+        ),
+    );
+    (out, skipped + capped)
 }

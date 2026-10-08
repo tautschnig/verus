@@ -93,6 +93,7 @@ pub struct ArgsX {
     pub allow_explicit_panics: bool,
     pub closure_param_requires: bool,
     pub counterexample: bool,
+    pub check_compute: bool,
     pub check_drops: bool,
     pub time: bool,
     pub time_expanded: bool,
@@ -153,6 +154,7 @@ impl ArgsX {
             allow_explicit_panics: Default::default(),
             closure_param_requires: Default::default(),
             counterexample: Default::default(),
+            check_compute: Default::default(),
             check_drops: true,
             time: Default::default(),
             time_expanded: Default::default(),
@@ -342,6 +344,7 @@ pub fn parse_args_with_imports(
     const OPT_ALLOW_EXPLICIT_PANICS: &str = "allow-explicit-panics";
     const OPT_CLOSURE_PARAM_REQUIRES: &str = "closure-param-requires";
     const OPT_COUNTEREXAMPLE: &str = "counterexample";
+    const OPT_CHECK_COMPUTE: &str = "check-compute";
     const OPT_NO_CHECK_DROPS: &str = "no-check-drops";
     const OPT_TIME: &str = "time";
     const OPT_TIME_EXPANDED: &str = "time-expanded";
@@ -574,6 +577,12 @@ pub fn parse_args_with_imports(
     );
     opts.optflag(
         "",
+        OPT_CHECK_COMPUTE,
+        "Check every call that `by (compute)` evaluates, and its final result, against the \
+         SMT encoding of the same definitions (one isolated query per step)",
+    );
+    opts.optflag(
+        "",
         OPT_CLOSURE_PARAM_REQUIRES,
         "Give an exec function that has no `requires` the precondition \
          `forall |args| call_requires(f, args)` for each parameter `f` whose type is a type \
@@ -795,6 +804,7 @@ pub fn parse_args_with_imports(
         allow_explicit_panics: matches.opt_present(OPT_ALLOW_EXPLICIT_PANICS),
         closure_param_requires: matches.opt_present(OPT_CLOSURE_PARAM_REQUIRES),
         counterexample: matches.opt_present(OPT_COUNTEREXAMPLE),
+        check_compute: matches.opt_present(OPT_CHECK_COMPUTE),
         check_drops: !matches.opt_present(OPT_NO_CHECK_DROPS),
         time: matches.opt_present(OPT_TIME) || matches.opt_present(OPT_TIME_EXPANDED),
         time_expanded: matches.opt_present(OPT_TIME_EXPANDED),
