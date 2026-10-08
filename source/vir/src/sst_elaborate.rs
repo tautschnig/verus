@@ -485,6 +485,27 @@ fn compute_step_checks(
         });
         format!("{:?}", e.x)
     };
+    // A step's result that still mentions one of the callee's own parameters (not in scope at
+    // the assertion) is an interpreter bug (upstream #3089: a `choose` kept the formal), not
+    // something to leave unchecked.
+    let mut leaks: Vec<(String, String)> = vec![];
+    for st in trace.steps.iter() {
+        for f in st.funs.iter() {
+            let Some(fs) = fun_ssts.get(f) else { continue };
+            for (x, _) in crate::sst_util::free_vars_exp(&st.result).iter() {
+                if !in_scope.contains_key(x) && fs.x.pars.iter().any(|p| &p.x.name == x) {
+                    leaks.push((
+                        format!("{}", x.0),
+                        format!(
+                            "{} == {}",
+                            st.call.x.to_user_string(&ctx.global),
+                            st.result.x.to_user_string(&ctx.global)
+                        ),
+                    ));
+                }
+            }
+        }
+    }
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut capped = 0usize;
     for st in trace.steps.iter() {
@@ -516,5 +537,32 @@ fn compute_step_checks(
             result.x.to_user_string(&ctx.global)
         ),
     );
+    // The final result may only mention variables in scope at the assertion: a variable of a
+    // callee in the result (upstream #3089: a `choose` kept the formal) is an interpreter bug,
+    // whatever the solver would make of it.
+    let leaked: Vec<String> = crate::sst_util::free_vars_exp(result)
+        .keys()
+        .filter(|x| !in_scope.contains_key(*x))
+        .map(|x| format!("{}", x.0))
+        .collect();
+    if !leaked.is_empty() {
+        leaks.push((
+            leaked.join(", "),
+            format!("result {}", result.x.to_user_string(&ctx.global)),
+        ));
+    }
+    for (vars, what) in leaks {
+        let msg = error_with_label(
+            &exp.span,
+            "by (compute) step mentions variables not in scope (--check-compute)",
+            format!("{}: {}", vars, what),
+        );
+        let f = SpannedTyped::new(
+            &exp.span,
+            &Arc::new(crate::ast::TypX::Bool),
+            ExpX::Const(crate::ast::Constant::Bool(false)),
+        );
+        out.push(stm.new_x(StmX::DeadEnd(stm.new_x(StmX::Assert(None, Some(msg), f)))));
+    }
     (out, skipped + capped)
 }
