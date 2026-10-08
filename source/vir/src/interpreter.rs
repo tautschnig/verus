@@ -979,9 +979,11 @@ fn array_to_sst(span: &Span, typ: Typ, arr: &Vector<Exp>) -> Result<Exp, VirErr>
         typ
     };
     let exp_new = |e: ExpX| SpannedTyped::new(span, &arr_typ, e);
+    // An element that cannot be cleaned up (a closure) is an error, not an omission:
+    // `flat_map` over the `Result`s dropped it, so `[|x| x + 1] == [|x| x + 2]` became
+    // `[] == []` (upstream #3072).
     let exps: Result<Vec<Exp>, VirErr> = arr.iter().map(|e| cleanup_exp(e)).collect();
-    let exps = Arc::new(exps?);
-    let exp = exp_new(ExpX::ArrayLiteral(exps));
+    let exp = exp_new(ExpX::ArrayLiteral(Arc::new(exps?)));
     Ok(exp)
 }
 
@@ -1792,25 +1794,48 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
                                 let pars = &func.x.pars;
                                 let body = &func.x.axioms.spec_axioms.as_ref().unwrap().body_exp;
                                 state.cache_misses += 1;
-                                let mut env = Env::new();
-                                let mut type_env = TypeEnv::new();
-                                env.push_scope(true);
-                                type_env.push_scope(true);
+                                // Substitute the actual arguments for the formals, and the
+                                // type arguments for the type parameters, then evaluate the
+                                // (now closed) body in an empty environment. `subst_exp` is
+                                // capture-avoiding: a binder of the body whose name occurs free
+                                // in an argument is renamed. Looking the formals up in the
+                                // caller's environment instead (lazily, by name) mixed the two
+                                // scopes: `f(y) = exists|x| .. x != y` applied to a quantified
+                                // `x` became `exists|x| .. x != x`; a caller's closure
+                                // mentioning its `y` read the callee's `y`; a caller's const
+                                // generic `N` read the callee's `N` (upstream #3088); and a body
+                                // the interpreter leaves alone (a `choose`) kept the formal
+                                // itself (upstream #3089).
+                                let mut typ_substs: HashMap<Ident, Typ> = HashMap::new();
+                                let mut var_substs: HashMap<VarIdent, Exp> = HashMap::new();
                                 for (formal, actual) in pars.iter().zip(new_args.iter()) {
-                                    let formal_id = formal.x.name.clone();
-                                    env.insert(formal_id, actual.clone()).unwrap();
+                                    var_substs.insert(formal.x.name.clone(), actual.clone());
                                 }
                                 for (formal, actual) in typ_params.iter().zip(typs.iter()) {
-                                    type_env.insert(formal.clone(), actual.clone()).unwrap();
+                                    typ_substs.insert(formal.clone(), actual.clone());
+                                    // Const generics: `{ N => 7 }` for the formal `N`
+                                    if let TypX::ConstInt(c) = &**actual {
+                                        let formal_id = VarIdent(
+                                            formal.clone(),
+                                            VarIdentDisambiguate::TypParamBare,
+                                        );
+                                        let value = SpannedTyped::new(
+                                            &exp.span,
+                                            &exp.typ,
+                                            Const(Constant::Int(c.clone())),
+                                        );
+                                        var_substs.insert(formal_id, value);
+                                    }
                                 }
-                                // Proactively apply the type environment to the body.
-                                // We don't do this for the variable environment, since
-                                // the body might locally shadow some of the parameter names.
-                                let empty_substs = HashMap::new();
-                                let body = subst_exp(type_env.map(), &empty_substs, body);
-                                let prev_env = std::mem::replace(&mut state.env, env);
+                                let body = subst_exp(&typ_substs, &var_substs, body);
+                                let saved_env = std::mem::replace(&mut state.env, ScopeMap::new());
+                                let saved_type_env =
+                                    std::mem::replace(&mut state.type_env, ScopeMap::new());
+                                state.env.push_scope(true);
+                                state.type_env.push_scope(true);
                                 let result = eval_expr_internal(ctx, state, &body);
-                                state.env = prev_env;
+                                state.env = saved_env;
+                                state.type_env = saved_type_env;
                                 state.insert_call(fun, &typs, &new_args, &result.clone()?, memoize);
                                 result
                             }
