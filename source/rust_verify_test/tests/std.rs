@@ -3823,3 +3823,25 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    // derived `Debug` of a local datatype: `fmt_req` is the conjunction of `fmt_req_all`
+    // of the field types that are not primitive/String or themselves derived/verified
+    #[test] derived_debug_fmt_req verus_code! {
+        use vstd::prelude::*;
+        #[derive(Debug, Clone, Copy)]
+        pub enum Side { Buy, Sell }
+        #[derive(Debug)]
+        pub struct P { pub x: u8, pub s: Side, pub name: String }
+        #[derive(Debug)]
+        pub struct W { pub p: P, pub d: std::time::Duration }
+        #[derive(Debug)]
+        pub struct Q { pub o: std::time::Instant }
+        fn a(s: Side) -> String { format!("{s:?}") }
+        fn c(p: P) -> String { format!("{p:?}") }
+        fn w(x: W) -> String { format!("{x:?}") }
+        fn q(x: Q) -> String {
+            format!("{x:?}") // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}

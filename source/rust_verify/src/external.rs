@@ -710,7 +710,7 @@ fn third_party_macro_crate<'tcx>(
 }
 
 /// The crate defining the derive macro whose expansion produced `span`, if any.
-fn derive_macro_crate<'tcx>(
+pub(crate) fn derive_macro_crate<'tcx>(
     tcx: rustc_middle::ty::TyCtxt<'tcx>,
     span: Span,
 ) -> Option<rustc_span::Symbol> {

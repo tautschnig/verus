@@ -3367,6 +3367,9 @@ impl Verifier {
             self.crate_id.as_ref().expect("crate_id"),
             &mut warning_ctx,
         );
+        let derived_fmt = crate::automatic_derive::derived_fmt_impls(&ctxt, &vir_crate);
+        let vir_crate =
+            vir::traits::synthesize_derived_fmt_impls(&vir_crate, &derived_fmt, &mut warning_ctx);
         let vir_crate = vir::traits::inherit_default_bodies(&vir_crate, &mut warning_ctx)
             .map_err(|e| (vec![e], Vec::new()))?;
 
