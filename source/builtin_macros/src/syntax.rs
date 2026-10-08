@@ -3712,6 +3712,54 @@ impl Visitor {
                     #verus_builtin::ensures(|ret| [<#t as #verus_builtin::ProofFnReqEnsDef<_, #output>>::ens(#args, ret)])
                 ));
             }
+            // An exec closure without `requires`/`ensures` whose parameter is a pattern
+            // (`|(k, v): &mut (K, V)|`, as in `retain(|(k, v)| ..)`) takes the parameter by a
+            // fresh name and binds the pattern with `let` at the start of the body. That is
+            // the same binding Rust performs for the parameter, and it lets the pattern's
+            // default binding mode be `ref mut`, which Verus supports in `let` but not in a
+            // closure parameter. (With `requires`/`ensures` the pattern's names must be in
+            // scope for them, so the parameter is left as it is.)
+            let mut param_lets: Vec<Stmt> = Vec::new();
+            if !is_proof_fn
+                && requires.is_none()
+                && ensures.is_none()
+                && opts.req_ens.is_none()
+            {
+                for (i, input) in clos.inputs.iter_mut().enumerate() {
+                    let (pat, ty) = match &input.pat {
+                        Pat::Type(pt) => (&*pt.pat, Some(pt.clone())),
+                        p => (p, None),
+                    };
+                    if matches!(pat, Pat::Ident(pi) if pi.subpat.is_none()) || matches!(pat, Pat::Wild(_)) {
+                        continue;
+                    }
+                    let pspan = pat.span();
+                    let fresh = Ident::new(&format!("verus_closure_param_{i}"), pspan);
+                    let pat = pat.clone();
+                    param_lets.push(parse_quote_spanned!(pspan => let #pat = #fresh;));
+                    // an explicit `ref mut` in a by-value parameter borrows from the
+                    // parameter, which `let` then needs to be mutable
+                    let explicit_ref_mut = quote!(#pat).to_string().contains("ref mut");
+                    let ident_pat = Pat::Ident(verus_syn::PatIdent {
+                        attrs: vec![],
+                        by_ref: None,
+                        mutability: if explicit_ref_mut {
+                            Some(Token![mut](pspan))
+                        } else {
+                            None
+                        },
+                        ident: fresh,
+                        subpat: None,
+                    });
+                    input.pat = match ty {
+                        Some(mut pt) => {
+                            pt.pat = Box::new(ident_pat);
+                            Pat::Type(pt)
+                        }
+                        None => ident_pat,
+                    };
+                }
+            }
             if let Some(Requires { token, mut exprs }) = requires {
                 for expr in exprs.exprs.iter_mut() {
                     self.visit_expr_mut(expr);
@@ -3738,6 +3786,7 @@ impl Visitor {
                 }
             }
             self.inside_ghost -= 1;
+            stmts.extend(param_lets);
             if stmts.len() > 0 {
                 if let Expr::Block(block) = &mut *clos.body {
                     block.block.stmts.splice(0..0, stmts);

@@ -206,9 +206,10 @@ test_verify_one_file_with_options! {
 }
 
 test_verify_one_file_with_options! {
+    // without requires/ensures this is supported (closure_param_pattern_ref_mut)
     #[test] test_pattern_implicit_mut_ref_unsupported ["vstd"] => verus_code! {
         fn test() {
-            let y = |(x, y): &mut (u64, u64)| {
+            let y = |(x, y): &mut (u64, u64)| requires true {
             };
         }
     } => Err(err) => assert_vir_error_msg(err,
@@ -225,14 +226,14 @@ test_verify_one_file_with_options! {
 }
 
 test_verify_one_file_with_options! {
-    #[test] test_pattern_nested_mut_ref_unsupported ["vstd"] => verus_code! {
+    // bound by `let` in the body (no requires/ensures), like a function body's `let`
+    #[test] test_pattern_nested_mut_ref_supported ["vstd"] => verus_code! {
         struct Pair { values: (u64, u64) }
 
         fn test() {
-            let f = |Pair { values: (x, ref mut y) }: Pair| {};
+            let f = |Pair { values: (x, ref mut y) }: Pair| { *y = x; };
         }
-    } => Err(err) => assert_vir_error_msg(err,
-        "mutable-reference bindings in closure parameters are not supported")
+    } => Ok(())
 }
 
 test_verify_one_file_with_options! {
@@ -2372,4 +2373,28 @@ test_verify_one_file_with_options! {
             v.into_iter().filter(|x| seen.insert(*x)).collect()
         }
     } => Ok(())
+}
+
+test_verify_one_file! {
+    // a pattern parameter whose binding mode is `ref mut` (`retain(|(k, v)| ..)`), in a
+    // closure without requires/ensures: bound by `let` at the start of the body
+    #[test] closure_param_pattern_ref_mut verus_code! {
+        use vstd::prelude::*;
+        fn ok() {
+            let d = |(k, v): &mut (u8, u8)| { *v = 0; *k == 1 };
+            let mut p = (1u8, 5u8);
+            let r = d(&mut p);
+            let e = |(a, b): (u8, u8)| a / 2 + b / 2;
+            let s = e((3, 4));
+        }
+        fn retain_like(xs: &mut Vec<(u8, u8)>) {
+            let f = |(k, v): &mut (u8, u8)| -> bool { *v = *k; true };
+        }
+        fn bad() {
+            let d = |(k, v): &mut (u8, u8)| { *v = 0; };
+            let mut p = (1u8, 5u8);
+            d(&mut p);
+            assert(p.1 == 5); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
 }
