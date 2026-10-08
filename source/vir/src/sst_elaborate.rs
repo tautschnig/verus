@@ -156,8 +156,9 @@ fn elaborate_one_stm<D: Diagnostics + ?Sized>(
                         &exp.span,
                         format!(
                             "--check-compute: {} of {} by (compute) step(s) not checked (closures, \
-                             bitwise operators, lambdas, variables bound inside the \
-                             expression, or functions outside this query's context)",
+                             bitwise operators, equations between functions, quantifiers \
+                             or closures without --check-compute-all, bound variables \
+                             without a trigger, or functions outside this query's context)",
                             trace.unexpressible + skipped,
                             trace.unexpressible + trace.steps.len() + 1
                         ),
@@ -368,6 +369,108 @@ pub(crate) fn elaborate_function_bv<'a>(
     Ok(())
 }
 
+/// Hints for each closed `Seq` operand `x` of an extensional equality in `e`: `x.len()`
+/// (and of each prefix of a push chain), and for a push chain `x[i]` with the pushed element
+fn seq_len_hints(e: &Exp) -> Vec<(Exp, Option<Exp>)> {
+    let len_fun = Arc::new(crate::ast::FunX {
+        path: Arc::new(crate::ast::PathX {
+            krate: crate::ast::CrateId::Vstd,
+            segments: Arc::new(
+                ["seq", "Seq", "len"].iter().map(|s| Arc::new(s.to_string())).collect(),
+            ),
+        }),
+    });
+    let index_fun = Arc::new(crate::ast::FunX {
+        path: Arc::new(crate::ast::PathX {
+            krate: crate::ast::CrateId::Vstd,
+            segments: Arc::new(
+                ["seq", "Seq", "index"].iter().map(|s| Arc::new(s.to_string())).collect(),
+            ),
+        }),
+    });
+    let mut out = vec![];
+    let mut map = crate::sst_visitor::VisitorScopeMap::new();
+    let _ = crate::sst_visitor::exp_visitor_check(e, &mut map, &mut |x: &Exp, map| {
+        if let ExpX::BinaryOpr(crate::ast::BinaryOpr::ExtEq(_, t), a, b) = &x.x {
+            if let crate::ast::TypX::Datatype(crate::ast::Dt::Path(p), targs, _) =
+                &*crate::ast_util::undecorate_typ(t)
+            {
+                let is_seq = p.krate == crate::ast::CrateId::Vstd
+                    && p.segments.iter().map(|s| s.as_str()).collect::<Vec<_>>() == ["seq", "Seq"];
+                // only closed operands: a bound variable would be out of scope in the hint
+                for o in [a, b] {
+                    let closed = crate::sst_util::free_vars_exp(o).keys().all(|v| !map.contains_key(v));
+                    if is_seq && closed && targs.len() == 1 {
+                        // `x[i]` for each position of a push chain (`seq![..]` cleaned up by
+                        // the interpreter), so a differing element can be found
+                        let mut n = 0usize;
+                        let mut elems: Vec<Exp> = vec![];
+                        let mut cur = o.clone();
+                        let mk_len = |x: &Exp| {
+                            SpannedTyped::new(
+                                &x.span,
+                                &Arc::new(crate::ast::TypX::Int(crate::ast::IntRange::Nat)),
+                                ExpX::Call(
+                                    CallFun::Fun(len_fun.clone(), None),
+                                    targs.clone(),
+                                    Arc::new(vec![x.clone()]),
+                                ),
+                            )
+                        };
+                        let known_len = loop {
+                            if !Arc::ptr_eq(&cur, o) {
+                                out.push((mk_len(&cur), None));
+                            }
+                            match &cur.x {
+                                ExpX::Call(CallFun::Fun(f, _), _, args)
+                                    if f.path.segments.last().map(|s| s.as_str()) == Some("push")
+                                        && args.len() == 2 =>
+                                {
+                                    n += 1;
+                                    elems.push(args[1].clone());
+                                    cur = args[0].clone();
+                                }
+                                ExpX::Call(CallFun::Fun(f, _), _, args)
+                                    if f.path.segments.last().map(|s| s.as_str()) == Some("empty")
+                                        && args.is_empty() =>
+                                {
+                                    break Some(n);
+                                }
+                                _ => break None,
+                            }
+                        };
+                        if let Some(n) = known_len.filter(|n| *n <= 16) {
+                            elems.reverse();
+                            for i in 0..n {
+                                let idx = SpannedTyped::new(
+                                    &o.span,
+                                    &Arc::new(crate::ast::TypX::Int(crate::ast::IntRange::Int)),
+                                    ExpX::Const(crate::ast::Constant::Int(num_bigint::BigInt::from(i))),
+                                );
+                                out.push((
+                                    SpannedTyped::new(
+                                        &o.span,
+                                        &targs[0],
+                                        ExpX::Call(
+                                            CallFun::Fun(index_fun.clone(), None),
+                                            targs.clone(),
+                                            Arc::new(vec![o.clone(), idx]),
+                                        ),
+                                    ),
+                                    Some(elems[i].clone()),
+                                ));
+                            }
+                        }
+                        out.push((mk_len(o), None));
+                    }
+                }
+            }
+        }
+        Ok::<(), ()>(())
+    });
+    out
+}
+
 /// More distinct steps than this are not checked (reported as unchecked)
 const MAX_COMPUTE_STEP_CHECKS: usize = 2000;
 
@@ -406,10 +509,9 @@ fn compute_step_checks(
         SpannedTyped::new(&a.span, &Arc::new(crate::ast::TypX::Bool), x)
     };
     // A step is checkable if every function it names is in this query's (pruned) context,
-    // its free variables are in scope at the assertion (free in `exp`; a step evaluated under
-    // a quantifier of `exp` mentions the bound variable), and it uses no operation that the
-    // default integer encoding leaves uninterpreted (bitwise operators: they would need a
-    // bit-vector query) or compares functions (lambdas).
+    // and it uses no operation that the default integer encoding leaves uninterpreted
+    // (bitwise operators: they would need a bit-vector query). Steps that equate functions
+    // are skipped below.
     let in_scope = crate::sst_util::free_vars_exp(exp);
     let known = |e: &Exp| {
         let mut map = crate::sst_visitor::VisitorScopeMap::new();
@@ -420,10 +522,8 @@ fn compute_step_checks(
             {
                 Err(())
             }
-            ExpX::Var(x) if !map.contains_key(x) && !in_scope.contains_key(x) => Err(()),
             ExpX::Binary(crate::sst::BinaryOp::Bitwise(..), _, _)
             | ExpX::Unary(crate::ast::UnaryOp::BitNot(_), _) => Err(()),
-            ExpX::Bind(b, _) if matches!(b.x, crate::sst::BndX::Lambda(..)) => Err(()),
             _ => Ok(()),
         })
         .is_ok()
@@ -444,16 +544,87 @@ fn compute_step_checks(
             })
         })
     };
+    // A step evaluated under a binder of the assertion (or of a callee) mentions the bound
+    // variable; it holds for every value of it, so it is checked, and used as a fact, as
+    // `forall|v| call == result`, triggered on the call.
+    let forall_over = |call: &Exp, body: Exp| -> Option<Exp> {
+        let vars: Vec<(UniqueIdent, crate::ast::Typ)> = crate::sst_util::free_vars_exp(&body)
+            .into_iter()
+            .filter(|(x, _)| !in_scope.contains_key(x))
+            .collect();
+        if vars.is_empty() {
+            return Some(body);
+        }
+        let in_call = crate::sst_util::free_vars_exp(call);
+        if !vars.iter().all(|(x, _)| in_call.contains_key(x)) {
+            return None; // no trigger covers all of them
+        }
+        let binders: Vec<crate::ast::VarBinder<crate::ast::Typ>> = vars
+            .into_iter()
+            .map(|(name, a)| Arc::new(crate::ast::VarBinderX { name, a }))
+            .collect();
+        let bnd = Spanned::new(
+            body.span.clone(),
+            BndX::Quant(
+                crate::ast::Quant { quant: air::ast::Quant::Forall },
+                Arc::new(binders),
+                Arc::new(vec![Arc::new(vec![call.clone()])]),
+                None,
+            ),
+        );
+        let span = body.span.clone();
+        Some(SpannedTyped::new(&span, &Arc::new(crate::ast::TypX::Bool), ExpX::Bind(bnd, body)))
+    };
     let mut out = vec![];
     let mut skipped = 0usize;
-    let mut add = |funs: &[crate::ast::Fun], facts: &[(Exp, Exp)], goal: Exp, what: String| {
-        if !known(&goal)
+    let mut add = |funs: &[crate::ast::Fun], facts: &[(Exp, Exp)], g: (&Exp, &Exp), what: String| {
+        if !known(g.0)
+            || !known(g.1)
             || facts.iter().any(|(c, r)| !known(c) || !known(r))
             || !funs.iter().all(|f| body_ok(f))
         {
             skipped += 1;
             return;
         }
+        // equations between functions (closures) are not decidable by the solver
+        let fn_typed = |e: &Exp| {
+            matches!(&*crate::ast_util::undecorate_typ(&e.typ), crate::ast::TypX::SpecFn(..))
+        };
+        if fn_typed(g.0) || facts.iter().any(|(c, _)| fn_typed(c)) {
+            skipped += 1;
+            return;
+        }
+        // quantifiers, `choose` and closures in a step: the solver often cannot relate two
+        // quantified formulas by E-matching, or two copies of a closure, so these are checked
+        // only with --check-compute-all
+        let has_binder = |e: &Exp| {
+            let mut map = crate::sst_visitor::VisitorScopeMap::new();
+            crate::sst_visitor::exp_visitor_check(e, &mut map, &mut |e: &Exp, _| match &e.x {
+                ExpX::Bind(b, _)
+                    if matches!(b.x, BndX::Quant(..) | BndX::Choose(..) | BndX::Lambda(..)) =>
+                {
+                    Err(())
+                }
+                _ => Ok(()),
+            })
+            .is_err()
+        };
+        if !ctx.global.check_compute_all
+            && (has_binder(g.0) || has_binder(g.1) || facts.iter().any(|(c, r)| has_binder(c) || has_binder(r)))
+        {
+            skipped += 1;
+            return;
+        }
+        let Some(goal) = forall_over(g.0, eq(g.0, g.1)) else {
+            skipped += 1;
+            return;
+        };
+        let Some(facts) =
+            facts.iter().map(|(c, r)| forall_over(c, eq(c, r))).collect::<Option<Vec<Exp>>>()
+        else {
+            skipped += 1;
+            return;
+        };
         let mut b: Vec<Stm> = vec![];
         for f in funs {
             // fuel exists for spec functions with a body in this context (`context.rs`);
@@ -466,8 +637,46 @@ fn compute_step_checks(
                 b.push(stm.new_x(StmX::Fuel(f.clone(), 1)));
             }
         }
-        for (c, r) in facts {
-            b.push(stm.new_x(StmX::Assume(AssumeIntent::CheckedCondition, eq(c, r))));
+        for f in facts {
+            b.push(stm.new_x(StmX::Assume(AssumeIntent::CheckedCondition, f)));
+        }
+        // Trigger hints: `x.len() >= 0` for each `Seq` operand of an
+        // extensional equality (`!(seq![1] =~= seq![])` needs the `len` terms for
+        // `axiom_seq_ext_equal` to give a contradiction)
+        for (h, elem) in seq_len_hints(&goal) {
+            if let Some(v) = elem {
+                // an element: `x[i] == e_i` is asserted (checked, then a fact): the solver
+                // proves it from the push axioms in its own query and needs it as a lemma
+                let t = SpannedTyped::new(
+                    &h.span,
+                    &Arc::new(crate::ast::TypX::Bool),
+                    ExpX::Binary(crate::sst::BinaryOp::Eq, h.clone(), v),
+                );
+                let m = error_with_label(
+                    &exp.span,
+                    "by (compute) step not confirmed by the SMT encoding (--check-compute)",
+                    format!("hint {}", t.x.to_user_string(&ctx.global)),
+                );
+                b.push(stm.new_x(StmX::Assert(None, Some(m), t)));
+                continue;
+            }
+            // `len` returns a `nat`, so `len(x) >= 0` is a fact; a trivial `x == x` would be
+            // simplified away before reaching the solver
+            let zero = SpannedTyped::new(
+                &h.span,
+                &h.typ,
+                ExpX::Const(crate::ast::Constant::Int(num_bigint::BigInt::from(0))),
+            );
+            let ge = SpannedTyped::new(
+                &h.span,
+                &Arc::new(crate::ast::TypX::Bool),
+                ExpX::Binary(
+                    crate::sst::BinaryOp::Inequality(crate::ast::InequalityOp::Ge),
+                    h.clone(),
+                    zero,
+                ),
+            );
+            b.push(stm.new_x(StmX::Assume(AssumeIntent::CheckedCondition, ge)));
         }
         let msg = error_with_label(
             &exp.span,
@@ -519,7 +728,7 @@ fn compute_step_checks(
         add(
             &st.funs,
             &st.children,
-            eq(&st.call, &st.result),
+            (&st.call, &st.result),
             format!(
                 "{} == {}",
                 st.call.x.to_user_string(&ctx.global),
@@ -530,7 +739,7 @@ fn compute_step_checks(
     add(
         &[],
         &trace.top,
-        eq(exp, result),
+        (exp, result),
         format!(
             "{} == {}",
             exp.x.to_user_string(&ctx.global),

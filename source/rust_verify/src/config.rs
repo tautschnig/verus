@@ -94,6 +94,7 @@ pub struct ArgsX {
     pub closure_param_requires: bool,
     pub counterexample: bool,
     pub check_compute: bool,
+    pub check_compute_all: bool,
     pub check_drops: bool,
     pub time: bool,
     pub time_expanded: bool,
@@ -155,6 +156,7 @@ impl ArgsX {
             closure_param_requires: Default::default(),
             counterexample: Default::default(),
             check_compute: Default::default(),
+            check_compute_all: Default::default(),
             check_drops: true,
             time: Default::default(),
             time_expanded: Default::default(),
@@ -345,6 +347,7 @@ pub fn parse_args_with_imports(
     const OPT_CLOSURE_PARAM_REQUIRES: &str = "closure-param-requires";
     const OPT_COUNTEREXAMPLE: &str = "counterexample";
     const OPT_CHECK_COMPUTE: &str = "check-compute";
+    const OPT_CHECK_COMPUTE_ALL: &str = "check-compute-all";
     const OPT_NO_CHECK_DROPS: &str = "no-check-drops";
     const OPT_TIME: &str = "time";
     const OPT_TIME_EXPANDED: &str = "time-expanded";
@@ -583,6 +586,12 @@ pub fn parse_args_with_imports(
     );
     opts.optflag(
         "",
+        OPT_CHECK_COMPUTE_ALL,
+        "--check-compute, also for steps with quantifiers, `choose` or closures (the solver \
+         may fail to confirm correct steps of this kind)",
+    );
+    opts.optflag(
+        "",
         OPT_CLOSURE_PARAM_REQUIRES,
         "Give an exec function that has no `requires` the precondition \
          `forall |args| call_requires(f, args)` for each parameter `f` whose type is a type \
@@ -804,7 +813,9 @@ pub fn parse_args_with_imports(
         allow_explicit_panics: matches.opt_present(OPT_ALLOW_EXPLICIT_PANICS),
         closure_param_requires: matches.opt_present(OPT_CLOSURE_PARAM_REQUIRES),
         counterexample: matches.opt_present(OPT_COUNTEREXAMPLE),
-        check_compute: matches.opt_present(OPT_CHECK_COMPUTE),
+        check_compute: matches.opt_present(OPT_CHECK_COMPUTE)
+            || matches.opt_present(OPT_CHECK_COMPUTE_ALL),
+        check_compute_all: matches.opt_present(OPT_CHECK_COMPUTE_ALL),
         check_drops: !matches.opt_present(OPT_NO_CHECK_DROPS),
         time: matches.opt_present(OPT_TIME) || matches.opt_present(OPT_TIME_EXPANDED),
         time_expanded: matches.opt_present(OPT_TIME_EXPANDED),

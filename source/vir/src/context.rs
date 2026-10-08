@@ -83,6 +83,8 @@ pub struct GlobalCtx {
     pub counterexamples: bool,
     /// `--check-compute`: check every call `by (compute)` evaluates against the SMT encoding
     pub check_compute: bool,
+    /// `--check-compute-all`: also steps with quantifiers or `choose`
+    pub check_compute_all: bool,
 }
 
 // Context for verifying one function
@@ -770,6 +772,7 @@ impl GlobalCtx {
             report_long_running,
             counterexamples: false,
             check_compute: false,
+            check_compute_all: false,
         })
     }
 
@@ -804,6 +807,7 @@ impl GlobalCtx {
             report_long_running: self.report_long_running,
             counterexamples: self.counterexamples,
             check_compute: self.check_compute,
+            check_compute_all: self.check_compute_all,
         }
     }
 
