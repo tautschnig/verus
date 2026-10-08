@@ -1637,3 +1637,18 @@ fn fmt_std_types_total() {
     write!(s, "{:?} {:?} {:?} {:?}", Some(1u8), None::<u8>, vec![1u8, 2], Box::new(3u8)).unwrap();
     assert!(!s.is_empty());
 }
+
+/// vstd `axiom_str_view_len_bound`: a `str` has at most as many chars as bytes (each char
+/// takes 1 to 4 bytes of UTF-8), so `chars().count() <= len() <= isize::MAX`.
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(6)]
+fn str_chars_le_bytes_holds() {
+    let b: [u8; 4] = kani::any();
+    let n: usize = kani::any();
+    kani::assume(n <= 4);
+    if let Ok(s) = core::str::from_utf8(&b[..n]) {
+        assert!(s.chars().count() <= s.len());
+        assert!(s.len() <= isize::MAX as usize);
+    }
+}

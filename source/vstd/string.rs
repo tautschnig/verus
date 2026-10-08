@@ -434,10 +434,27 @@ pub broadcast axiom fn axiom_str_literal_get_char<'a>(s: &'a str, i: int)
         #[trigger] s@.index(i) == strslice_get_char(s, i),
 ;
 
+/// A `str` occupies at most `isize::MAX` bytes (as does every Rust allocation; see the
+/// `slice::from_raw_parts` safety contract), and each char takes at least one byte of its
+/// UTF-8 encoding, so it has at most `isize::MAX` chars. (`s.chars().count()` relies on it.)
+#[cfg(not(verus_verify_core))]
+pub broadcast axiom fn axiom_str_view_len_bound<'a>(s: &'a str)
+    ensures
+        #[trigger] s@.len() <= isize::MAX,
+;
+
+/// The same bound for `String` (its buffer is one allocation).
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+pub broadcast axiom fn axiom_string_view_len_bound(s: &String)
+    ensures
+        #[trigger] s@.len() <= isize::MAX,
+;
+
 #[cfg(all(not(feature = "alloc"), not(verus_verify_core)))]
 pub broadcast group group_string_axioms {
     axiom_new_strlit_view_id,
     axiom_str_view_injective,
+    axiom_str_view_len_bound,
     axiom_str_literal_len,
     axiom_str_literal_get_char,
     is_ascii_spec_bytes,
@@ -448,8 +465,10 @@ pub broadcast group group_string_axioms {
 pub broadcast group group_string_axioms {
     axiom_new_strlit_view_id,
     axiom_str_view_injective,
+    axiom_str_view_len_bound,
     axiom_str_literal_len,
     axiom_str_literal_get_char,
+    axiom_string_view_len_bound,
     to_string_from_display_ensures_for_str,
     is_ascii_spec_bytes,
     is_ascii_concat,
