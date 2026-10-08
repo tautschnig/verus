@@ -2849,6 +2849,36 @@ pub fn synthesize_derived_fmt_impls(
         if has_user_impl {
             continue;
         }
+        // The impl belongs to the datatype's module (for a datatype of another crate, to our
+        // root module). Pruning treats a function as "our function", body included, in its
+        // owning module, so every type its body names must be visible there: a field type
+        // private to another module would otherwise reach the SMT context without its
+        // datatype.
+        let own_mod = if &dt.krate == crate_id {
+            d.x.owning_module.clone().unwrap_or_else(|| root_module.clone())
+        } else {
+            root_module.clone()
+        };
+        if &dt.krate != crate_id && !crate::datatype_to_air::is_datatype_transparent(&own_mod, d) {
+            continue;
+        }
+        let all_visible = std::cell::Cell::new(true);
+        for ft in fields_of(dt) {
+            let check = |t: &Typ| {
+                if let TypX::Datatype(Dt::Path(p), _, _) = &**t {
+                    if let Some(fd) = dts.get(p) {
+                        if !crate::ast_util::is_visible_to(&fd.x.visibility, &own_mod) {
+                            all_visible.set(false);
+                        }
+                    }
+                }
+                Ok(t.clone())
+            };
+            let _ = crate::ast_visitor::map_typ_visitor(&ft, &check);
+        }
+        if !all_visible.get() {
+            continue;
+        }
         let span = d.span.clone();
         let mk_bool = |x: ExprX| SpannedTyped::new(&span, &Arc::new(TypX::Bool), x);
         let mut conjs: Vec<crate::ast::Expr> = Vec::new();
@@ -2934,7 +2964,7 @@ pub fn synthesize_derived_fmt_impls(
             visibility: vis.clone(),
             body_visibility: crate::ast::BodyVisibility::Visibility(vis.clone()),
             opaqueness: Opaqueness::Revealed { visibility: vis.clone() },
-            owning_module: Some(root_module.clone()),
+            owning_module: Some(own_mod.clone()),
             typ_params: Arc::new(own_typ_params),
             typ_bounds: Arc::new(vec![]),
             params: Arc::new(params),
@@ -2958,7 +2988,7 @@ pub fn synthesize_derived_fmt_impls(
                     span.clone(),
                     Arc::new(vec![crate::ast::ImplPath::TraitImplPath(impl_of_trait.clone())]),
                 ),
-                owning_module: Some(root_module.clone()),
+                owning_module: Some(own_mod.clone()),
                 auto_imported: false,
                 external_trait_blanket: false,
             },

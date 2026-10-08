@@ -3846,6 +3846,31 @@ test_verify_one_file! {
     } => Err(err) => assert_one_fails(err)
 }
 
+test_verify_one_file! {
+    // derived `Debug` of datatypes private to a module, one containing the other in a
+    // `BTreeMap`: the synthesized impls belong to that module, so other modules (here the
+    // crate root and `other`) do not see their bodies (this used to panic: "datatype ...
+    // missing from the pruned context")
+    #[test] derived_debug_fmt_req_private_module verus_code! {
+        use vstd::prelude::*;
+        use std::collections::BTreeMap;
+        mod m {
+            use super::*;
+            #[derive(Debug)]
+            struct Inner { frames: u64, name: String }
+            #[derive(Debug)]
+            struct Snap { n: u64, channels: BTreeMap<String, Inner> }
+            #[derive(Debug)]
+            struct Plain { i: Inner }
+            fn show(s: Plain) -> String { format!("{:?}", s) }
+        }
+        mod other {
+            pub fn f(x: u64) -> String { format!("{:?}", x) }
+        }
+        fn g(x: u64) -> String { format!("{:?}", x) }
+    } => Ok(())
+}
+
 test_verify_one_file_with_options! {
     // `--counterexample` only adds notes: verdicts are unchanged (scalars, slices, arrays,
     // `&mut` scalars, loop queries)
