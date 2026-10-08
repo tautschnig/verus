@@ -2922,6 +2922,7 @@ pub fn synthesize_derived_fmt_impls(
                 conjs.push(call);
             }
         }
+        let names_no_type = conjs.is_empty();
         let body = if conjs.is_empty() {
             mk_bool(ExprX::Const(crate::ast::Constant::Bool(true)))
         } else {
@@ -2958,6 +2959,23 @@ pub fn synthesize_derived_fmt_impls(
         let mut attrs = (*decl.x.attrs).clone();
         attrs.is_external_body = false;
         let vis = d.x.visibility.clone();
+        // The body names the field types, so it may be visible only where all fields are:
+        // the most restrictive of the datatype's and the fields' visibilities (all are
+        // ancestors of the datatype's module, so the longest restriction is the meet).
+        let body_vis = {
+            let mut r = vis.restricted_to.clone();
+            for v in d.x.variants.iter() {
+                for f in v.fields.iter() {
+                    if let Some(p) = &f.a.2.restricted_to {
+                        if r.as_ref().map_or(true, |q| p.segments.len() > q.segments.len()) {
+                            r = Some(p.clone());
+                        }
+                    }
+                }
+            }
+            // a body that names no type (`true`) can be as visible as the datatype
+            if names_no_type { vis.clone() } else { crate::ast::Visibility { restricted_to: r } }
+        };
         let mname = decl.x.name.path.segments.last().unwrap().clone();
         let fx = FunctionX {
             name: Arc::new(FunX { path: impl_path.push_segment(mname) }),
@@ -2970,8 +2988,8 @@ pub fn synthesize_derived_fmt_impls(
                 inherit_body_from: None,
             },
             visibility: vis.clone(),
-            body_visibility: crate::ast::BodyVisibility::Visibility(vis.clone()),
-            opaqueness: Opaqueness::Revealed { visibility: vis.clone() },
+            body_visibility: crate::ast::BodyVisibility::Visibility(body_vis.clone()),
+            opaqueness: Opaqueness::Revealed { visibility: body_vis.clone() },
             owning_module: Some(own_mod.clone()),
             typ_params: Arc::new(own_typ_params),
             typ_bounds: Arc::new(vec![]),

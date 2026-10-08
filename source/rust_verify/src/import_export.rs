@@ -69,6 +69,25 @@ pub(crate) fn export_crate(
         // for efficiency's sake, prune out elements of AST that won't be needed by importers:
         let mut kratex = (*vir_crate).clone();
         kratex.functions.retain(|f| f.x.visibility.restricted_to.is_none());
+        // a synthesized derived-fmt impl of a non-public datatype loses its function above;
+        // drop the impl too (importers cannot name the datatype)
+        {
+            let kept: std::collections::HashSet<vir::ast::Path> = kratex
+                .functions
+                .iter()
+                .filter_map(|f| match &f.x.kind {
+                    vir::ast::FunctionKind::TraitMethodImpl { impl_path, .. } => {
+                        Some(impl_path.clone())
+                    }
+                    _ => None,
+                })
+                .collect();
+            kratex.trait_impls.retain(|t| {
+                t.x.impl_path.segments.first().map(|s| s.as_str())
+                    != Some(vir::traits::DERIVED_FMT_SEGMENT)
+                    || kept.contains(&t.x.impl_path)
+            });
+        }
         for func in kratex.functions.iter_mut() {
             let mut functionx = func.x.clone();
             functionx.decrease_by = None;

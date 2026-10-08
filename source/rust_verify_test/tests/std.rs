@@ -3847,6 +3847,26 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
+    // the synthesized `fmt_req` body is visible only where all fields are: from another
+    // module, a datatype with private fields is formattable if its `fmt_req` is `true`
+    // (the body names no type), and otherwise its `fmt_req` is unknown
+    #[test] derived_debug_fmt_req_body_visibility verus_code! {
+        use vstd::prelude::*;
+        mod m {
+            #[derive(Debug)]
+            pub struct Total { x: u8, s: String }
+            #[derive(Debug)]
+            pub struct NotTotal { o: Vec<std::time::Instant> }
+            pub fn mk_total() -> Total { Total { x: 0, s: String::new() } }
+        }
+        fn a(t: m::Total) -> String { format!("{:?}", t) }
+        fn b(t: m::NotTotal) -> String {
+            format!("{:?}", t) // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
     // `&T` formats by delegating to `T` (axiom_fmt_req_ref_*): references to derived and
     // verified types, nested references; a reference to a type whose `fmt_req` is unknown
     // still fails
