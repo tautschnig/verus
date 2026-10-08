@@ -15,6 +15,11 @@
 //! glue, and reports the impls that are local to the crate but not verified. `Drop` impls of
 //! other crates (std's, or a dependency's) are trusted, as before; they are listed with
 //! `VERUS_CHECK_DROPS_VERBOSE=1`. `--no-check-drops` turns the check off.
+//!
+//! The same applies inside `open_atomic_invariant!` blocks of any verified exec function:
+//! the block must be one atomic step, and an unverified drop inside it is arbitrary code.
+//! Those drops are found by span: a `Drop` terminator (or a moving call to an unverified
+//! callee) whose span lies in the body of an atomic `OpenInvariant`.
 
 use crate::external::{CrateItems, VerifOrExternal};
 use rustc_hir::OwnerId;
@@ -83,16 +88,32 @@ pub(crate) fn check_drops<'tcx>(
     def_id_to_vir_path: impl Fn(DefId) -> vir::ast::Path,
     verbose: bool,
 ) -> Vec<DropFinding> {
-    // which VIR functions need checking: exec with body, no_unwind or atomic
+    // which VIR functions need checking: exec with body, no_unwind or atomic, or containing
+    // atomic invariant blocks (whose body spans are collected)
     let mut wanted: HashMap<vir::ast::Path, (bool, bool)> = HashMap::new();
+    let mut atomic_blocks: HashMap<vir::ast::Path, Vec<rustc_span::Span>> = HashMap::new();
     for f in krate.functions.iter() {
-        if f.x.mode != vir::ast::Mode::Exec || f.x.body.is_none() || f.x.attrs.is_external_body {
+        if f.x.mode != vir::ast::Mode::Exec || f.x.attrs.is_external_body {
             continue;
         }
+        let Some(fbody) = &f.x.body else { continue };
         let no_unwind = matches!(f.x.unwind_spec, Some(UnwindSpec::NoUnwind));
         let atomic = f.x.attrs.atomic;
-        if no_unwind || atomic {
+        let blocks = std::cell::RefCell::new(vec![]);
+        let _ = vir::ast_visitor::map_expr_visitor(fbody, &|e: &vir::ast::Expr| {
+            if let vir::ast::ExprX::OpenInvariant(_, _, b, vir::ast::InvAtomicity::Atomic) = &e.x {
+                if let Some(sp) = crate::spans::from_raw_span(&b.span.raw_span) {
+                    blocks.borrow_mut().push(sp);
+                }
+            }
+            Ok(e.clone())
+        });
+        let blocks = blocks.into_inner();
+        if no_unwind || atomic || !blocks.is_empty() {
             wanted.insert(f.x.name.path.clone(), (no_unwind, atomic));
+        }
+        if !blocks.is_empty() {
+            atomic_blocks.insert(f.x.name.path.clone(), blocks);
         }
     }
     let verified_local = |did: DefId| -> bool {
@@ -115,6 +136,11 @@ pub(crate) fn check_drops<'tcx>(
         }
         let path = def_id_to_vir_path(did);
         let Some((no_unwind, atomic)) = wanted.get(&path).copied() else { continue };
+        let blocks: &[rustc_span::Span] = atomic_blocks.get(&path).map_or(&[], |v| &v[..]);
+        let in_atomic_block = |sp: rustc_span::Span| {
+            let sp = sp.source_callsite();
+            blocks.iter().any(|b| b.contains(sp) || b.source_callsite().contains(sp))
+        };
         let body = tcx.mir_drops_elaborated_and_const_checked(local);
         let body = body.borrow();
         let typing_env = body.typing_env(tcx);
@@ -152,6 +178,11 @@ pub(crate) fn check_drops<'tcx>(
                 }
                 _ => continue,
             }
+            let term_span = bb.terminator().source_info.span;
+            let block_only = !no_unwind && !atomic;
+            if block_only && !in_atomic_block(term_span) {
+                continue;
+            }
             for ty in dropped {
             let mut impls = vec![];
             drop_impls_of(tcx, typing_env, ty, &mut HashSet::new(), &mut impls);
@@ -166,7 +197,8 @@ pub(crate) fn check_drops<'tcx>(
                 let span = bb.terminator().source_info.span;
                 let what = match (no_unwind, atomic) {
                     (_, true) => "an atomic function",
-                    _ => "a `no_unwind` function",
+                    (true, _) => "a `no_unwind` function",
+                    _ => "an atomic invariant block",
                 };
                 findings.push(DropFinding {
                     span,
