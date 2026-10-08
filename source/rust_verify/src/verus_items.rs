@@ -1096,5 +1096,49 @@ pub(crate) fn get_rust_item_str(rust_path: Option<&str>) -> Option<RustItem> {
         return Some(RustItem::Any);
     }
 
+    if let Some(rust_path) = rust_path {
+        static NUM_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        // The associated constants (`u32::MAX`) are recognized by `get_rust_int_intrinsic`.
+        // The deprecated module constants `core::u32::MAX` / `std::u32::MAX` resolve to
+        // `core::legacy_int_modules::u32::MAX` (not associated items); they have the same
+        // value. Only that exact path is matched: a user crate named `u8` with a constant
+        // `MAX` must not be mistaken for it (upstream #3039).
+        let num_re = NUM_RE.get_or_init(|| {
+            regex::Regex::new(r"^core::legacy_int_modules::([A-Za-z0-9_]+)::(MIN|MAX|BITS)$").unwrap()
+        });
+        if let Some(captures) = num_re.captures(rust_path) {
+            let ty_name = captures.get(1).expect("invalid int intrinsic regex");
+            let const_name = captures.get(2).expect("invalid int intrinsic regex");
+            use RustIntType::*;
+            let ty = match ty_name.as_str() {
+                "u8" => Some(U8),
+                "u16" => Some(U16),
+                "u32" => Some(U32),
+                "u64" => Some(U64),
+                "u128" => Some(U128),
+                "usize" => Some(USize),
+
+                "i8" => Some(I8),
+                "i16" => Some(I16),
+                "i32" => Some(I32),
+                "i64" => Some(I64),
+                "i128" => Some(I128),
+                "isize" => Some(ISize),
+
+                _ => None,
+            };
+            return ty.map(|ty| {
+                let const_ = match const_name.as_str() {
+                    "MIN" => RustIntConst::Min,
+                    "MAX" => RustIntConst::Max,
+                    "BITS" => RustIntConst::Bits,
+
+                    _ => panic!("unexpected int const"),
+                };
+                RustItem::IntIntrinsic(RustIntIntrinsicItem(ty, const_))
+            });
+        }
+    }
+
     None
 }
