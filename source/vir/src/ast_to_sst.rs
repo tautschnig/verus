@@ -1538,11 +1538,14 @@ fn stm_call(
         // Supported closures cannot mutate their captures, so a FnMut call preserves
         // the callable during its call reborrow. This does not constrain the final
         // value of a longer-lived reference passed through a generic FnOnce argument.
+        // (This fork's mutable captures, 723b384be, model a capture's mutation as a havoc
+        // of the captured variable in the parent; the closure value itself, which is what
+        // this equates, does not change.)
         let f = &small_args[0];
         let current = sst_mut_ref_current(span, f);
         let future = sst_mut_ref_future(span, f);
         let equal = sst_equal(span, &current, &future);
-        stms.push(Spanned::new(span.clone(), StmX::Assume(equal)));
+        stms.push(Spanned::new(span.clone(), StmX::Assume(AssumeIntent::ClosureSpec, equal)));
     }
     Ok(stms_to_one_stm(span, stms))
 }

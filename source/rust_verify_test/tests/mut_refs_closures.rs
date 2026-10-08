@@ -4,21 +4,32 @@ mod common;
 use common::*;
 
 test_verify_one_file_with_options! {
-    // Soundness of closure handling currently relies on disallowing mutation of
-    // captured variables. Once that is supported, we will have to revisit the
-    // assumption added in ast_to_sst::stm_call.
+    // Upstream relies on disallowing mutation of captured variables for the assumption
+    // added in ast_to_sst::stm_call (a call through `&mut F` leaves the callable unchanged).
+    // This fork supports mutable captures (723b384be) by havocking the captured state;
+    // the closure value, which carries only its requires/ensures, still does not change,
+    // so the assumption holds. Two calls are not known to return the same value.
     #[test] fn_mut_call_ensures_disallows_mutating_moved_capture [] => verus_code! {
         use vstd::prelude::*;
+
+        fn call<G: FnMut() -> u64>(g: &mut G) -> (r: u64)
+            requires g.requires(()),
+            ensures call_ensures(*old(g), (), r), *final(g) == *old(g),
+        {
+            g()
+        }
 
         fn test() {
             let mut captured = 0u64;
             let mut f = move || -> u64 {
-                captured += 1;
+                captured = if captured < 100 { captured + 1 } else { 0 };
                 captured
             };
-            f();
+            let a = call(&mut f);
+            let b = call(&mut f);
+            assert(a == b); // FAILS
         }
-    } => Err(err) => assert_vir_error_msg(err, "Verus does not currently support closures capturing a mutable reference")
+    } => Err(err) => assert_one_fails(err)
 }
 
 test_verify_one_file_with_options! {

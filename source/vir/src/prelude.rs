@@ -1052,12 +1052,14 @@ pub(crate) fn prelude_nodes(name_ctxt: &NameCtxt, config: PreludeConfig) -> Vec<
         (declare-fun [default_ens] (/*[decoration] skipped */ [typ] [decoration] [typ] [Poly] [Poly] [Poly]) Bool)
 
         // Calling through `&mut F` is core's blanket `impl<A, F: ?Sized + FnMut<A>> FnMut<A>
-        // for &mut F`, which calls `F::call_mut` on the referent; the model does not track
-        // state changes of the callable (current == future). So the contract of the call
+        // for &mut F`, which calls `F::call_mut` on the referent. So the contract of the call
         // through the reference is F's contract on the current referent. Stated here for
         // every F, sized or not (vstd's axiom_fn_mut_call_* cover only sized F, because
         // call_requires takes F by value); for an F that is not FnMut both sides are
-        // uninterpreted, so the equation is harmless.
+        // uninterpreted, so the equation is harmless. Nothing is said about the reference's
+        // future: the reference may outlive the call and be used to replace the callable
+        // (upstream #3055). That the call itself leaves the callable unchanged is assumed at
+        // the call site (ast_to_sst::stm_call).
         (axiom (forall ((fd [decoration]) (ft [typ]) (ad [decoration]) (at [typ]) (f [Poly]) (args [Poly])) (!
             (= ([closure_req] ([type_id_mut_ref] fd ft) ad at f args)
                ([closure_req] ft ad at ([mut_ref_current] f) args))
@@ -1067,8 +1069,7 @@ pub(crate) fn prelude_nodes(name_ctxt: &NameCtxt, config: PreludeConfig) -> Vec<
         )))
         (axiom (forall ((fd [decoration]) (ft [typ]) (ad [decoration]) (at [typ]) (f [Poly]) (args [Poly]) (ret [Poly])) (!
             (= ([closure_ens] ([type_id_mut_ref] fd ft) ad at f args ret)
-               (and ([closure_ens] ft ad at ([mut_ref_current] f) args ret)
-                    (= ([mut_ref_current] f) ([mut_ref_future] f))))
+               ([closure_ens] ft ad at ([mut_ref_current] f) args ret))
             :pattern (([closure_ens] ([type_id_mut_ref] fd ft) ad at f args ret))
             :qid prelude_closure_ens_mut_ref
             :skolemid skolem_prelude_closure_ens_mut_ref
