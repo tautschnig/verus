@@ -2554,6 +2554,103 @@ pub(crate) fn finish_function<'tcx>(
         }
     }
 
+    // `impl Drop for T { fn drop(&mut self) { .. } }` must be `opens_invariants none` and
+    // `no_unwind`, because `drop` runs implicitly where Verus assumes both. Unannotated
+    // Rust code does not carry the markers; supply them as the defaults. The body is
+    // still checked against them (a drop that opens an invariant or may unwind is
+    // rejected), so this changes only what the user must write, not what is verified.
+    let is_drop_impl = matches!(&kind, FunctionKind::TraitMethodImpl { trait_path, .. }
+            if Some(trait_path) == ctxt.tcx.lang_items().drop_trait()
+                .map(|d| ctxt.def_id_to_vir_path(d)).as_ref());
+    let (invariant_mask, unwind_spec) = if is_drop_impl && mode == Mode::Exec {
+        (
+            header.invariant_mask.or_else(|| {
+                Some(vir::ast::MaskSpec::InvariantOpens(
+                    ctxt.spans.to_air_span(sig.span),
+                    Arc::new(vec![]),
+                ))
+            }),
+            header.unwind_spec.or(Some(vir::ast::UnwindSpec::NoUnwind)),
+        )
+    } else {
+        (header.invariant_mask, header.unwind_spec)
+    };
+    // `--closure-param-requires`: unannotated code calls its closure parameters without a
+    // `requires`, which Verus cannot discharge (`call_requires(f, args)` is unknown). Give an
+    // exec function that has no `requires` the precondition `forall |a| call_requires(f, a)`
+    // for each parameter `f` whose type is a type parameter with an Fn/FnMut/FnOnce bound.
+    // It is a precondition, so every caller is checked against it; a closure argument whose
+    // own `requires` is `true` (every unannotated closure) meets it.
+    let header_require = if ctxt.cmd_line_args.closure_param_requires
+        && mode == Mode::Exec
+        && header.require.is_empty()
+        && matches!(kind, FunctionKind::Static)
+    {
+        let tcx = ctxt.tcx;
+        let fn_paths: Vec<vir::ast::Path> =
+            [tcx.lang_items().fn_trait(), tcx.lang_items().fn_mut_trait(), tcx.lang_items().fn_once_trait()]
+                .into_iter()
+                .flatten()
+                .map(|d| ctxt.def_id_to_vir_path(d))
+                .collect();
+        let span = ctxt.spans.to_air_span(sig.span);
+        let mut reqs: Vec<vir::ast::Expr> = Vec::new();
+        for (i, p) in params.iter().enumerate() {
+            let vir::ast::TypX::TypParam(tp) = &*vir::ast_util::undecorate_typ(&p.x.typ) else {
+                continue;
+            };
+            if !matches!(&*p.x.typ, vir::ast::TypX::TypParam(_)) {
+                continue; // `&F` etc.: not the closure value itself
+            }
+            let args_typ = typ_bounds.iter().find_map(|b| match &**b {
+                vir::ast::GenericBoundX::Trait(vir::ast::TraitId::Path(tr), targs)
+                    if fn_paths.contains(tr)
+                        && targs.len() == 2
+                        && matches!(&*targs[0], vir::ast::TypX::TypParam(x) if x == tp) =>
+                {
+                    Some(targs[1].clone())
+                }
+                _ => None,
+            });
+            let Some(args_typ) = args_typ else { continue };
+            let a = vir::ast_util::str_unique_var(
+                &format!("closure_args{i}"),
+                vir::ast::VarIdentDisambiguate::AirLocal,
+            );
+            let f_var = ctxt.spanned_typed_new_vir(&span, &p.x.typ, vir::ast::ExprX::Var(p.x.name.clone()));
+            let a_var = ctxt.spanned_typed_new_vir(&span, &args_typ, vir::ast::ExprX::Var(a.clone()));
+            // generated nodes: known ids, no source HIR
+            ctxt.erasure_info.borrow_mut().hir_vir_ids.push((None, f_var.span.id));
+            ctxt.erasure_info.borrow_mut().hir_vir_ids.push((None, a_var.span.id));
+            let call = ctxt.spanned_typed_new_vir(
+                &span,
+                &vir::ast_util::bool_typ(),
+                vir::ast::ExprX::Call {
+                    target: vir::ast::CallTarget::BuiltinSpecFun(
+                        vir::ast::BuiltinSpecFun::ClosureReq,
+                        Arc::new(vec![p.x.typ.clone(), args_typ.clone()]),
+                        Arc::new(vec![]),
+                    ),
+                    args: Arc::new(vec![f_var, a_var]),
+                    post_args: None,
+                    body: None,
+                },
+            );
+            let binders = Arc::new(vec![Arc::new(vir::ast::VarBinderX { name: a, a: args_typ })]);
+            reqs.push(ctxt.spanned_typed_new_vir(
+                &span,
+                &vir::ast_util::bool_typ(),
+                vir::ast::ExprX::Quant(
+                    vir::ast::Quant { quant: air::ast::Quant::Forall },
+                    binders,
+                    call,
+                ),
+            ));
+        }
+        if reqs.is_empty() { header.require.clone() } else { Arc::new(reqs) }
+    } else {
+        header.require.clone()
+    };
     let mut functionx = FunctionX {
         name,
         proxy,
@@ -2568,7 +2665,7 @@ pub(crate) fn finish_function<'tcx>(
         params,
         outer_ret,
         inner_ret,
-        require: if mode == Mode::Spec { Arc::new(recommend) } else { header.require },
+        require: if mode == Mode::Spec { Arc::new(recommend) } else { header_require },
         returns,
         ensure,
         decrease: header.decrease,

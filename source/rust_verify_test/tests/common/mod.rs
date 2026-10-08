@@ -319,6 +319,8 @@ pub fn run_verus(
             verus_args.push("2018".to_string());
         } else if *option == "--allow-explicit-panics" {
             verus_args.push("--allow-explicit-panics".to_string());
+        } else if *option == "--closure-param-requires" {
+            verus_args.push("--closure-param-requires".to_string());
         } else if *option == "--output-json" {
             verus_args.push("--output-json".to_string());
         } else if *option == "vstd" {

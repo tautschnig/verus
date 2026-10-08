@@ -248,3 +248,29 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_vir_error_msg(err, "return is not allowed in pure context")
 }
+
+test_verify_one_file_with_options! {
+    // `--closure-param-requires`: an unannotated exec function gets
+    // `forall |a| call_requires(f, a)` for each closure-typed parameter
+    #[test] test_closure_param_default_requires ["--closure-param-requires"] => verus_code! {
+        use vstd::prelude::*;
+        fn memo<T>(build: impl FnOnce() -> Option<T>) -> Option<T> {
+            build()
+        }
+        fn apply<F: Fn(u8) -> u8>(f: F, x: u8) -> u8 { f(x) }
+        fn pass_on<G: Fn(u8) -> u8>(g: G) -> u8 { apply(g, 1) }
+        fn use_it() -> u8 {
+            let r = memo(|| Some(3u8));
+            let s = pass_on(|x: u8| x / 2);
+            apply(|x: u8| x / 2, 7)
+        }
+        fn annotated<F: Fn(u8) -> u8>(f: F) -> u8
+            requires f.requires((1u8,)),
+        {
+            f(1)
+        }
+        fn bad_caller() -> u8 {
+            apply(|x: u8| -> (r: u8) requires x < 5 { x }, 7) // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
