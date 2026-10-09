@@ -148,17 +148,64 @@ fn elaborate_one_stm<D: Diagnostics + ?Sized>(
             if !ctx.global.check_compute {
                 return Ok(main);
             }
-            let (mut stms, skipped) =
-                compute_step_checks(ctx, fun_ssts, stm, exp, &interp_exp, &trace);
+            // Closed sequence operands of `=~=` in the assertion: their values as push chains,
+            // computed by the interpreter, so that the final check can relate them element by
+            // element (`subrange`, `add`, `seq![..]`). Each `operand == value` is itself checked.
+            let eval_chain = |o: &Exp| -> Option<Exp> {
+                let (v, _) = crate::interpreter::eval_expr_with_trace(
+                    ctx,
+                    o,
+                    None::<&air::messages::Reporter>,
+                    fun_ssts.clone(),
+                    ctx.global.rlimit,
+                    ctx.global.arch,
+                    ComputeMode::Z3,
+                    &mut ctx.global.interpreter_log.lock().unwrap(),
+                )
+                .ok()?;
+                if is_push_chain(&v) { Some(v) } else { None }
+            };
+            let mut seq_values: Vec<(Exp, Exp)> = vec![];
+            for o in closed_seq_operands(exp) {
+                // a closure inside the operand: its elements need --check-compute-all
+                if !ctx.global.check_compute_all && contains_lambda(&o) {
+                    continue;
+                }
+                if let Ok((v, _)) = crate::interpreter::eval_expr_with_trace(
+                    ctx,
+                    &o,
+                    None::<&air::messages::Reporter>,
+                    fun_ssts.clone(),
+                    ctx.global.rlimit,
+                    ctx.global.arch,
+                    ComputeMode::Z3,
+                    &mut ctx.global.interpreter_log.lock().unwrap(),
+                ) {
+                    if is_push_chain(&v) {
+                        seq_values.push((o, v));
+                    }
+                }
+            }
+            let (mut stms, skipped) = compute_step_checks(
+                ctx,
+                fun_ssts,
+                stm,
+                exp,
+                &interp_exp,
+                &trace,
+                &seq_values,
+                &eval_chain,
+            );
             if trace.unexpressible + skipped > 0 {
                 diagnostics.report(
                     &crate::messages::warning(
                         &exp.span,
                         format!(
-                            "--check-compute: {} of {} by (compute) step(s) not checked (closures, \
-                             bitwise operators, equations between functions, quantifiers \
-                             or closures without --check-compute-all, bound variables \
-                             without a trigger, or functions outside this query's context)",
+                            "--check-compute: {} of {} by (compute) step(s) not checked (bitwise \
+                             steps that are not closed after unfolding, equations between \
+                             functions, quantifiers or closures without --check-compute-all, \
+                             bound variables without a trigger, or functions outside this \
+                             query's context)",
                             trace.unexpressible + skipped,
                             trace.unexpressible + trace.steps.len() + 1
                         ),
@@ -486,6 +533,8 @@ fn compute_step_checks(
     exp: &Exp,
     result: &Exp,
     trace: &crate::interpreter::ComputeTrace,
+    seq_values: &[(Exp, Exp)],
+    eval_chain: &dyn Fn(&Exp) -> Option<Exp>,
 ) -> (Vec<Stm>, usize) {
     // `==` for values; extensional equality for vstd collections, whose interpreter results
     // (push chains) are equal to the call only extensionally
@@ -501,7 +550,7 @@ fn compute_step_checks(
     };
     let eq = |a: &Exp, b: &Exp| {
         let x = if is_collection(&a.typ) {
-            ExpX::BinaryOpr(crate::ast::BinaryOpr::ExtEq(true, a.typ.clone()), a.clone(), b.clone())
+            ExpX::BinaryOpr(crate::ast::BinaryOpr::ExtEq(false, a.typ.clone()), a.clone(), b.clone())
         } else {
             ExpX::Binary(crate::sst::BinaryOp::Eq, a.clone(), b.clone())
         };
@@ -576,12 +625,63 @@ fn compute_step_checks(
     };
     let mut out = vec![];
     let mut skipped = 0usize;
+    let mut bv_checked = 0usize;
+    let pending_lemmas: std::cell::RefCell<Vec<Exp>> = std::cell::RefCell::new(vec![]);
+    // A step with bitwise operators is checked in a bit-vector query (as `by (bit_vector)`):
+    // the function's body with the arguments substituted, `body[args] == result`, if that is a
+    // closed, call-free equation over fixed-width integers. (A bit-vector query has no function
+    // axioms, so the unfolding is done here, by substitution, and the children must already be
+    // evaluated away: no calls left.)
+    let call_free = |e: &Exp| {
+        let mut map = crate::sst_visitor::VisitorScopeMap::new();
+        crate::sst_visitor::exp_visitor_check(e, &mut map, &mut |e: &Exp, _| match &e.x {
+            ExpX::Call(..) | ExpX::Bind(..) => Err(()),
+            _ => Ok(()),
+        })
+        .is_ok()
+    };
+    let bv_goal = |funs: &[crate::ast::Fun], g: (&Exp, &Exp)| -> Option<Exp> {
+        let (call, res) = g;
+        let unfolded = match &call.x {
+            ExpX::Call(CallFun::Fun(_, _), typs, args) if funs.len() >= 1 => {
+                let f = funs.last().unwrap();
+                let fs = fun_ssts.get(f)?;
+                let body = &fs.x.axioms.spec_axioms.as_ref()?.body_exp;
+                let mut vs: HashMap<UniqueIdent, Exp> = HashMap::new();
+                for (p, a) in fs.x.pars.iter().zip(args.iter()) {
+                    vs.insert(p.x.name.clone(), a.clone());
+                }
+                let mut ts: HashMap<crate::ast::Ident, crate::ast::Typ> = HashMap::new();
+                for (p, t) in fs.x.typ_params.iter().zip(typs.iter()) {
+                    ts.insert(p.clone(), t.clone());
+                }
+                crate::sst_util::subst_exp(&ts, &vs, body)
+            }
+            _ if funs.is_empty() => call.clone(),
+            _ => return None,
+        };
+        let e = eq(&unfolded, res);
+        if crate::sst_util::free_vars_exp(&e).is_empty() && call_free(&e) {
+            Some(e)
+        } else {
+            None
+        }
+    };
     let mut add = |funs: &[crate::ast::Fun], facts: &[(Exp, Exp)], g: (&Exp, &Exp), what: String| {
-        if !known(g.0)
-            || !known(g.1)
-            || facts.iter().any(|(c, r)| !known(c) || !known(r))
-            || !funs.iter().all(|f| body_ok(f))
-        {
+        let bitwise = !known(g.0) || !known(g.1) || !funs.iter().all(|f| body_ok(f));
+        if bitwise {
+            if let Some(e) = bv_goal(funs, g) {
+                // the step is checked in a bit-vector query; on failure Verus reports the
+                // assertion's span
+                out.push(stm.new_x(StmX::AssertBitVector {
+                    requires: Arc::new(vec![]),
+                    ensures: Arc::new(vec![e]),
+                }));
+                bv_checked += 1;
+                return;
+            }
+        }
+        if bitwise || facts.iter().any(|(c, r)| !known(c) || !known(r)) {
             skipped += 1;
             return;
         }
@@ -677,6 +777,29 @@ fn compute_step_checks(
             );
             b.push(stm.new_x(StmX::Assume(ge)));
         }
+        for l in pending_lemmas.borrow_mut().drain(..) {
+            for (h, elem) in seq_len_hints(&l) {
+                if let Some(v) = elem {
+                    let t = SpannedTyped::new(
+                        &h.span,
+                        &Arc::new(crate::ast::TypX::Bool),
+                        ExpX::Binary(crate::sst::BinaryOp::Eq, h.clone(), v),
+                    );
+                    let m = error_with_label(
+                        &exp.span,
+                        "by (compute) step not confirmed by the SMT encoding (--check-compute)",
+                        format!("hint {}", t.x.to_user_string(&ctx.global)),
+                    );
+                    b.push(stm.new_x(StmX::Assert(None, Some(m), t)));
+                }
+            }
+            let m = error_with_label(
+                &exp.span,
+                "by (compute) step not confirmed by the SMT encoding (--check-compute)",
+                format!("sequence value {}", l.x.to_user_string(&ctx.global)),
+            );
+            b.push(stm.new_x(StmX::Assert(None, Some(m), l)));
+        }
         let msg = error_with_label(
             &exp.span,
             "by (compute) step not confirmed by the SMT encoding (--check-compute)",
@@ -724,6 +847,45 @@ fn compute_step_checks(
             capped += 1;
             continue;
         }
+        // Seq-valued sub-terms of the unfolded body over the (evaluated) arguments, such as
+        // `s.subrange(1, s.len())` for `s` a push chain: their values as push chains, asserted
+        // (checked) before the step, so that the step's children, recorded with evaluated
+        // arguments, match the body's terms
+        let mut lemmas = vec![];
+        if let (ExpX::Call(_, typs, args), Some(f)) = (&st.call.x, st.funs.last()) {
+            if let Some(body) = fun_ssts
+                .get(f)
+                .and_then(|fs| fs.x.axioms.spec_axioms.as_ref().map(|a| (fs, a.body_exp.clone())))
+            {
+                let (fs, body) = body;
+                let mut vs: HashMap<UniqueIdent, Exp> = HashMap::new();
+                for (p, a) in fs.x.pars.iter().zip(args.iter()) {
+                    vs.insert(p.x.name.clone(), a.clone());
+                }
+                let mut ts: HashMap<crate::ast::Ident, crate::ast::Typ> = HashMap::new();
+                for (p, t) in fs.x.typ_params.iter().zip(typs.iter()) {
+                    ts.insert(p.clone(), t.clone());
+                }
+                // the push-chain arguments' elements (`s.index(0)` in the body)
+                for a in args.iter() {
+                    if is_push_chain(a) {
+                        lemmas.push(eq(a, a));
+                    }
+                }
+                let ub = crate::sst_util::subst_exp(&ts, &vs, &body);
+                for t in seq_subterms(&ub) {
+                    if contains_lambda(&t) && !ctx.global.check_compute_all {
+                        continue;
+                    }
+                    if let Some(v) = eval_chain(&t) {
+                        if format!("{:?}", v.x) != format!("{:?}", t.x) {
+                            lemmas.push(eq(&t, &v));
+                        }
+                    }
+                }
+            }
+        }
+        *pending_lemmas.borrow_mut() = lemmas;
         add(
             &st.funs,
             &st.children,
@@ -735,10 +897,22 @@ fn compute_step_checks(
             ),
         );
     }
+    // the final check: the sequence operands' values are asserted first (checked lemmas,
+    // `operand =~= chain`), then the goal is asserted with the operands rewritten to their chains
+    let mut lemmas: Vec<Exp> = vec![];
+    let mut goal_exp = exp.clone();
+    for (o, v) in seq_values.iter() {
+        lemmas.push(eq(o, v));
+        let (o2, v2) = (o.clone(), v.clone());
+        goal_exp = crate::sst_visitor::map_exp_visitor(&goal_exp, &mut |x: &Exp| {
+            if format!("{:?}", x.x) == format!("{:?}", o2.x) { v2.clone() } else { x.clone() }
+        });
+    }
+    *pending_lemmas.borrow_mut() = lemmas;
     add(
         &[],
         &trace.top,
-        (exp, result),
+        (&goal_exp, result),
         format!(
             "{} == {}",
             exp.x.to_user_string(&ctx.global),
@@ -774,3 +948,104 @@ fn compute_step_checks(
     }
     (out, skipped + capped)
 }
+
+/// The closed `Seq` operands of `=~=` in `e` (no variables bound in `e` or free)
+fn closed_seq_operands(e: &Exp) -> Vec<Exp> {
+    let mut out = vec![];
+    let mut map = crate::sst_visitor::VisitorScopeMap::new();
+    let _ = crate::sst_visitor::exp_visitor_check(e, &mut map, &mut |x: &Exp, _map| {
+        if let ExpX::BinaryOpr(crate::ast::BinaryOpr::ExtEq(_, t), a, b) = &x.x {
+            if let crate::ast::TypX::Datatype(crate::ast::Dt::Path(p), _, _) =
+                &*crate::ast_util::undecorate_typ(t)
+            {
+                if p.krate == crate::ast::CrateId::Vstd
+                    && p.segments.iter().map(|s| s.as_str()).collect::<Vec<_>>() == ["seq", "Seq"]
+                {
+                    for o in [a, b] {
+                        if crate::sst_util::free_vars_exp(o).is_empty() && !is_value_chain(o) {
+                            out.push(o.clone());
+                        }
+                    }
+                }
+            }
+        }
+        Ok::<(), ()>(())
+    });
+    out
+}
+
+/// `Seq::empty().push(..)..push(..)`
+fn is_push_chain(e: &Exp) -> bool {
+    let mut cur = e.clone();
+    loop {
+        match &cur.x {
+            ExpX::Call(CallFun::Fun(f, _), _, args)
+                if f.path.segments.last().map(|s| s.as_str()) == Some("push") && args.len() == 2 =>
+            {
+                cur = args[0].clone();
+            }
+            ExpX::Call(CallFun::Fun(f, _), _, args)
+                if f.path.segments.last().map(|s| s.as_str()) == Some("empty") && args.is_empty() =>
+            {
+                return true;
+            }
+            _ => return false,
+        }
+    }
+}
+
+/// a push chain whose elements are constants
+fn is_value_chain(e: &Exp) -> bool {
+    let mut cur = e.clone();
+    loop {
+        match &cur.x {
+            ExpX::Call(CallFun::Fun(f, _), _, args)
+                if f.path.segments.last().map(|s| s.as_str()) == Some("push") && args.len() == 2 =>
+            {
+                if !matches!(&args[1].x, ExpX::Const(_)) {
+                    return false;
+                }
+                cur = args[0].clone();
+            }
+            ExpX::Call(CallFun::Fun(f, _), _, args)
+                if f.path.segments.last().map(|s| s.as_str()) == Some("empty") && args.is_empty() =>
+            {
+                return true;
+            }
+            _ => return false,
+        }
+    }
+}
+
+fn contains_lambda(e: &Exp) -> bool {
+    let mut map = crate::sst_visitor::VisitorScopeMap::new();
+    crate::sst_visitor::exp_visitor_check(e, &mut map, &mut |x: &Exp, _| match &x.x {
+        ExpX::Bind(b, _) if matches!(b.x, BndX::Lambda(..)) => Err(()),
+        _ => Ok(()),
+    })
+    .is_err()
+}
+
+/// Seq-valued `subrange`/`add`/`update`/`push` applications in `e` with no bound variables
+fn seq_subterms(e: &Exp) -> Vec<Exp> {
+    let mut out: Vec<Exp> = vec![];
+    let mut map = crate::sst_visitor::VisitorScopeMap::new();
+    let _ = crate::sst_visitor::exp_visitor_check(e, &mut map, &mut |x: &Exp, map| {
+        if let ExpX::Call(CallFun::Fun(f, _), _, _) = &x.x {
+            let last = f.path.segments.last().map(|s| s.as_str());
+            let is_seq = f.path.krate == crate::ast::CrateId::Vstd
+                && f.path.segments.len() >= 3
+                && f.path.segments[0].as_str() == "seq";
+            if is_seq
+                && matches!(last, Some("subrange" | "add" | "update"))
+                && crate::sst_util::free_vars_exp(x).keys().all(|v| !map.contains_key(v))
+                && !out.iter().any(|o| format!("{:?}", o.x) == format!("{:?}", x.x))
+            {
+                out.push(x.clone());
+            }
+        }
+        Ok::<(), ()>(())
+    });
+    out
+}
+

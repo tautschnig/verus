@@ -2262,7 +2262,13 @@ fn eval_expr_launch(
         }
         SimplificationResult::Complex(res) => match mode {
             ComputeMode::Z3 => {
-                let res = cleanup_exp(&res)?;
+                // with --check-compute, sequences in the result are push chains, which the step
+                // checks can relate element by element
+                // (falling back to the normal cleanup, and its errors, if that fails)
+                let res = match global.check_compute.then(|| cleanup_exp_for_check(&res)) {
+                    Some(Ok(r)) => r,
+                    _ => cleanup_exp(&res)?,
+                };
                 // Send partial result to Z3
                 if exp.definitely_eq(&res) {
                     ctx.warning(

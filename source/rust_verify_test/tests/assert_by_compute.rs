@@ -1172,3 +1172,19 @@ test_verify_one_file_with_options! {
     } => Err(err) => assert_one_fails(err)
 }
 
+test_verify_one_file_with_options! {
+    // `--check-compute` on bitwise steps (bit-vector queries on the unfolded body) and on
+    // sequence operands built with `subrange`/`add` (their values are checked lemmas)
+    #[test] check_compute_bitwise_and_seq_ops ["--check-compute"] => verus_code! {
+        use vstd::prelude::*;
+        spec fn shifter(x: u64, amt: u64) -> u64 { x << amt }
+        spec fn mask(x: u32) -> u32 { x & 0xff }
+        proof fn t() {
+            assert(shifter(1, 10) == 1024) by (compute_only);
+            assert(mask(0x1234) == 0x34) by (compute_only);
+            assert(!(seq![3int, -1int, 6int].subrange(0int, 3int) =~= seq![0int].add(seq![-2int, 6int]))) by (compute);
+            assert(seq![1int, 2, 3].subrange(1, 3) =~= seq![2int, 3]) by (compute);
+        }
+    } => Ok(())
+}
+
