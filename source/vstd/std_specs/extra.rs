@@ -65,7 +65,39 @@ pub open spec fn sorted_by_cmp<T: Ord>(s: Seq<T>) -> bool {
         OrdSpec::cmp_spec(&s[i], &s[j]) != Ordering::Greater
 }
 
+/// `compare` is a total order on the elements of `s` (antisymmetric, transitive, and
+/// deterministic), which std's sorts require: since Rust 1.81 they may panic otherwise
+/// ("user-provided comparison function does not correctly implement a total order").
+pub open spec fn cmp_fn_total_on<T, F: FnMut(&T, &T) -> Ordering>(compare: F, s: Seq<T>) -> bool {
+    &&& forall |i: int, j: int, o1: Ordering, o2: Ordering|
+        #![trigger call_ensures(compare, (&s[i], &s[j]), o1), call_ensures(compare, (&s[j], &s[i]), o2)]
+        0 <= i < s.len() && 0 <= j < s.len()
+            && call_ensures(compare, (&s[i], &s[j]), o1) && call_ensures(compare, (&s[j], &s[i]), o2)
+            ==> o2 == match o1 { Ordering::Less => Ordering::Greater, Ordering::Equal => Ordering::Equal, Ordering::Greater => Ordering::Less }
+    &&& forall |i: int, j: int, o1: Ordering, o2: Ordering|
+        #![trigger call_ensures(compare, (&s[i], &s[j]), o1), call_ensures(compare, (&s[i], &s[j]), o2)]
+        0 <= i < s.len() && 0 <= j < s.len()
+            && call_ensures(compare, (&s[i], &s[j]), o1) && call_ensures(compare, (&s[i], &s[j]), o2)
+            ==> o1 == o2
+    &&& forall |i: int, j: int, k: int, o1: Ordering, o2: Ordering, o3: Ordering|
+        #![trigger call_ensures(compare, (&s[i], &s[j]), o1), call_ensures(compare, (&s[j], &s[k]), o2), call_ensures(compare, (&s[i], &s[k]), o3)]
+        0 <= i < s.len() && 0 <= j < s.len() && 0 <= k < s.len()
+            && call_ensures(compare, (&s[i], &s[j]), o1) && call_ensures(compare, (&s[j], &s[k]), o2)
+            && call_ensures(compare, (&s[i], &s[k]), o3)
+            && o1 != Ordering::Greater && o2 != Ordering::Greater
+            ==> o3 != Ordering::Greater && (o1 == Ordering::Less || o2 == Ordering::Less ==> o3 == Ordering::Less)
+}
+
+/// `f` returns the same key for the same element (std's `sort_by_key` calls it more than once)
+pub open spec fn key_fn_deterministic_on<T, K, F: FnMut(&T) -> K>(f: F, s: Seq<T>) -> bool {
+    forall |i: int, k1: K, k2: K| #![trigger call_ensures(f, (&s[i],), k1), call_ensures(f, (&s[i],), k2)]
+        0 <= i < s.len() && call_ensures(f, (&s[i],), k1) && call_ensures(f, (&s[i],), k2) ==> k1 == k2
+}
+
 pub assume_specification<T: Ord>[ <[T]>::sort ](s: &mut [T])
+    requires
+        // std may panic if `Ord` is not a total order (Rust >= 1.81)
+        crate::laws_cmp::obeys_cmp::<T>(),
     ensures
         final(s)@.len() == old(s)@.len(),
         final(s)@.to_multiset() == old(s)@.to_multiset(),
@@ -73,6 +105,9 @@ pub assume_specification<T: Ord>[ <[T]>::sort ](s: &mut [T])
 ;
 
 pub assume_specification<T: Ord>[ <[T]>::sort_unstable ](s: &mut [T])
+    requires
+        // std may panic if `Ord` is not a total order (Rust >= 1.81)
+        crate::laws_cmp::obeys_cmp::<T>(),
     ensures
         final(s)@.len() == old(s)@.len(),
         final(s)@.to_multiset() == old(s)@.to_multiset(),
@@ -84,6 +119,8 @@ pub assume_specification<T, F: FnMut(&T, &T) -> Ordering>[ <[T]>::sort_by::<F> ]
     requires
         forall |i: int, j: int| 0 <= i < old(s)@.len() && 0 <= j < old(s)@.len() ==>
             call_requires(compare, (#[trigger] &old(s)@[i], #[trigger] &old(s)@[j])),
+        // std may panic if `compare` is not a total order (Rust >= 1.81)
+        cmp_fn_total_on(compare, old(s)@),
     ensures
         final(s)@.len() == old(s)@.len(),
         final(s)@.to_multiset() == old(s)@.to_multiset(),
@@ -93,6 +130,8 @@ pub assume_specification<T, F: FnMut(&T, &T) -> Ordering>[ <[T]>::sort_unstable_
     requires
         forall |i: int, j: int| 0 <= i < old(s)@.len() && 0 <= j < old(s)@.len() ==>
             call_requires(compare, (#[trigger] &old(s)@[i], #[trigger] &old(s)@[j])),
+        // std may panic if `compare` is not a total order (Rust >= 1.81)
+        cmp_fn_total_on(compare, old(s)@),
     ensures
         final(s)@.len() == old(s)@.len(),
         final(s)@.to_multiset() == old(s)@.to_multiset(),
@@ -101,6 +140,9 @@ pub assume_specification<T, F: FnMut(&T, &T) -> Ordering>[ <[T]>::sort_unstable_
 pub assume_specification<T, K: Ord, F: FnMut(&T) -> K>[ <[T]>::sort_by_key::<K, F> ](s: &mut [T], f: F)
     requires
         forall |i: int| 0 <= i < old(s)@.len() ==> call_requires(f, (#[trigger] &old(s)@[i],)),
+        // std may panic if the keys' `Ord` is not a total order, or if `f` is not deterministic
+        crate::laws_cmp::obeys_cmp::<K>(),
+        key_fn_deterministic_on(f, old(s)@),
     ensures
         final(s)@.len() == old(s)@.len(),
         final(s)@.to_multiset() == old(s)@.to_multiset(),
@@ -109,6 +151,9 @@ pub assume_specification<T, K: Ord, F: FnMut(&T) -> K>[ <[T]>::sort_by_key::<K, 
 pub assume_specification<T, K: Ord, F: FnMut(&T) -> K>[ <[T]>::sort_unstable_by_key::<K, F> ](s: &mut [T], f: F)
     requires
         forall |i: int| 0 <= i < old(s)@.len() ==> call_requires(f, (#[trigger] &old(s)@[i],)),
+        // std may panic if the keys' `Ord` is not a total order, or if `f` is not deterministic
+        crate::laws_cmp::obeys_cmp::<K>(),
+        key_fn_deterministic_on(f, old(s)@),
     ensures
         final(s)@.len() == old(s)@.len(),
         final(s)@.to_multiset() == old(s)@.to_multiset(),

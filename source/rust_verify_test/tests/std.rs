@@ -3152,7 +3152,7 @@ test_verify_one_file! {
             v.sort();
         }
         fn by_key(v: &mut Vec<(u8, u8)>) ensures final(v)@.len() == old(v)@.len() {
-            v.sort_by_key(|p: &(u8, u8)| p.0);
+            v.sort_by_key(|p: &(u8, u8)| -> (k: u8) ensures k == p.0 { p.0 });
         }
         fn search(v: &Vec<u8>, x: u8) {
             match v.binary_search(&x) {
@@ -3188,10 +3188,27 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
+    // std's sorts may panic if the order is not total (Rust >= 1.81): the comparator must be
+    // a total order on the elements, the keys' `Ord` lawful and the key function deterministic
+    #[test] sort_requires_total_order verus_code! {
+        use vstd::prelude::*;
+        use vstd::std_specs::cmp::OrdSpec;
+        use std::cmp::Ordering;
+        fn ok(v: &mut Vec<u8>) {
+            v.sort_by(|a: &u8, b: &u8| -> (o: Ordering) ensures o == (*a).cmp_spec(b) { a.cmp(b) });
+        }
+        fn unannotated(v: &mut Vec<u8>) {
+            v.sort_by(|a: &u8, b: &u8| a.cmp(b)); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
     #[test] sort_by_not_sorted verus_code! {
         use vstd::prelude::*;
+        use vstd::std_specs::cmp::OrdSpec;
         fn test(v: &mut Vec<u8>) requires old(v)@.len() == 2 {
-            v.sort_by(|a: &u8, b: &u8| b.cmp(a));
+            v.sort_by(|a: &u8, b: &u8| -> (o: std::cmp::Ordering) ensures o == (*b).cmp_spec(a) { b.cmp(a) });
             assert(v@[0] <= v@[1]); // FAILS
         }
     } => Err(err) => assert_one_fails(err)
