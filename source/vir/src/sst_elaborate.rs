@@ -487,7 +487,6 @@ fn compute_step_checks(
     result: &Exp,
     trace: &crate::interpreter::ComputeTrace,
 ) -> (Vec<Stm>, usize) {
-    use crate::sst::AssumeIntent;
     // `==` for values; extensional equality for vstd collections, whose interpreter results
     // (push chains) are equal to the call only extensionally
     let is_collection = |t: &crate::ast::Typ| match &*crate::ast_util::undecorate_typ(t) {
@@ -638,7 +637,7 @@ fn compute_step_checks(
             }
         }
         for f in facts {
-            b.push(stm.new_x(StmX::Assume(AssumeIntent::CheckedCondition, f)));
+            b.push(stm.new_x(StmX::Assume(f)));
         }
         // Trigger hints: `x.len() >= 0` for each `Seq` operand of an
         // extensional equality (`!(seq![1] =~= seq![])` needs the `len` terms for
@@ -676,7 +675,7 @@ fn compute_step_checks(
                     zero,
                 ),
             );
-            b.push(stm.new_x(StmX::Assume(AssumeIntent::CheckedCondition, ge)));
+            b.push(stm.new_x(StmX::Assume(ge)));
         }
         let msg = error_with_label(
             &exp.span,
