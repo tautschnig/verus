@@ -109,8 +109,33 @@ impl<T> PtrSet<T> {
     }
 }
 
+/// One call the interpreter evaluated (`--check-compute`): `call` (the call as written, with
+/// the evaluated arguments) equals `result`, given the definitions of `funs` and the facts in
+/// `children` (the calls made while evaluating the body, each itself a step).
+#[derive(Clone)]
+pub struct ComputeStep {
+    pub call: Exp,
+    pub result: Exp,
+    pub funs: Vec<Fun>,
+    pub children: Vec<(Exp, Exp)>,
+}
+
+/// The steps of one `by (compute)` evaluation: the steps, the facts the final result rests on
+/// directly (`top`), and how many steps could not be expressed in SST (closures)
+#[derive(Clone, Default)]
+pub struct ComputeTrace {
+    pub steps: Vec<ComputeStep>,
+    pub top: Vec<(Exp, Exp)>,
+    pub unexpressible: usize,
+}
+
 /// Mutable interpreter state
 struct State {
+    /// `--check-compute`: record the calls evaluated
+    record_steps: bool,
+    steps: Vec<ComputeStep>,
+    open_steps: Vec<usize>,
+    top_facts: Vec<(Exp, Exp)>,
     /// Depth of our current recursion; used for formatting log output and recursion control
     depth: usize,
     /// Symbol table mapping bound variables to their values
@@ -182,6 +207,14 @@ impl State {
             self.cache.get(f)?.get(&(typs, args).into()).cloned()
         } else {
             None
+        }
+    }
+
+    /// A call fact used by the innermost open step (or by the final result)
+    fn add_fact(&mut self, call: Exp, result: Exp) {
+        match self.open_steps.last() {
+            Some(&p) => self.steps[p].children.push((call, result)),
+            None => self.top_facts.push((call, result)),
         }
     }
 
@@ -885,6 +918,17 @@ pub(crate) fn is_seq_to_sst_fun(fun: &Fun) -> bool {
 /// macro definition in vstd's seq.rs.
 // TODO: More robust way of pointing to vstd's sequence functions
 fn seq_to_sst(span: &Span, inner_typ: Typ, s: &Vector<Exp>) -> Result<Exp, VirErr> {
+    seq_to_sst_with(span, inner_typ, s, false)
+}
+
+/// `push_chain`: always `Seq::empty().push(..)..`, never a view of an array literal
+/// (`array_view` is only in the context of queries that use arrays)
+fn seq_to_sst_with(
+    span: &Span,
+    inner_typ: Typ,
+    s: &Vector<Exp>,
+    push_chain: bool,
+) -> Result<Exp, VirErr> {
     let seq_type_path =
         Arc::new(PathX { krate: CrateId::Vstd, segments: strs_to_idents(vec!["seq", "Seq"]) });
     let seq_typ = Arc::new(TypX::Datatype(
@@ -893,7 +937,7 @@ fn seq_to_sst(span: &Span, inner_typ: Typ, s: &Vector<Exp>) -> Result<Exp, VirEr
         Arc::new(vec![]),
     ));
     let new_seq_exp = |e: ExpX| SpannedTyped::new(span, &seq_typ, e);
-    if s.len() <= 1 {
+    if s.len() <= 1 || push_chain {
         let typs = Arc::new(vec![inner_typ.clone()]);
         let path_empty = Arc::new(PathX {
             krate: CrateId::Vstd,
@@ -1719,6 +1763,7 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
             }
         }
         Call(CallFun::Fun(fun, resolved_method), typs, args) => {
+            let (orig_fun, orig_typs) = (fun, typs);
             let (fun, typs) = resolve_call(fun, resolved_method, typs);
             if state.perf {
                 // Record the call for later performance analysis
@@ -1746,12 +1791,40 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
                         if func.x.axioms.spec_axioms.is_some() && func.x.kind.inline_okay() =>
                     {
                         let memoize = func.x.attrs.memoize;
+                        let call_exp = SpannedTyped::new(
+                            &exp.span,
+                            &exp.typ,
+                            Call(
+                                CallFun::Fun(orig_fun.clone(), resolved_method.clone()),
+                                orig_typs.clone(),
+                                new_args.clone(),
+                            ),
+                        );
                         match state.lookup_call(&fun, &typs, &new_args, memoize) {
                             Some(prev_result) => {
                                 state.cache_hits += 1;
+                                if state.record_steps {
+                                    state.add_fact(call_exp, prev_result.clone());
+                                }
                                 Ok(prev_result)
                             }
                             None => {
+                                let step_idx = if state.record_steps {
+                                    state.steps.push(ComputeStep {
+                                        call: call_exp.clone(),
+                                        result: call_exp.clone(),
+                                        funs: if orig_fun == fun {
+                                            vec![fun.clone()]
+                                        } else {
+                                            vec![orig_fun.clone(), fun.clone()]
+                                        },
+                                        children: vec![],
+                                    });
+                                    state.open_steps.push(state.steps.len() - 1);
+                                    Some(state.steps.len() - 1)
+                                } else {
+                                    None
+                                };
                                 let typ_params = &func.x.typ_params;
                                 let pars = &func.x.pars;
                                 let body = &func.x.axioms.spec_axioms.as_ref().unwrap().body_exp;
@@ -1786,6 +1859,13 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
                                 let result = eval_expr_internal(ctx, state, &body);
                                 state.env.pop_scope();
                                 state.type_env.pop_scope();
+                                if let Some(i) = step_idx {
+                                    state.open_steps.pop();
+                                    if let Ok(r) = &result {
+                                        state.steps[i].result = r.clone();
+                                        state.add_fact(call_exp, r.clone());
+                                    }
+                                }
                                 state.insert_call(fun, &typs, &new_args, &result.clone()?, memoize);
                                 result
                             }
@@ -1968,6 +2048,32 @@ fn cleanup_array(span: &Span, typ: Typ, v: &Vector<Exp>) -> Result<Exp, VirErr> 
     array_to_sst(span, typ.clone(), v)
 }
 
+/// `cleanup_exp` for `--check-compute` steps: sequences as push chains
+fn cleanup_exp_for_check(exp: &Exp) -> Result<Exp, VirErr> {
+    crate::sst_visitor::map_exp_visitor_result(exp, &mut |e| match &e.x {
+        ExpX::Interp(InterpExp::Seq(v)) => match &*e.typ {
+            TypX::Datatype(_, typs, _) => {
+                let cleaned: Result<Vector<Exp>, VirErr> =
+                    v.iter().map(|x| cleanup_exp_for_check(x)).collect();
+                seq_to_sst_with(&e.span, typs[0].clone(), &cleaned?, true)
+            }
+            _ => Err(error(&e.span, "Internal error: sequence without a sequence type")),
+        },
+        ExpX::Interp(InterpExp::FreeVar(v)) => {
+            Ok(SpannedTyped::new(&e.span, &e.typ, ExpX::Var(v.clone())))
+        }
+        ExpX::Interp(InterpExp::Array(v)) => {
+            let cleaned: Result<Vector<Exp>, VirErr> =
+                v.iter().map(|x| cleanup_exp_for_check(x)).collect();
+            cleanup_array(&e.span, e.typ.clone(), &cleaned?)
+        }
+        ExpX::Interp(InterpExp::Closure(..)) => {
+            Err(error(&e.span, "closure literal in a by (compute) step"))
+        }
+        _ => Ok(e.clone()),
+    })
+}
+
 /// Restore the free variables we hid during interpretation
 /// and any sequence expressions we partially simplified during interpretation
 fn cleanup_exp(exp: &Exp) -> Result<Exp, VirErr> {
@@ -2053,7 +2159,7 @@ fn eval_expr_launch(
     mode: ComputeMode,
     log: &mut Option<File>,
     quiet: bool,
-) -> Result<(Exp, Vec<Message>), VirErr> {
+) -> Result<(Exp, Vec<Message>, ComputeTrace), VirErr> {
     let env = ScopeMap::new();
     let type_env = ScopeMap::new();
     let cache = HashMap::new();
@@ -2061,6 +2167,10 @@ fn eval_expr_launch(
     let msgs = Vec::new();
     let now = Instant::now();
     let mut state = State {
+        record_steps: global.check_compute,
+        steps: vec![],
+        open_steps: vec![],
+        top_facts: vec![],
         depth: 0,
         env,
         type_env,
@@ -2095,17 +2205,43 @@ fn eval_expr_launch(
     };
     let result = eval_expr_top(&ctx, &mut state, &exp)?;
     display_perf_stats(&state);
+    let trace = {
+        let mut t = ComputeTrace::default();
+        let clean = |(a, b): &(Exp, Exp)| {
+            Some((cleanup_exp_for_check(a).ok()?, cleanup_exp_for_check(b).ok()?))
+        };
+        for st in state.steps.iter() {
+            let main = clean(&(st.call.clone(), st.result.clone()));
+            let children: Option<Vec<(Exp, Exp)>> = st.children.iter().map(clean).collect();
+            match (main, children) {
+                (Some((call, result)), Some(children)) => t.steps.push(ComputeStep {
+                    call,
+                    result,
+                    funs: st.funs.clone(),
+                    children,
+                }),
+                _ => t.unexpressible += 1,
+            }
+        }
+        for f in state.top_facts.iter() {
+            match clean(f) {
+                Some(f) => t.top.push(f),
+                None => t.unexpressible += 1,
+            }
+        }
+        t
+    };
     if let Some(state_log) = state.log {
         log.replace(state_log);
     }
 
     match result {
         SimplificationResult::True => {
-            return Ok((crate::sst_util::sst_bool(&exp.span, true), state.msgs));
+            return Ok((crate::sst_util::sst_bool(&exp.span, true), state.msgs, trace));
         }
         SimplificationResult::False(None) => {
             if quiet {
-                return Ok((crate::sst_util::sst_bool(&exp.span, false), state.msgs));
+                return Ok((crate::sst_util::sst_bool(&exp.span, false), state.msgs, trace));
             } else {
                 return Err(error(&exp.span, "expression simplifies to false"));
             }
@@ -2113,7 +2249,7 @@ fn eval_expr_launch(
         SimplificationResult::False(Some(small_exp)) => {
             let small_exp = cleanup_exp(&small_exp)?;
             if quiet {
-                return Ok((crate::sst_util::sst_bool(&exp.span, false), state.msgs));
+                return Ok((crate::sst_util::sst_bool(&exp.span, false), state.msgs, trace));
             } else {
                 return Err(error(
                     &exp.span,
@@ -2141,7 +2277,7 @@ fn eval_expr_launch(
                         |msg| state.msgs.push(msg),
                     );
                 }
-                Ok((res, state.msgs))
+                Ok((res, state.msgs, trace))
             }
             ComputeMode::ComputeOnly => {
                 // Proof must succeed purely through computation
@@ -2170,6 +2306,23 @@ pub fn eval_expr<D>(
     mode: ComputeMode,
     log: &mut Option<File>,
 ) -> Result<Exp, VirErr>
+where
+    D: air::messages::Diagnostics + ?Sized,
+{
+    eval_expr_with_trace(ctx, exp, diagnostics, fun_ssts, rlimit, arch, mode, log).map(|(e, _)| e)
+}
+
+/// `eval_expr`, also returning the calls evaluated (empty unless `--check-compute`)
+pub fn eval_expr_with_trace<D>(
+    ctx: &crate::context::Ctx,
+    exp: &Exp,
+    diagnostics: Option<&D>,
+    fun_ssts: SstMap,
+    rlimit: f32,
+    arch: ArchWordBits,
+    mode: ComputeMode,
+    log: &mut Option<File>,
+) -> Result<(Exp, ComputeTrace), VirErr>
 where
     D: air::messages::Diagnostics + ?Sized,
 {
@@ -2205,9 +2358,9 @@ where
         handler.join().unwrap()
     };
     *log = taken_log;
-    let (e, msgs) = res?;
+    let (e, msgs, trace) = res?;
     if let Some(diagnostics) = diagnostics {
         msgs.iter().for_each(|m| diagnostics.report(&m.clone().to_any()));
     }
-    Ok(e)
+    Ok((e, trace))
 }

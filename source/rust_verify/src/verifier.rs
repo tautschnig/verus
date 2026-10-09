@@ -2054,6 +2054,8 @@ impl Verifier {
             self.args.no_bv_simplify,
             self.args.report_long_running,
         )?;
+        global_ctx.check_compute = self.args.check_compute;
+        global_ctx.check_compute_all = self.args.check_compute_all;
         vir::recursive_types::check_traits(&krate, &global_ctx)?;
         let krate = vir::ast_simplify::simplify_krate(&mut global_ctx, &krate)?;
 

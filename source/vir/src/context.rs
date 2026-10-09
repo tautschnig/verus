@@ -79,6 +79,10 @@ pub struct GlobalCtx {
     pub axiom_usage_info: bool,
     pub no_bv_simplify: bool,
     pub report_long_running: bool,
+    /// `--check-compute`: check every call `by (compute)` evaluates against the SMT encoding
+    pub check_compute: bool,
+    /// `--check-compute-all`: also steps with quantifiers or `choose`
+    pub check_compute_all: bool,
 }
 
 // Context for verifying one function
@@ -740,6 +744,8 @@ impl GlobalCtx {
             axiom_usage_info,
             no_bv_simplify,
             report_long_running,
+            check_compute: false,
+            check_compute_all: false,
         })
     }
 
@@ -772,6 +778,8 @@ impl GlobalCtx {
             axiom_usage_info: self.axiom_usage_info,
             no_bv_simplify: self.no_bv_simplify,
             report_long_running: self.report_long_running,
+            check_compute: self.check_compute,
+            check_compute_all: self.check_compute_all,
         }
     }
 

@@ -1146,3 +1146,29 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_vir_error_msg(err, "failed to simplify down to true")
 }
+
+test_verify_one_file_with_options! {
+    // `--check-compute`: every call the interpreter evaluates, and the final result, is
+    // checked against the SMT encoding of the same definitions; recursion (memoized or not),
+    // sequences (compared extensionally), nested calls. Verdicts are unchanged.
+    #[test] check_compute_confirms_steps ["--check-compute"] => verus_code! {
+        use vstd::prelude::*;
+        spec fn fib(n: nat) -> nat decreases n { if n < 2 { n } else { fib((n - 1) as nat) + fib((n - 2) as nat) } }
+        #[verifier::memoize]
+        spec fn fibm(n: nat) -> nat decreases n { if n < 2 { n } else { fibm((n - 1) as nat) + fibm((n - 2) as nat) } }
+        spec fn sum(n: nat) -> int decreases n { if n == 0 { 0 } else { n + sum((n - 1) as nat) } }
+        spec fn sq(x: int) -> int { x * x }
+        spec fn mk(n: nat) -> Seq<int> decreases n { if n == 0 { seq![] } else { mk((n - 1) as nat).push(n as int) } }
+        proof fn t() {
+            assert(fib(15) == 610) by (compute_only);
+            assert(fibm(60) == 1548008755920) by (compute_only);
+            assert(sum(100) == 5050) by (compute);
+            assert(sq(sq(3)) + sq(3) == 90) by (compute_only);
+            assert(mk(5).len() == 5 && mk(5)[2] == 3) by (compute_only);
+        }
+        proof fn u() {
+            assert(sum(10) == 56) by (compute); // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+

@@ -90,6 +90,8 @@ pub struct ArgsX {
     pub no_erasure_check: bool,
     pub no_auto_recommends_check: bool,
     pub no_cheating: bool,
+    pub check_compute: bool,
+    pub check_compute_all: bool,
     pub time: bool,
     pub time_expanded: bool,
     pub output_json: bool,
@@ -139,6 +141,8 @@ impl ArgsX {
             no_erasure_check: Default::default(),
             no_auto_recommends_check: Default::default(),
             no_cheating: Default::default(),
+            check_compute: Default::default(),
+            check_compute_all: Default::default(),
             time: Default::default(),
             time_expanded: Default::default(),
             output_json: Default::default(),
@@ -317,6 +321,8 @@ pub fn parse_args_with_imports(
     const OPT_NO_ERASURE_CHECK: &str = "no-erasure-check";
     const OPT_NO_AUTO_RECOMMENDS_CHECK: &str = "no-auto-recommends-check";
     const OPT_NO_CHEATING: &str = "no-cheating";
+    const OPT_CHECK_COMPUTE: &str = "check-compute";
+    const OPT_CHECK_COMPUTE_ALL: &str = "check-compute-all";
     const OPT_TIME: &str = "time";
     const OPT_TIME_EXPANDED: &str = "time-expanded";
     const OPT_OUTPUT_JSON: &str = "output-json";
@@ -490,6 +496,18 @@ pub fn parse_args_with_imports(
         "",
         OPT_NO_CHEATING,
         "Do not allow assume, admit, verifier::external_body, and assume_specification",
+    );
+    opts.optflag(
+        "",
+        OPT_CHECK_COMPUTE,
+        "Check every call that `by (compute)` evaluates, and its final result, against the \
+         SMT encoding of the same definitions (one isolated query per step)",
+    );
+    opts.optflag(
+        "",
+        OPT_CHECK_COMPUTE_ALL,
+        "--check-compute, also for steps with quantifiers, `choose` or closures (the solver \
+         may fail to confirm correct steps of this kind)",
     );
     opts.optflag("", OPT_TIME, "Measure and report time taken");
     opts.optflag("", OPT_TIME_EXPANDED, "Measure and report time taken with module breakdown");
@@ -698,6 +716,9 @@ pub fn parse_args_with_imports(
         no_erasure_check: matches.opt_present(OPT_NO_ERASURE_CHECK),
         no_auto_recommends_check: matches.opt_present(OPT_NO_AUTO_RECOMMENDS_CHECK),
         no_cheating: matches.opt_present(OPT_NO_CHEATING),
+        check_compute: matches.opt_present(OPT_CHECK_COMPUTE)
+            || matches.opt_present(OPT_CHECK_COMPUTE_ALL),
+        check_compute_all: matches.opt_present(OPT_CHECK_COMPUTE_ALL),
         time: matches.opt_present(OPT_TIME) || matches.opt_present(OPT_TIME_EXPANDED),
         time_expanded: matches.opt_present(OPT_TIME_EXPANDED),
         output_json: matches.opt_present(OPT_OUTPUT_JSON),

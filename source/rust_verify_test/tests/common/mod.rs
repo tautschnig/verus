@@ -314,6 +314,10 @@ pub fn run_verus(
             verus_args.push("--no-report-long-running".to_string());
         } else if *option == "--no-cheating" {
             verus_args.push("--no-cheating".to_string());
+        } else if *option == "--check-compute" {
+            verus_args.push("--check-compute".to_string());
+        } else if *option == "--check-compute-all" {
+            verus_args.push("--check-compute-all".to_string());
         } else if *option == "--output-json" {
             verus_args.push("--output-json".to_string());
         } else if *option == "vstd" {

@@ -1661,6 +1661,8 @@ pub fn simplify_krate(ctx: &mut GlobalCtx, krate: &Krate) -> Result<Krate, VirEr
         path_as_rust_names: path_as_rust_names.clone(),
         arch: arch.clone(),
     });
+    let check_compute = ctx.check_compute;
+    let check_compute_all = ctx.check_compute_all;
     *ctx = crate::context::GlobalCtx::new(
         &krate,
         ctx.crate_name.clone(),
@@ -1675,7 +1677,12 @@ pub fn simplify_krate(ctx: &mut GlobalCtx, krate: &Krate) -> Result<Krate, VirEr
         ctx.axiom_usage_info,
         ctx.no_bv_simplify,
         ctx.report_long_running,
-    )?;
+    )
+    .map(|mut g| {
+        g.check_compute = check_compute;
+        g.check_compute_all = check_compute_all;
+        g
+    })?;
     Ok(krate)
 }
 
