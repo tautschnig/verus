@@ -4009,3 +4009,32 @@ test_verify_one_file_with_options! {
         }
     } => Err(err) => assert_vir_error_msg(err, "whose `Drop` impl is not verified, in an atomic invariant block")
 }
+
+test_verify_one_file! {
+    // `str::repeat`: the result is the string repeated, so its length is the product; the
+    // product must fit in usize (std panics otherwise)
+    #[test] str_repeat_spec verus_code! {
+        use vstd::prelude::*;
+        use vstd::string::*;
+        fn ok(depth: usize) -> (r: String)
+            requires depth <= 100,
+            ensures r@.len() == depth,
+        {
+            let tab = "\t";
+            proof {
+                reveal_strlit("\t");
+                assert(tab@.len() == 1);
+                assert(tab.is_ascii());
+                is_ascii_spec_bytes(tab);
+                assert(tab.spec_bytes().len() == 1);
+            }
+            let r = tab.repeat(depth);
+            proof { lemma_seq_repeat_len(tab@, depth as nat); }
+            r
+        }
+        fn bad(n: usize) -> String {
+            "ab".repeat(n) // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+

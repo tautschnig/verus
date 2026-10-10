@@ -226,6 +226,44 @@ pub assume_specification[ str::to_owned ](s: &str) -> (res: String)
         s@ == res@,
 ;
 
+/// `s` repeated `n` times
+pub open spec fn seq_repeat<A>(s: Seq<A>, n: nat) -> Seq<A>
+    decreases n,
+{
+    if n == 0 {
+        Seq::empty()
+    } else {
+        seq_repeat(s, (n - 1) as nat) + s
+    }
+}
+
+/// `str::repeat` panics ("capacity overflow") when `s.len() * n` overflows `usize`.
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+pub assume_specification[ str::repeat ](s: &str, n: usize) -> (res: String)
+    requires
+        s.spec_bytes().len() * n <= usize::MAX,
+    ensures
+        res@ == seq_repeat(s@, n as nat),
+;
+
+pub broadcast proof fn lemma_seq_repeat_len<A>(s: Seq<A>, n: nat)
+    ensures
+        #[trigger] seq_repeat(s, n).len() == s.len() * n,
+    decreases n,
+{
+    if n > 0 {
+        lemma_seq_repeat_len(s, (n - 1) as nat);
+        let m = (n - 1) as nat;
+        assert(s.len() * n == s.len() * m + s.len()) by (nonlinear_arith)
+            requires n == m + 1;
+        assert(seq_repeat(s, n) == seq_repeat(s, m) + s);
+        assert((seq_repeat(s, m) + s).len() == seq_repeat(s, m).len() + s.len());
+    } else {
+        assert(seq_repeat(s, 0).len() == 0);
+        assert(s.len() * 0 == 0) by (nonlinear_arith);
+    }
+}
+
 #[cfg(not(verus_verify_core))]
 pub assume_specification[ str::as_bytes ](s: &str) -> (b: &[u8])
     ensures
@@ -452,6 +490,7 @@ pub broadcast axiom fn axiom_string_view_len_bound(s: &String)
 
 #[cfg(all(not(feature = "alloc"), not(verus_verify_core)))]
 pub broadcast group group_string_axioms {
+    lemma_seq_repeat_len,
     axiom_new_strlit_view_id,
     axiom_str_view_injective,
     axiom_str_view_len_bound,

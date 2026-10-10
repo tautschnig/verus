@@ -1643,6 +1643,28 @@ fn fmt_ref_delegates() {
     }
 }
 
+/// vstd `str::repeat`: the result is `s` repeated `n` times (`seq_repeat`); it panics when
+/// `s.len() * n` overflows `usize` (the spec's precondition). Exec test over ASCII and multi-byte
+/// strings; `cargo test str_repeat_spec`.
+#[cfg(test)]
+#[test]
+fn str_repeat_spec() {
+    for s in ["", "a", "ab", "\u{e9}", "x\u{1F600}y"] {
+        for n in [0usize, 1, 2, 3, 7] {
+            let r = s.repeat(n);
+            let chars: Vec<char> = s.chars().collect();
+            let mut want: Vec<char> = Vec::new();
+            for _ in 0..n {
+                want.extend(chars.iter().copied());
+            }
+            assert_eq!(r.chars().collect::<Vec<_>>(), want);
+            assert_eq!(r.chars().count(), chars.len() * n);
+        }
+    }
+    let overflow = std::panic::catch_unwind(|| "ab".repeat(usize::MAX / 2 + 1));
+    assert!(overflow.is_err());
+}
+
 /// vstd `fmt_req_all` axioms for std types: their Debug/Display impls return for every
 /// value (exec test over representative values; `cargo test fmt_std_types_total`).
 #[cfg(test)]
