@@ -1752,3 +1752,37 @@ fn float_ops_never_panic() {
     }
     assert_eq!(n, 2 * 13 * 13);
 }
+
+/// vstd `axiom_fmt_req_{box,rc,arc}_{debug,display}`: `Box`, `Rc` and `Arc` format by
+/// delegating to the pointee, so formatting the pointer panics exactly when formatting the
+/// pointee does and otherwise prints the same (exec test; `cargo test fmt_ptr_delegates`).
+#[cfg(test)]
+#[test]
+fn fmt_ptr_delegates() {
+    use std::fmt;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::{rc::Rc, sync::Arc};
+    struct P(u8);
+    impl fmt::Debug for P {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            if self.0 == 0 { panic!("fmt precondition violated"); }
+            write!(f, "D{}", self.0)
+        }
+    }
+    impl fmt::Display for P {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            if self.0 == 1 { panic!("fmt precondition violated"); }
+            write!(f, "S{}", self.0)
+        }
+    }
+    fn both<T: fmt::Debug + fmt::Display>(x: &T) -> (Option<String>, Option<String>) {
+        (catch_unwind(AssertUnwindSafe(|| format!("{:?}", x))).ok(),
+         catch_unwind(AssertUnwindSafe(|| format!("{}", x))).ok())
+    }
+    for k in 0u8..=3 {
+        let base = both(&P(k));
+        assert_eq!(both(&Box::new(P(k))), base);
+        assert_eq!(both(&Rc::new(P(k))), base);
+        assert_eq!(both(&Arc::new(P(k))), base);
+    }
+}

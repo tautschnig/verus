@@ -451,6 +451,54 @@ def_ref_axiom!(core::fmt::UpperExp, UpperExpSpec, axiom_fmt_req_ref_upper_exp);
 
 def_ref_axiom!(core::fmt::UpperHex, UpperHexSpec, axiom_fmt_req_ref_upper_hex);
 
+// `alloc` implements `Debug` and `Display` for `Box<T>`, `Rc<T>` and `Arc<T>` by delegation
+// (`fmt::Debug::fmt(&**self, f)`), so the pointer's precondition is implied by `T`'s on the
+// pointee. (`Pointer` prints the address and is not included; the other fmt traits are not
+// implemented for these pointers.)
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+macro_rules! def_ptr_axiom {
+    ($ptr:ident, $trait:path, $spec:path, $name: ident) => {
+        $crate::vstd::prelude::verus! {
+            pub broadcast axiom fn $name<A: $trait + ?Sized>(a: &$ptr<A>, f: &Formatter)
+                requires
+                    <A as $spec>::fmt_req(&**a, f),
+                ensures
+                    #[trigger] <$ptr<A> as $spec>::fmt_req(a, f);
+        }
+};
+}
+
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+use alloc::{boxed::Box, rc::Rc, sync::Arc};
+
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+def_ptr_axiom!(Box, core::fmt::Debug, DebugSpec, axiom_fmt_req_box_debug);
+
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+def_ptr_axiom!(Box, core::fmt::Display, DisplaySpec, axiom_fmt_req_box_display);
+
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+def_ptr_axiom!(Rc, core::fmt::Debug, DebugSpec, axiom_fmt_req_rc_debug);
+
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+def_ptr_axiom!(Rc, core::fmt::Display, DisplaySpec, axiom_fmt_req_rc_display);
+
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+def_ptr_axiom!(Arc, core::fmt::Debug, DebugSpec, axiom_fmt_req_arc_debug);
+
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+def_ptr_axiom!(Arc, core::fmt::Display, DisplaySpec, axiom_fmt_req_arc_display);
+
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+pub broadcast group group_fmt_ptr_axioms {
+    axiom_fmt_req_box_debug,
+    axiom_fmt_req_box_display,
+    axiom_fmt_req_rc_debug,
+    axiom_fmt_req_rc_display,
+    axiom_fmt_req_arc_debug,
+    axiom_fmt_req_arc_display,
+}
+
 pub broadcast group group_fmt_axioms {
     // types
     axiom_fmt_req_all_u8,
