@@ -491,12 +491,61 @@ def_ptr_axiom!(Arc, core::fmt::Display, DisplaySpec, axiom_fmt_req_arc_display);
 
 #[cfg(all(feature = "alloc", not(verus_verify_core)))]
 pub broadcast group group_fmt_ptr_axioms {
+    axiom_debug_elements_vec_deque,
+    axiom_debug_elements_btree_set,
+    axiom_debug_elements_btree_map,
     axiom_fmt_req_box_debug,
     axiom_fmt_req_box_display,
     axiom_fmt_req_rc_debug,
     axiom_fmt_req_rc_display,
     axiom_fmt_req_arc_debug,
     axiom_fmt_req_arc_display,
+}
+
+/// `debug_elements::<C, A>()` declares that `C`'s `Debug` impl formats values of type `A` with
+/// `A`'s `Debug` and calls nothing else with a precondition (core's `debug_list`, `debug_set`,
+/// `debug_map`; a map states it for its key and its value type). It has no meaning in proofs;
+/// Verus's derived-`fmt_req` synthesis (`synthesize_derived_fmt_impls`) reads the broadcast
+/// axioms that state it, and walks through such a container to its elements as through `Vec`.
+/// Trusted, like any axiom: state it only for an impl that formats exactly so.
+pub uninterp spec fn debug_elements<C, A>() -> bool;
+
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+pub broadcast axiom fn axiom_debug_elements_vec_deque<T>()
+    ensures
+        #[trigger] debug_elements::<alloc::collections::VecDeque<T>, T>(),
+;
+
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+pub broadcast axiom fn axiom_debug_elements_btree_set<K>()
+    ensures
+        #[trigger] debug_elements::<alloc::collections::BTreeSet<K>, K>(),
+;
+
+#[cfg(all(feature = "alloc", not(verus_verify_core)))]
+pub broadcast axiom fn axiom_debug_elements_btree_map<K, V>()
+    ensures
+        #[trigger] debug_elements::<alloc::collections::BTreeMap<K, V>, K>(),
+        #[trigger] debug_elements::<alloc::collections::BTreeMap<K, V>, V>(),
+;
+
+#[cfg(all(feature = "std", not(verus_verify_core)))]
+pub broadcast axiom fn axiom_debug_elements_hash_set<K, S>()
+    ensures
+        #[trigger] debug_elements::<std::collections::HashSet<K, S>, K>(),
+;
+
+#[cfg(all(feature = "std", not(verus_verify_core)))]
+pub broadcast axiom fn axiom_debug_elements_hash_map<K, V, S>()
+    ensures
+        #[trigger] debug_elements::<std::collections::HashMap<K, V, S>, K>(),
+        #[trigger] debug_elements::<std::collections::HashMap<K, V, S>, V>(),
+;
+
+#[cfg(all(feature = "std", not(verus_verify_core)))]
+pub broadcast group group_fmt_std_container_axioms {
+    axiom_debug_elements_hash_set,
+    axiom_debug_elements_hash_map,
 }
 
 pub broadcast group group_fmt_axioms {

@@ -3475,6 +3475,7 @@ impl Verifier {
         let vir_crate =
             vir::traits::synthesize_derived_fmt_impls(
                 &vir_crate,
+                &unpruned_crate,
                 self.crate_id.as_ref().expect("crate_id"),
                 &derived_fmt,
                 &mut warning_ctx,

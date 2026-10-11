@@ -3908,6 +3908,24 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
+    // derived `Debug` through tuples and std's collections (`debug_elements` declarations)
+    #[test] derived_debug_fmt_req_containers verus_code! {
+        use vstd::prelude::*;
+        use std::sync::Arc;
+        use std::collections::{HashMap, HashSet, VecDeque, BTreeMap, BTreeSet};
+        #[derive(Debug)]
+        pub enum E { A(u8), M(HashMap<u64, Arc<E>>), Q(VecDeque<(String, E)>), B(BTreeMap<u8, Vec<E>>),
+                     S(BTreeSet<u8>), H(HashSet<String>) }
+        #[derive(Debug)]
+        pub enum F { I(std::time::Instant), M(HashMap<u8, F>) }
+        fn e(x: &E) -> String { format!("{x:?}") }
+        fn f(x: &F) -> String {
+            format!("{x:?}") // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
     // the synthesized `fmt_req` body is visible only where all fields are: from another
     // module, a datatype with private fields is formattable if its `fmt_req` is `true`
     // (the body names no type), and otherwise its `fmt_req` is unknown

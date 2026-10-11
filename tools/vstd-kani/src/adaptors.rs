@@ -1838,3 +1838,52 @@ fn derived_fmt_leaves() {
     }
     assert!(panics > 100 && oks > 100, "{panics} {oks}");
 }
+
+/// vstd `axiom_debug_elements_*` (read by Verus's derived-`fmt_req` synthesis): the `Debug` of
+/// `VecDeque`, `BTreeSet`, `BTreeMap`, `HashSet` and `HashMap` formats each element (key and
+/// value) with its `Debug` and nothing else: the output is the `debug_list`/`debug_set`/
+/// `debug_map` of the elements, and formatting panics exactly when an element's does
+/// (exec test; `cargo test debug_elements_containers`).
+#[cfg(test)]
+#[test]
+fn debug_elements_containers() {
+    use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+    use std::fmt;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    #[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Copy)]
+    struct P(u8);
+    impl fmt::Debug for P {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            if self.0 == 0 { panic!("fmt precondition violated"); }
+            write!(f, "P{}", self.0)
+        }
+    }
+    struct L<'a>(&'a [P]);
+    impl fmt::Debug for L<'_> { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.debug_list().entries(self.0.iter()).finish() } }
+    struct S<'a>(&'a [P]);
+    impl fmt::Debug for S<'_> { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.debug_set().entries(self.0.iter()).finish() } }
+    struct M<'a>(&'a [(P, P)]);
+    impl fmt::Debug for M<'_> { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.debug_map().entries(self.0.iter().map(|(k, v)| (k, v))).finish() } }
+    fn run<T: fmt::Debug>(x: &T) -> Option<String> { catch_unwind(AssertUnwindSafe(|| format!("{:?}", x))).ok() }
+    let mut seed = 0x2545F4914F6CDD1Du64;
+    for _ in 0..2000 {
+        let mut xs: Vec<P> = Vec::new();
+        seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17;
+        for i in 0..(seed % 6) { xs.push(P(((seed >> (8 * i)) % 5) as u8)); }
+        let any0 = xs.iter().any(|p| p.0 == 0);
+        let vd: VecDeque<P> = xs.iter().copied().collect();
+        assert_eq!(run(&vd), run(&L(&xs)));
+        assert_eq!(run(&vd).is_none(), any0);
+        let mut sorted = xs.clone(); sorted.sort(); sorted.dedup();
+        let bs: BTreeSet<P> = xs.iter().copied().collect();
+        assert_eq!(run(&bs), run(&S(&sorted)));
+        let pairs: Vec<(P, P)> = sorted.iter().map(|k| (*k, P((k.0 + 1) % 5))).collect();
+        let bm: BTreeMap<P, P> = pairs.iter().copied().collect();
+        assert_eq!(run(&bm), run(&M(&pairs)));
+        let hs: HashSet<P> = xs.iter().copied().collect();
+        assert_eq!(run(&hs).is_none(), hs.iter().any(|p| p.0 == 0));
+        let hm: HashMap<P, P> = pairs.iter().copied().collect();
+        assert_eq!(run(&hm).is_none(), pairs.iter().any(|(k, v)| k.0 == 0 || v.0 == 0));
+        if let Some(s) = run(&hm) { for (k, v) in hm.iter() { assert!(s.contains(&format!("{:?}: {:?}", k, v))); } }
+    }
+}

@@ -2736,6 +2736,7 @@ pub const DERIVED_FMT_SEGMENT: &str = "%derived_fmt";
 
 pub fn synthesize_derived_fmt_impls(
     krate: &Krate,
+    unpruned: &Krate,
     crate_id: &crate::ast::CrateId,
     derived: &Vec<(Path, Path, Path)>,
     warning_ctx: &mut crate::context::WarningCtx,
@@ -2832,6 +2833,59 @@ pub fn synthesize_derived_fmt_impls(
             && p.segments.iter().zip(segs.iter()).all(|(a, b)| a.as_str() == *b)
     };
     let is_debug = |tr: &Path| is_std(tr, crate::ast::CrateId::Core, &["fmt", "Debug"]);
+    // Containers whose `Debug` formats their elements with the elements' `Debug`, as declared
+    // by broadcast axioms `ensures debug_elements::<C, A>()` (vstd for std's collections, spec
+    // crates for theirs): (container pattern, element pattern, the axiom's type parameters)
+    // (from the unpruned crate: nothing a crate uses reaches these axioms, which only declare)
+    let mut elem_decls: Vec<(Typ, Typ, Vec<Ident>)> = Vec::new();
+    for f in unpruned.functions.iter() {
+        if !f.x.attrs.broadcast_forall {
+            continue;
+        }
+        for e in f.x.ensure.0.iter() {
+            let mut e = e;
+            while let ExprX::Unary(crate::ast::UnaryOp::Trigger(_), inner) = &e.x {
+                e = inner;
+            }
+            if let ExprX::Call { target: CallTarget::Fun(_, name, typs, _, _), .. } = &e.x {
+                let segs = &name.path.segments;
+                if name.path.krate == crate::ast::CrateId::Vstd
+                    && segs.len() >= 2
+                    && segs[segs.len() - 1].as_str() == "debug_elements"
+                    && segs[segs.len() - 2].as_str() == "fmt"
+                    && typs.len() == 2
+                {
+                    elem_decls.push((typs[0].clone(), typs[1].clone(), (*f.x.typ_params).clone()));
+                }
+            }
+        }
+    }
+    // the element types `t` formats through a declared container, if it is one
+    let elements_of = |t: &Typ| -> Vec<Typ> {
+        let TypX::Datatype(Dt::Path(p), args, _) = &**t else { return vec![] };
+        let mut out = Vec::new();
+        for (c, a, params) in elem_decls.iter() {
+            let TypX::Datatype(Dt::Path(cp), cargs, _) = &**c else { continue };
+            if cp != p || cargs.len() != args.len() {
+                continue;
+            }
+            let mut sb: HashMap<Ident, Typ> = HashMap::new();
+            let ok = cargs.iter().zip(args.iter()).all(|(pat, t)| match &**pat {
+                TypX::TypParam(x) if params.contains(x) => match sb.get(x) {
+                    Some(prev) => crate::ast_util::types_equal(prev, t),
+                    None => {
+                        sb.insert(x.clone(), t.clone());
+                        true
+                    }
+                },
+                _ => crate::ast_util::types_equal(pat, t),
+            });
+            if ok {
+                out.push(crate::sst_util::subst_typ(&sb, a));
+            }
+        }
+        out
+    };
     // field types of `dt` applied to `args`
     let field_typs = |dt: &Path, args: &Typs| -> Vec<Typ> {
         let d = dts[dt];
@@ -2847,9 +2901,9 @@ pub fn synthesize_derived_fmt_impls(
     // The types whose impls of `tr` the derived impl for `dt<args>` may call with a
     // precondition ("leaves"). A derived impl formats each field with the field type's impl.
     // Walking the field types: primitives, `&str` and `String` have none; references, `Box`,
-    // `Rc`, `Arc` (all decorations) delegate to the pointee; for `Debug`, `Vec`, `Option`,
-    // arrays and slices format each element with its `Debug`; a verified impl has `fmt_req`
-    // true; another derived impl of the same trait is walked into, instantiated (a visited set
+    // `Rc`, `Arc` (all decorations) delegate to the pointee; for `Debug`, tuples, `Vec`,
+    // `Option`, arrays, slices and the containers declared by `debug_elements` axioms format
+    // each element with its `Debug`; a verified impl has `fmt_req` true; another derived impl of the same trait is walked into, instantiated (a visited set
     // stops recursion: a recursive datatype adds no precondition beyond its leaves, by
     // induction on the value). Anything else is a leaf, whose precondition is required.
     let leaves_of = |tr: &Path, dt: &Path, args: &Typs| -> Vec<Typ> {
@@ -2871,6 +2925,8 @@ pub fn synthesize_derived_fmt_impls(
                 }
                 TypX::Datatype(Dt::Path(p), _, _)
                     if is_std(p, crate::ast::CrateId::Alloc, &["string", "String"]) => {}
+                // tuples: `Debug` formats each element with its `Debug`
+                TypX::Datatype(Dt::Tuple(_), a, _) if debug => work.extend(a.iter().cloned()),
                 TypX::Datatype(Dt::Path(p), a, _)
                     if debug
                         && !a.is_empty()
@@ -2880,6 +2936,9 @@ pub fn synthesize_derived_fmt_impls(
                     work.push(a[0].clone())
                 }
                 TypX::Datatype(Dt::Path(p), _, _) if verified.contains(&(tr.clone(), p.clone())) => {}
+                TypX::Datatype(Dt::Path(_), _, _) if debug && !elements_of(&t).is_empty() => {
+                    work.extend(elements_of(&t))
+                }
                 TypX::Datatype(Dt::Path(p), a, _) if is_candidate(tr, p) => work.extend(field_typs(p, a)),
                 _ => leaves.push(t.clone()),
             }
