@@ -3817,6 +3817,17 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
+    // a slice iterator has at most usize::MAX items (the slice's length is a usize), so
+    // `position` and `count` need no length fact from the caller
+    #[test] slice_iter_len_bound verus_code! {
+        use vstd::prelude::*;
+        fn pos(v: &[u64]) -> Option<usize> { v.iter().position(|x: &u64| *x == 3) }
+        fn cnt(v: &Vec<u64>) -> usize { v.iter().count() }
+        fn pos2(v: &Vec<u64>) -> Option<usize> { v.into_iter().position(|x: &u64| *x == 3) }
+    } => Ok(())
+}
+
+test_verify_one_file! {
     // formatting std types and containers of them (fmt_req_all axioms)
     #[test] fmt_std_types verus_code! {
         use vstd::prelude::*;

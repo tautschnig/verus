@@ -448,6 +448,8 @@ impl <'a, T: 'a> super::iter::IteratorSpecImpl for Iter<'a, T> {
 
 pub assume_specification<'a, T>[ <[T]>::iter ](s: &'a [T]) -> (iter: Iter<'a, T>)
     ensures
+        // a slice has at most usize::MAX elements (axiom_spec_len: its length is a usize)
+        s@.len() <= usize::MAX,
         IteratorSpec::remaining(&iter) == s@.as_ref(),
         into_iter_elts(iter) == IteratorSpec::remaining(&iter).unref(),
         IteratorSpec::decrease(&iter) is Some,
@@ -456,6 +458,8 @@ pub assume_specification<'a, T>[ <[T]>::iter ](s: &'a [T]) -> (iter: Iter<'a, T>
 pub assume_specification<'a, T> [<&'a [T] as core::iter::IntoIterator>::into_iter] (s: &'a [T]) ->
     (iter: Iter<'a, T>)
     ensures
+        // a slice has at most usize::MAX elements (axiom_spec_len: its length is a usize)
+        s@.len() <= usize::MAX,
         IteratorSpec::remaining(&iter) == s@.as_ref(),
         into_iter_elts(iter) == IteratorSpec::remaining(&iter).unref(),
         IteratorSpec::decrease(&iter) is Some,
