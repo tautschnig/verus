@@ -3462,6 +3462,24 @@ fn mk_static_prelude(ctx: &Ctx, statics: &Vec<Fun>) -> Vec<Stmt> {
         .collect()
 }
 
+/// The string literals in a statement, in order of first occurrence, each once
+fn string_literals_in_stm(stm: &Stm) -> Vec<Arc<String>> {
+    let mut lits: Vec<Arc<String>> = Vec::new();
+    crate::sst_visitor::map_exps_in_stm_visitor(stm, &mut |e: &Exp| {
+        let mut map = crate::sst_visitor::VisitorScopeMap::new();
+        let _ = crate::sst_visitor::exp_visitor_check::<(), _>(e, &mut map, &mut |e: &Exp, _| {
+            if let ExpX::Const(crate::ast::Constant::StrSlice(s)) = &e.x {
+                if !lits.iter().any(|l| l == s) {
+                    lits.push(s.clone());
+                }
+            }
+            Ok(())
+        });
+        e.clone()
+    });
+    lits
+}
+
 pub(crate) fn body_stm_to_air(
     ctx: &Ctx,
     func_span: &Span,
@@ -3612,9 +3630,25 @@ pub(crate) fn body_stm_to_air(
         lowering_provenance,
     };
 
+    // `--reveal-strlits`: collected before compute_assign_info adds HavocSets (which the SST
+    // visitors do not traverse)
+    let lits = if ctx.global.reveal_strlits { string_literals_in_stm(stm) } else { vec![] };
+
     let stm = crate::sst_vars::compute_assign_info(&mut state.assign_map, params, local_decls, stm);
 
     let mut stmts = stm_to_stmts(ctx, &mut state, &stm)?;
+
+    {
+        // the content of each literal in the body, as `reveal_strlit` would assume it
+        if !lits.is_empty() {
+            let facts: Vec<Expr> = lits
+                .into_iter()
+                .flat_map(|l| [string_len_to_air(ctx, l.clone()), string_indices_to_air(ctx, l)])
+                .collect();
+            let fact = Arc::new(ExprX::Multi(MultiOp::And, Arc::new(facts)));
+            stmts.insert(0, Arc::new(StmtX::Assume(fact)));
+        }
+    }
 
     stmts.insert(0, Arc::new(StmtX::Snapshot(snapshot_ident(SNAPSHOT_PRE))));
     if state.static_prelude.len() > 0 {

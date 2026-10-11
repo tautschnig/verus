@@ -89,6 +89,19 @@ pub broadcast proof fn is_ascii_spec_bytes(s: &str)
     }
 }
 
+/// The UTF-8 encoding of an ASCII string has one byte per character. Unlike
+/// `is_ascii_spec_bytes`, triggered by `spec_bytes()` alone, so the byte length of an ASCII
+/// string (e.g. a literal whose content is known) follows without mentioning `is_ascii`.
+#[cfg(not(verus_verify_core))]
+pub broadcast proof fn lemma_ascii_spec_bytes_len(s: &str)
+    ensures
+        is_ascii(s) ==> #[trigger] s.spec_bytes().len() == s@.len(),
+{
+    if is_ascii(s) {
+        is_ascii_chars_encode_utf8(s@);
+    }
+}
+
 #[cfg(not(verus_verify_core))]
 pub broadcast proof fn is_ascii_concat(s1: &str, s2: &str, s3: &str)
     requires
@@ -238,10 +251,13 @@ pub open spec fn seq_repeat<A>(s: Seq<A>, n: nat) -> Seq<A>
 }
 
 /// `str::repeat` panics ("capacity overflow") when `s.len() * n` overflows `usize`.
+/// The first disjunct is implied by the second (`n <= usize::MAX`); it is stated so that a
+/// string of at most one byte (`"\t".repeat(n)`) needs no reasoning about the product, which
+/// the solver treats as uninterpreted when neither factor is a literal.
 #[cfg(all(feature = "alloc", not(verus_verify_core)))]
 pub assume_specification[ str::repeat ](s: &str, n: usize) -> (res: String)
     requires
-        s.spec_bytes().len() * n <= usize::MAX,
+        s.spec_bytes().len() <= 1 || s.spec_bytes().len() * n <= usize::MAX,
     ensures
         res@ == seq_repeat(s@, n as nat),
 ;
@@ -497,6 +513,7 @@ pub broadcast group group_string_axioms {
     axiom_str_literal_len,
     axiom_str_literal_get_char,
     is_ascii_spec_bytes,
+    lemma_ascii_spec_bytes_len,
     is_ascii_concat,
 }
 
@@ -510,6 +527,7 @@ pub broadcast group group_string_axioms {
     axiom_string_view_len_bound,
     to_string_from_display_ensures_for_str,
     is_ascii_spec_bytes,
+    lemma_ascii_spec_bytes_len,
     is_ascii_concat,
 }
 

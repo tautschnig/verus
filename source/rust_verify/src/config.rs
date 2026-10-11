@@ -95,6 +95,7 @@ pub struct ArgsX {
     pub counterexample: bool,
     pub check_compute: bool,
     pub check_compute_all: bool,
+    pub reveal_strlits: bool,
     pub check_drops: bool,
     pub time: bool,
     pub time_expanded: bool,
@@ -157,6 +158,7 @@ impl ArgsX {
             counterexample: Default::default(),
             check_compute: Default::default(),
             check_compute_all: Default::default(),
+            reveal_strlits: Default::default(),
             check_drops: true,
             time: Default::default(),
             time_expanded: Default::default(),
@@ -348,6 +350,7 @@ pub fn parse_args_with_imports(
     const OPT_COUNTEREXAMPLE: &str = "counterexample";
     const OPT_CHECK_COMPUTE: &str = "check-compute";
     const OPT_CHECK_COMPUTE_ALL: &str = "check-compute-all";
+    const OPT_REVEAL_STRLITS: &str = "reveal-strlits";
     const OPT_NO_CHECK_DROPS: &str = "no-check-drops";
     const OPT_TIME: &str = "time";
     const OPT_TIME_EXPANDED: &str = "time-expanded";
@@ -592,6 +595,12 @@ pub fn parse_args_with_imports(
     );
     opts.optflag(
         "",
+        OPT_REVEAL_STRLITS,
+        "Reveal the content of every string literal in a function body, as \
+         `reveal_strlit` at the start of the body would",
+    );
+    opts.optflag(
+        "",
         OPT_CLOSURE_PARAM_REQUIRES,
         "Give an exec function that has no `requires` the precondition \
          `forall |args| call_requires(f, args)` for each parameter `f` whose type is a type \
@@ -816,6 +825,7 @@ pub fn parse_args_with_imports(
         check_compute: matches.opt_present(OPT_CHECK_COMPUTE)
             || matches.opt_present(OPT_CHECK_COMPUTE_ALL),
         check_compute_all: matches.opt_present(OPT_CHECK_COMPUTE_ALL),
+        reveal_strlits: matches.opt_present(OPT_REVEAL_STRLITS),
         check_drops: !matches.opt_present(OPT_NO_CHECK_DROPS),
         time: matches.opt_present(OPT_TIME) || matches.opt_present(OPT_TIME_EXPANDED),
         time_expanded: matches.opt_present(OPT_TIME_EXPANDED),

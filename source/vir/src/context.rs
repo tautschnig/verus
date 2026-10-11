@@ -85,6 +85,8 @@ pub struct GlobalCtx {
     pub check_compute: bool,
     /// `--check-compute-all`: also steps with quantifiers or `choose`
     pub check_compute_all: bool,
+    /// `--reveal-strlits`: assume the content of each string literal of a function body
+    pub reveal_strlits: bool,
 }
 
 // Context for verifying one function
@@ -773,6 +775,7 @@ impl GlobalCtx {
             counterexamples: false,
             check_compute: false,
             check_compute_all: false,
+            reveal_strlits: false,
         })
     }
 
@@ -808,6 +811,7 @@ impl GlobalCtx {
             counterexamples: self.counterexamples,
             check_compute: self.check_compute,
             check_compute_all: self.check_compute_all,
+            reveal_strlits: self.reveal_strlits,
         }
     }
 

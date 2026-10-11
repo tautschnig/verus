@@ -1423,3 +1423,35 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file_with_options! {
+    // `--reveal-strlits`: every literal of a body is revealed, as by `reveal_strlit`; a
+    // one-byte string repeats without an overflow obligation, a longer one keeps it
+    #[test] reveal_strlits_flag ["--reveal-strlits"] => verus_code! {
+        use vstd::prelude::*;
+        use vstd::string::*;
+        fn lit() {
+            let x = "abc";
+            assert(x@.len() == 3);
+            assert(x@[1] == 'b');
+        }
+        fn rep(n: usize) -> (r: String) ensures r@.len() == n {
+            broadcast use vstd::string::lemma_seq_repeat_len;
+            "\t".repeat(n)
+        }
+        fn rep80() -> String { "*".repeat(80) }
+        fn rep2(n: usize) -> String {
+            "ab".repeat(n) // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}
+
+test_verify_one_file! {
+    // without the flag a literal is opaque, as before
+    #[test] reveal_strlits_default_opaque verus_code! {
+        use vstd::prelude::*;
+        fn rep(n: usize) -> String {
+            "\t".repeat(n) // FAILS
+        }
+    } => Err(err) => assert_one_fails(err)
+}

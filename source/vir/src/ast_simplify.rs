@@ -1730,6 +1730,7 @@ pub fn simplify_krate(ctx: &mut GlobalCtx, krate: &Krate) -> Result<Krate, VirEr
     let counterexamples = ctx.counterexamples;
     let check_compute = ctx.check_compute;
     let check_compute_all = ctx.check_compute_all;
+    let reveal_strlits = ctx.reveal_strlits;
     *ctx = crate::context::GlobalCtx::new(
         &krate,
         ctx.crate_name.clone(),
@@ -1749,6 +1750,7 @@ pub fn simplify_krate(ctx: &mut GlobalCtx, krate: &Krate) -> Result<Krate, VirEr
         g.counterexamples = counterexamples;
         g.check_compute = check_compute;
         g.check_compute_all = check_compute_all;
+        g.reveal_strlits = reveal_strlits;
         g
     })?;
     Ok(krate)
