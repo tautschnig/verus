@@ -327,11 +327,13 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
+    // float operators never panic: their `*_req` is `true`, with no assumption needed
     #[test] f64_exec_negation_requires verus_code! {
-        fn neg(x: f64) -> f64 {
-            -x // FAILS: neg_req is not established
+        use vstd::std_specs::ops::neg_ensures;
+        fn neg(x: f64) -> (r: f64) ensures neg_ensures::<f64>(x, r) {
+            -x
         }
-    } => Err(err) => assert_one_fails(err)
+    } => Ok(())
 }
 
 test_verify_one_file! {

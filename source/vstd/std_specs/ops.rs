@@ -751,6 +751,122 @@ pub uninterp spec fn mul_ensures<A>(x: A, y: A, o: A) -> bool;
 
 pub uninterp spec fn div_ensures<A>(x: A, y: A, o: A) -> bool;
 
+/// The value a float operator returns. Unspecified: `obeys_*_spec` is false for floats, so
+/// these are never equated with a result; only the `*_ensures` relations above describe it.
+pub uninterp spec fn float_neg_spec<A>(x: A) -> A;
+
+pub uninterp spec fn float_binop_spec<A>(op: int, x: A, y: A) -> A;
+
+// Rust float arithmetic never panics (IEEE 754: overflow, division by zero and invalid
+// operations produce inf or NaN), so every float operator's `*_req` is `true`.
+impl NegSpecImpl for f32 {
+    open spec fn obeys_neg_spec() -> bool { false }
+    open spec fn neg_req(self) -> bool { true }
+    open spec fn neg_spec(self) -> f32 { float_neg_spec(self) }
+}
+
+impl NegSpecImpl for f64 {
+    open spec fn obeys_neg_spec() -> bool { false }
+    open spec fn neg_req(self) -> bool { true }
+    open spec fn neg_spec(self) -> f64 { float_neg_spec(self) }
+}
+
+impl AddSpecImpl for f32 {
+    open spec fn obeys_add_spec() -> bool { false }
+    open spec fn add_req(self, rhs: f32) -> bool { true }
+    open spec fn add_spec(self, rhs: f32) -> f32 { float_binop_spec(0, self, rhs) }
+}
+
+impl AddAssignSpecImpl for f32 {
+    open spec fn obeys_add_assign_spec() -> bool { false }
+    open spec fn add_assign_req(&self, rhs: f32) -> bool { true }
+    open spec fn add_assign_spec(&self, rhs: f32) -> &Self { &float_binop_spec(0, *self, rhs) }
+}
+
+impl SubSpecImpl for f32 {
+    open spec fn obeys_sub_spec() -> bool { false }
+    open spec fn sub_req(self, rhs: f32) -> bool { true }
+    open spec fn sub_spec(self, rhs: f32) -> f32 { float_binop_spec(1, self, rhs) }
+}
+
+impl SubAssignSpecImpl for f32 {
+    open spec fn obeys_sub_assign_spec() -> bool { false }
+    open spec fn sub_assign_req(&self, rhs: f32) -> bool { true }
+    open spec fn sub_assign_spec(&self, rhs: f32) -> &Self { &float_binop_spec(1, *self, rhs) }
+}
+
+impl MulSpecImpl for f32 {
+    open spec fn obeys_mul_spec() -> bool { false }
+    open spec fn mul_req(self, rhs: f32) -> bool { true }
+    open spec fn mul_spec(self, rhs: f32) -> f32 { float_binop_spec(2, self, rhs) }
+}
+
+impl MulAssignSpecImpl for f32 {
+    open spec fn obeys_mul_assign_spec() -> bool { false }
+    open spec fn mul_assign_req(&self, rhs: f32) -> bool { true }
+    open spec fn mul_assign_spec(&self, rhs: f32) -> &Self { &float_binop_spec(2, *self, rhs) }
+}
+
+impl DivSpecImpl for f32 {
+    open spec fn obeys_div_spec() -> bool { false }
+    open spec fn div_req(self, rhs: f32) -> bool { true }
+    open spec fn div_spec(self, rhs: f32) -> f32 { float_binop_spec(3, self, rhs) }
+}
+
+impl DivAssignSpecImpl for f32 {
+    open spec fn obeys_div_assign_spec() -> bool { false }
+    open spec fn div_assign_req(&self, rhs: f32) -> bool { true }
+    open spec fn div_assign_spec(&self, rhs: f32) -> &Self { &float_binop_spec(3, *self, rhs) }
+}
+
+impl AddSpecImpl for f64 {
+    open spec fn obeys_add_spec() -> bool { false }
+    open spec fn add_req(self, rhs: f64) -> bool { true }
+    open spec fn add_spec(self, rhs: f64) -> f64 { float_binop_spec(0, self, rhs) }
+}
+
+impl AddAssignSpecImpl for f64 {
+    open spec fn obeys_add_assign_spec() -> bool { false }
+    open spec fn add_assign_req(&self, rhs: f64) -> bool { true }
+    open spec fn add_assign_spec(&self, rhs: f64) -> &Self { &float_binop_spec(0, *self, rhs) }
+}
+
+impl SubSpecImpl for f64 {
+    open spec fn obeys_sub_spec() -> bool { false }
+    open spec fn sub_req(self, rhs: f64) -> bool { true }
+    open spec fn sub_spec(self, rhs: f64) -> f64 { float_binop_spec(1, self, rhs) }
+}
+
+impl SubAssignSpecImpl for f64 {
+    open spec fn obeys_sub_assign_spec() -> bool { false }
+    open spec fn sub_assign_req(&self, rhs: f64) -> bool { true }
+    open spec fn sub_assign_spec(&self, rhs: f64) -> &Self { &float_binop_spec(1, *self, rhs) }
+}
+
+impl MulSpecImpl for f64 {
+    open spec fn obeys_mul_spec() -> bool { false }
+    open spec fn mul_req(self, rhs: f64) -> bool { true }
+    open spec fn mul_spec(self, rhs: f64) -> f64 { float_binop_spec(2, self, rhs) }
+}
+
+impl MulAssignSpecImpl for f64 {
+    open spec fn obeys_mul_assign_spec() -> bool { false }
+    open spec fn mul_assign_req(&self, rhs: f64) -> bool { true }
+    open spec fn mul_assign_spec(&self, rhs: f64) -> &Self { &float_binop_spec(2, *self, rhs) }
+}
+
+impl DivSpecImpl for f64 {
+    open spec fn obeys_div_spec() -> bool { false }
+    open spec fn div_req(self, rhs: f64) -> bool { true }
+    open spec fn div_spec(self, rhs: f64) -> f64 { float_binop_spec(3, self, rhs) }
+}
+
+impl DivAssignSpecImpl for f64 {
+    open spec fn obeys_div_assign_spec() -> bool { false }
+    open spec fn div_assign_req(&self, rhs: f64) -> bool { true }
+    open spec fn div_assign_spec(&self, rhs: f64) -> &Self { &float_binop_spec(3, *self, rhs) }
+}
+
 pub assume_specification[ <f32 as core::ops::Neg>::neg ](x: f32) -> (o: f32)
     ensures
         neg_ensures::<f32>(x, o),

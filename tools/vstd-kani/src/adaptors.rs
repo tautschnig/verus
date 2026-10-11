@@ -1720,3 +1720,35 @@ fn str_chars_le_bytes_holds() {
         assert!(s.len() <= isize::MAX as usize);
     }
 }
+
+/// vstd float operator `*_req` = true (std_specs/ops.rs): IEEE 754 arithmetic in Rust never
+/// panics, whatever the operands (NaN, infinities, zero divisors, signed zeros, extremes)
+/// (exec test; `cargo test float_ops_never_panic`).
+#[cfg(test)]
+#[test]
+fn float_ops_never_panic() {
+    let v64 = [0.0f64, -0.0, 1.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY, f64::MAX,
+        f64::MIN, f64::MIN_POSITIVE, f64::EPSILON, 1e-310, 3.5];
+    let v32 = [0.0f32, -0.0, 1.0, -1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY, f32::MAX,
+        f32::MIN, f32::MIN_POSITIVE, f32::EPSILON, 1e-40, 3.5];
+    let mut n = 0;
+    for &a in v64.iter() {
+        for &b in v64.iter() {
+            let r = std::panic::catch_unwind(|| {
+                let mut c = a; c += b; c -= b; c *= b; c /= b;
+                (a + b, a - b, a * b, a / b, -a, c)
+            });
+            assert!(r.is_ok()); n += 1;
+        }
+    }
+    for &a in v32.iter() {
+        for &b in v32.iter() {
+            let r = std::panic::catch_unwind(|| {
+                let mut c = a; c += b; c -= b; c *= b; c /= b;
+                (a + b, a - b, a * b, a / b, -a, c)
+            });
+            assert!(r.is_ok()); n += 1;
+        }
+    }
+    assert_eq!(n, 2 * 13 * 13);
+}
