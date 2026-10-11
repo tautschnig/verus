@@ -486,10 +486,10 @@ fn cleanup_span_ids<'tcx>(ctxt: &Context<'tcx>, span: Span, hir_id: HirId, expr:
     .unwrap()
 }
 
-/// Impls of `core::fmt::Debug`/`Display` for non-generic datatypes of the VIR crate (local or
+/// Impls of `core::fmt::Debug`/`Display` for datatypes of the VIR crate (local or
 /// imported from another Verus crate) that a derive macro generated (rustc's
 /// `#[derive(Debug)]`, or a third-party derive such as `strum::Display` or `thiserror::Error`)
-/// and that Verus does not verify. Returned as `(trait path, datatype path, impl path)` for
+/// and that Verus does not verify (generic datatypes: rustc's derives only). Returned as `(trait path, datatype path, impl path)` for
 /// `vir::traits::synthesize_derived_fmt_impls`; the impl path is the extension impl's path,
 /// in this crate.
 pub(crate) fn derived_fmt_impls<'tcx>(
@@ -520,10 +520,23 @@ pub(crate) fn derived_fmt_impls<'tcx>(
         let impls = tcx.trait_impls_of(*tr);
         for (_, impl_ids) in impls.non_blanket_impls().iter() {
             for &impl_id in impl_ids.iter() {
-                if tcx.generics_of(impl_id).count() != 0 {
-                    continue;
+                // Generic impls: only rustc's derives, whose bounds are `X: Trait` for each type
+                // parameter (what the synthesized extension impl assumes); no const parameters.
+                let generics = tcx.generics_of(impl_id);
+                let rustc_derived = tcx.is_automatically_derived(impl_id);
+                if generics.count() != 0 {
+                    let only_types = generics.own_params.iter().all(|p| {
+                        matches!(
+                            p.kind,
+                            rustc_middle::ty::GenericParamDefKind::Type { .. }
+                                | rustc_middle::ty::GenericParamDefKind::Lifetime
+                        )
+                    });
+                    if !rustc_derived || generics.parent.is_some() || !only_types {
+                        continue;
+                    }
                 }
-                let derived = tcx.is_automatically_derived(impl_id)
+                let derived = rustc_derived
                     || crate::external::derive_macro_crate(tcx, tcx.def_span(impl_id)).is_some();
                 if !derived {
                     continue;

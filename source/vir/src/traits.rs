@@ -2769,72 +2769,126 @@ pub fn synthesize_derived_fmt_impls(
             _ => None,
         })
         .collect();
-    let dt_typ = |p: &Path| Arc::new(TypX::Datatype(Dt::Path(p.clone()), Arc::new(vec![]), Arc::new(vec![])));
-    // local datatypes with a verified impl of the trait (fmt_req = true by default or by user)
+    // the datatype applied to its own type parameters
+    let dt_typ = |p: &Path| {
+        let args: Vec<Typ> =
+            dts[p].x.typ_params.iter().map(|(x, _)| Arc::new(TypX::TypParam(x.clone()))).collect();
+        Arc::new(TypX::Datatype(Dt::Path(p.clone()), Arc::new(args), Arc::new(vec![])))
+    };
+    // Extension impls written by the user (not synthesized by
+    // `synthesize_default_extension_impls`): their `fmt_req` may state a precondition.
+    let user_ext: Vec<(Path, Path)> = krate
+        .trait_impls
+        .iter()
+        .filter(|ti| ext_of.values().any(|s| s == &ti.x.trait_path))
+        .filter(|ti| !ti.x.impl_path.segments.last().map_or(false, |s| s.contains("%default_")))
+        .filter_map(|ti| match &*ti.x.trait_typ_args[0] {
+            TypX::Datatype(Dt::Path(p), _, _) => Some((ti.x.trait_path.clone(), p.clone())),
+            _ => None,
+        })
+        .collect();
+    // (trait, datatype) with a verified impl of the trait for the datatype applied to distinct
+    // type parameters (or none), and no user extension impl: its `fmt_req` is `true` (the
+    // default extension impl), for every instantiation
     let verified: Vec<(Path, Path)> = krate
         .trait_impls
         .iter()
         .filter(|ti| !ti.x.auto_imported)
         .filter_map(|ti| match &*ti.x.trait_typ_args[0] {
-            TypX::Datatype(Dt::Path(p), args, _) if args.is_empty() => {
-                Some((ti.x.trait_path.clone(), p.clone()))
+            TypX::Datatype(Dt::Path(p), args, _) => {
+                let params: Vec<&Ident> = args
+                    .iter()
+                    .filter_map(|a| match &**a {
+                        TypX::TypParam(x) => Some(x),
+                        _ => None,
+                    })
+                    .collect();
+                let distinct = params.len() == args.len()
+                    && params.iter().enumerate().all(|(i, x)| !params[..i].contains(x));
+                if distinct { Some((ti.x.trait_path.clone(), p.clone())) } else { None }
             }
             _ => None,
+        })
+        .filter(|(tr, p)| match ext_of.get(tr) {
+            Some(spec) => !user_ext.contains(&(spec.clone(), p.clone())),
+            None => false,
         })
         .collect();
     let candidates: Vec<&(Path, Path, Path)> = derived
         .iter()
         .filter(|(tr, dt, _)| {
             ext_of.contains_key(tr)
-                && dts.get(dt).map_or(false, |d| d.x.typ_params.is_empty())
+                && dts.contains_key(dt)
                 && !verified.contains(&(tr.clone(), dt.clone()))
+                // generic datatypes: those of this crate only (std's, e.g. `Option`, have specs)
+                && (dts[dt].x.typ_params.is_empty() || &dt.krate == crate_id)
         })
         .collect();
-    fn base_total(t: &Typ) -> Option<bool> {
-        match &**t {
-            TypX::Bool | TypX::Int(_) => Some(true),
-            TypX::Primitive(Primitive::StrSlice, _) => Some(true),
-            TypX::Decorate(_, _, t) | TypX::Boxed(t) => base_total(t),
-            TypX::Datatype(Dt::Path(p), args, _)
-                if args.is_empty() && p.segments.last().map(|s| s.as_str()) == Some("String")
-                    && matches!(p.krate, crate::ast::CrateId::Alloc) =>
-            {
-                Some(true)
-            }
-            TypX::Datatype(Dt::Path(_), args, _) if args.is_empty() => None,
-            _ => Some(false),
-        }
-    }
-    let fields_of = |dt: &Path| -> Vec<Typ> {
-        dts[dt].x.variants.iter().flat_map(|v| v.fields.iter().map(|f| f.a.0.clone())).collect()
+    let is_candidate =
+        |tr: &Path, dt: &Path| candidates.iter().any(|(t, d, _)| t == tr && d == dt);
+    let is_std = |p: &Path, krate: crate::ast::CrateId, segs: &[&str]| {
+        p.krate == krate
+            && p.segments.len() == segs.len()
+            && p.segments.iter().zip(segs.iter()).all(|(a, b)| a.as_str() == *b)
     };
-    // fixpoint: which derived (trait, datatype) pairs are total
-    let mut total: Vec<(Path, Path)> = verified.clone();
-    loop {
-        let mut changed = false;
-        for (tr, dt, _) in candidates.iter() {
-            if total.contains(&(tr.clone(), dt.clone())) {
+    let is_debug = |tr: &Path| is_std(tr, crate::ast::CrateId::Core, &["fmt", "Debug"]);
+    // field types of `dt` applied to `args`
+    let field_typs = |dt: &Path, args: &Typs| -> Vec<Typ> {
+        let d = dts[dt];
+        let mut sb: HashMap<Ident, Typ> = HashMap::new();
+        for ((x, _), a) in d.x.typ_params.iter().zip(args.iter()) {
+            sb.insert(x.clone(), a.clone());
+        }
+        d.x.variants
+            .iter()
+            .flat_map(|v| v.fields.iter().map(|f| crate::sst_util::subst_typ(&sb, &f.a.0)))
+            .collect()
+    };
+    // The types whose impls of `tr` the derived impl for `dt<args>` may call with a
+    // precondition ("leaves"). A derived impl formats each field with the field type's impl.
+    // Walking the field types: primitives, `&str` and `String` have none; references, `Box`,
+    // `Rc`, `Arc` (all decorations) delegate to the pointee; for `Debug`, `Vec`, `Option`,
+    // arrays and slices format each element with its `Debug`; a verified impl has `fmt_req`
+    // true; another derived impl of the same trait is walked into, instantiated (a visited set
+    // stops recursion: a recursive datatype adds no precondition beyond its leaves, by
+    // induction on the value). Anything else is a leaf, whose precondition is required.
+    let leaves_of = |tr: &Path, dt: &Path, args: &Typs| -> Vec<Typ> {
+        let debug = is_debug(tr);
+        let mut leaves: Vec<Typ> = Vec::new();
+        let mut seen: Vec<Typ> = vec![Arc::new(TypX::Datatype(Dt::Path(dt.clone()), args.clone(), Arc::new(vec![])))];
+        let mut work = field_typs(dt, args);
+        while let Some(t) = work.pop() {
+            let t = crate::ast_util::undecorate_typ(&t);
+            if seen.iter().any(|x| crate::ast_util::types_equal(x, &t)) {
                 continue;
             }
-            let ok = fields_of(dt).iter().all(|t| match base_total(t) {
-                Some(b) => b,
-                None => match &*crate::ast_util::undecorate_typ(t) {
-                    TypX::Datatype(Dt::Path(p), _, _) => total.contains(&(tr.clone(), p.clone())),
-                    _ => false,
-                },
-            });
-            if ok {
-                total.push((tr.clone(), dt.clone()));
-                changed = true;
+            seen.push(t.clone());
+            match &*t {
+                TypX::Bool | TypX::Int(_) => {}
+                TypX::Primitive(Primitive::StrSlice, _) => {}
+                TypX::Primitive(Primitive::Array | Primitive::Slice, ts) if debug && !ts.is_empty() => {
+                    work.push(ts[0].clone())
+                }
+                TypX::Datatype(Dt::Path(p), _, _)
+                    if is_std(p, crate::ast::CrateId::Alloc, &["string", "String"]) => {}
+                TypX::Datatype(Dt::Path(p), a, _)
+                    if debug
+                        && !a.is_empty()
+                        && (is_std(p, crate::ast::CrateId::Alloc, &["vec", "Vec"])
+                            || is_std(p, crate::ast::CrateId::Core, &["option", "Option"])) =>
+                {
+                    work.push(a[0].clone())
+                }
+                TypX::Datatype(Dt::Path(p), _, _) if verified.contains(&(tr.clone(), p.clone())) => {}
+                TypX::Datatype(Dt::Path(p), a, _) if is_candidate(tr, p) => work.extend(field_typs(p, a)),
+                _ => leaves.push(t.clone()),
             }
         }
-        if !changed {
-            break;
-        }
-    }
+        leaves
+    };
     let mut new_impls: Vec<TraitImpl> = Vec::new();
     let mut new_funs: Vec<Function> = Vec::new();
-    for (tr, dt, impl_of_trait) in candidates {
+    for (tr, dt, impl_of_trait) in candidates.iter().copied() {
         let spec = &ext_of[tr];
         let d = dts[dt];
         let Some(decl) = krate.functions.iter().find(|f| {
@@ -2866,7 +2920,7 @@ pub fn synthesize_derived_fmt_impls(
         }
         let foreign = &dt.krate != crate_id;
         let all_visible = std::cell::Cell::new(true);
-        for ft in fields_of(dt) {
+        for ft in field_typs(dt, &match &*dt_typ(dt) { TypX::Datatype(_, a, _) => a.clone(), _ => unreachable!() }) {
             let check = |t: &Typ| {
                 if let TypX::Datatype(Dt::Path(p), _, _) = &**t {
                     match dts.get(p) {
@@ -2889,38 +2943,89 @@ pub fn synthesize_derived_fmt_impls(
         }
         let span = d.span.clone();
         let mk_bool = |x: ExprX| SpannedTyped::new(&span, &Arc::new(TypX::Bool), x);
+        // The derived impl itself (auto-imported): the extension impl must have its type
+        // parameter names and trait arguments (find_trait_impl_from_extension).
+        let derived_impl = krate.trait_impls.iter().find(|t| &t.x.impl_path == impl_of_trait);
+        let self_typ = match derived_impl {
+            Some(t) if !d.x.typ_params.is_empty() => t.x.trait_typ_args[0].clone(),
+            _ => dt_typ(dt),
+        };
+        if !d.x.typ_params.is_empty() && derived_impl.is_none() {
+            continue;
+        }
+        let self_args = match &*self_typ {
+            TypX::Datatype(_, a, _) => a.clone(),
+            _ => unreachable!(),
+        };
+        let attrs_final = CallTargetAttrs { autospec: AutospecUsage::Final, const_var: false, assume_external_allowed: false };
         let mut conjs: Vec<crate::ast::Expr> = Vec::new();
-        if !total.contains(&(tr.clone(), dt.clone())) {
-            let mut seen: Vec<Typ> = Vec::new();
-            for ft in fields_of(dt) {
-                let ft = crate::ast_util::undecorate_typ(&ft);
-                if base_total(&ft) == Some(true) || seen.iter().any(|s| crate::ast_util::types_equal(s, &ft)) {
-                    continue;
-                }
-                if let TypX::Datatype(Dt::Path(p), _, _) = &*ft {
-                    if total.contains(&(tr.clone(), p.clone())) {
-                        continue;
-                    }
-                }
-                seen.push(ft.clone());
+        for leaf in leaves_of(tr, dt, &self_args) {
+            if let TypX::TypParam(_) = &*leaf {
+                // forall |x: &X, f: &Formatter| <X as Spec>::fmt_req(x, f)
+                let mut sb: HashMap<Ident, Typ> = HashMap::new();
+                sb.insert(crate::def::trait_self_type_param(), leaf.clone());
+                let binders: Vec<crate::ast::VarBinder<Typ>> = decl
+                    .x
+                    .params
+                    .iter()
+                    .map(|p| {
+                        Arc::new(crate::ast::VarBinderX {
+                            name: crate::ast::VarIdent(
+                                Arc::new(format!("%fmt_{}", p.x.name.0)),
+                                crate::ast::VarIdentDisambiguate::VirExprNoNumber,
+                            ),
+                            a: crate::sst_util::subst_typ(&sb, &p.x.typ),
+                        })
+                    })
+                    .collect();
+                // generated variables have no source: a span without a raw span keeps them out
+                // of the erasure tables (`setup_verus_ctxt_for_thir_erasure` skips those)
+                let gen_span = crate::messages::Span {
+                    raw_span: Arc::new(()),
+                    id: 0,
+                    data: vec![],
+                    as_string: span.as_string.clone(),
+                    proof_coverage_generated: false,
+                };
+                let args: Vec<crate::ast::Expr> = binders
+                    .iter()
+                    .map(|b| SpannedTyped::new(&gen_span, &b.a, ExprX::Var(b.name.clone())))
+                    .collect();
                 let call = mk_bool(ExprX::Call {
                     target: CallTarget::Fun(
-                        CallTargetKind::Static,
-                        fmt_req_all.clone(),
-                        Arc::new(vec![ft.clone()]),
+                        CallTargetKind::Dynamic,
+                        decl.x.name.clone(),
+                        Arc::new(vec![leaf.clone()]),
                         Arc::new(vec![]),
-                        CallTargetAttrs {
-                            autospec: AutospecUsage::Final,
-                            const_var: false,
-                            assume_external_allowed: false,
-                        },
+                        attrs_final.clone(),
                     ),
-                    args: Arc::new(vec![]),
+                    args: Arc::new(args),
                     post_args: None,
                     body: None,
                 });
-                conjs.push(call);
+                let trig = mk_bool(ExprX::Unary(
+                    crate::ast::UnaryOp::Trigger(crate::ast::TriggerAnnotation::Trigger(None)),
+                    call,
+                ));
+                conjs.push(mk_bool(ExprX::Quant(
+                    crate::ast::Quant { quant: air::ast::Quant::Forall },
+                    Arc::new(binders),
+                    trig,
+                )));
+                continue;
             }
+            conjs.push(mk_bool(ExprX::Call {
+                target: CallTarget::Fun(
+                    CallTargetKind::Static,
+                    fmt_req_all.clone(),
+                    Arc::new(vec![leaf.clone()]),
+                    Arc::new(vec![]),
+                    attrs_final.clone(),
+                ),
+                args: Arc::new(vec![]),
+                post_args: None,
+                body: None,
+            }));
         }
         let names_no_type = conjs.is_empty();
         let body = if conjs.is_empty() {
@@ -2944,9 +3049,14 @@ pub fn synthesize_derived_fmt_impls(
                     .collect(),
             ),
         });
-        let trait_typ_args = Arc::new(vec![dt_typ(dt)]);
+        let trait_typ_args = Arc::new(vec![self_typ.clone()]);
         let mut substs: HashMap<Ident, Typ> = HashMap::new();
-        substs.insert(crate::def::trait_self_type_param(), dt_typ(dt));
+        substs.insert(crate::def::trait_self_type_param(), self_typ.clone());
+        // a generic datatype's: the derived impl's parameters and bounds (`X: Trait` for each)
+        let (dt_params, dt_bounds): (Vec<Ident>, Vec<crate::ast::GenericBound>) = match derived_impl {
+            Some(t) if !d.x.typ_params.is_empty() => ((*t.x.typ_params).clone(), (*t.x.typ_bounds).clone()),
+            _ => (vec![], vec![]),
+        };
         let sub = |t: &Typ| crate::sst_util::subst_typ(&substs, t);
         let params: Vec<crate::ast::Param> = decl
             .x
@@ -2991,8 +3101,8 @@ pub fn synthesize_derived_fmt_impls(
             body_visibility: crate::ast::BodyVisibility::Visibility(body_vis.clone()),
             opaqueness: Opaqueness::Revealed { visibility: body_vis.clone() },
             owning_module: Some(own_mod.clone()),
-            typ_params: Arc::new(own_typ_params),
-            typ_bounds: Arc::new(vec![]),
+            typ_params: Arc::new(dt_params.iter().cloned().chain(own_typ_params.into_iter()).collect()),
+            typ_bounds: Arc::new(dt_bounds.clone()),
             params: Arc::new(params),
             ret,
             body: Some(body),
@@ -3006,8 +3116,8 @@ pub fn synthesize_derived_fmt_impls(
             span.clone(),
             TraitImplX {
                 impl_path,
-                typ_params: Arc::new(vec![]),
-                typ_bounds: Arc::new(vec![]),
+                typ_params: Arc::new(dt_params.clone()),
+                typ_bounds: Arc::new(dt_bounds.clone()),
                 trait_path: spec.clone(),
                 trait_typ_args,
                 trait_typ_arg_impls: Spanned::new(

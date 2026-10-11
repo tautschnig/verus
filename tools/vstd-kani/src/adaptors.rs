@@ -1786,3 +1786,55 @@ fn fmt_ptr_delegates() {
         assert_eq!(both(&Arc::new(P(k))), base);
     }
 }
+
+/// Verus's derived `fmt_req` (vir/src/traits.rs `synthesize_derived_fmt_impls`): a derived
+/// `Debug` of a recursive or generic datatype calls only the `Debug` impls of the types it
+/// reaches through its fields (through `Arc`/`Box`/`Vec`/`Option`), so formatting a value
+/// panics exactly when a reachable leaf value's impl panics: here, when the tree contains a
+/// `Leaf(0)` (exec test; `cargo test derived_fmt_leaves`).
+#[cfg(test)]
+#[test]
+fn derived_fmt_leaves() {
+    use std::fmt;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::sync::Arc;
+    struct L(u8);
+    impl fmt::Debug for L {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            if self.0 == 0 { panic!("fmt precondition violated"); }
+            write!(f, "L{}", self.0)
+        }
+    }
+    #[allow(dead_code)]
+    #[derive(Debug)]
+    struct ST<X> { tag: u8, x: X }
+    #[allow(dead_code)]
+    #[derive(Debug)]
+    enum T { Leaf(L), Node(Vec<Arc<ST<T>>>), Opt(Option<Box<T>>), S(String) }
+    fn has_zero(t: &T) -> bool {
+        match t {
+            T::Leaf(l) => l.0 == 0,
+            T::Node(v) => v.iter().any(|s| has_zero(&s.x)),
+            T::Opt(o) => o.as_ref().map_or(false, |b| has_zero(b)),
+            T::S(_) => false,
+        }
+    }
+    fn gen(seed: &mut u64, depth: u32) -> T {
+        *seed ^= *seed << 13; *seed ^= *seed >> 7; *seed ^= *seed << 17;
+        match if depth == 0 { *seed % 2 } else { *seed % 4 } {
+            0 => T::Leaf(L((*seed >> 8) as u8 % 6)),
+            1 => T::S("s".to_string()),
+            2 => T::Node((0..(*seed % 3)).map(|i| Arc::new(ST { tag: i as u8, x: gen(seed, depth - 1) })).collect()),
+            _ => T::Opt(if *seed % 5 == 0 { None } else { Some(Box::new(gen(seed, depth - 1))) }),
+        }
+    }
+    let mut seed = 0x9E3779B97F4A7C15u64;
+    let (mut panics, mut oks) = (0, 0);
+    for _ in 0..5000 {
+        let t = gen(&mut seed, 5);
+        let r = catch_unwind(AssertUnwindSafe(|| format!("{:?}", Arc::new(ST { tag: 9, x: &t }))));
+        assert_eq!(r.is_err(), has_zero(&t));
+        if r.is_err() { panics += 1 } else { oks += 1 }
+    }
+    assert!(panics > 100 && oks > 100, "{panics} {oks}");
+}

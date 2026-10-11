@@ -3875,6 +3875,39 @@ test_verify_one_file! {
 }
 
 test_verify_one_file! {
+    // derived `Debug` of recursive and generic datatypes (as vir's `TypX`, `ExpX`,
+    // `SpannedTyped<X>`): recursion through `Arc`/`Box`/`Vec`/`Option` adds nothing, a type
+    // parameter contributes its own `fmt_req`, and a field type whose impl has an unknown
+    // precondition (`Q`'s `Instant`) is required however deep it occurs
+    #[test] derived_debug_fmt_req_recursive_generic verus_code! {
+        use vstd::prelude::*;
+        use std::sync::Arc;
+        #[derive(Debug)]
+        pub struct ST<X> { pub span: u64, pub typ: Typ, pub x: X }
+        pub type Typ = Arc<TypX>;
+        #[derive(Debug)]
+        pub enum TypX { Bool, Int(u32), Seq(Typ), Tuple(Vec<Typ>), Opt(Option<Box<TypX>>) }
+        pub type Exp = Arc<ST<ExpX>>;
+        #[derive(Debug)]
+        pub enum ExpX { Const(i64), Var(String), Seq(Vec<Exp>), Unary(Exp) }
+        #[derive(Debug)]
+        pub struct Q { pub o: std::time::Instant }
+        #[derive(Debug)]
+        pub enum Deep { A(u8), B(Box<Deep>), C(Vec<Q>) }
+        fn t(x: &Typ) -> String { format!("{x:?}") }
+        fn e(x: &Exp) -> String { format!("{x:?}") }
+        fn g(x: &ST<u8>, y: Box<ST<Typ>>) -> String { format!("{x:?} {y:?}") }
+        fn r(x: std::rc::Rc<TypX>) -> String { format!("{x:?}") }
+        fn d(x: &Deep) -> String {
+            format!("{x:?}") // FAILS
+        }
+        fn gq(x: &ST<Q>) -> String {
+            format!("{x:?}") // FAILS
+        }
+    } => Err(err) => assert_fails(err, 2)
+}
+
+test_verify_one_file! {
     // the synthesized `fmt_req` body is visible only where all fields are: from another
     // module, a datatype with private fields is formattable if its `fmt_req` is `true`
     // (the body names no type), and otherwise its `fmt_req` is unknown
