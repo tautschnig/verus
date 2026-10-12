@@ -2398,3 +2398,34 @@ test_verify_one_file! {
         }
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    // after a closure that mutably captures one field, the enclosing function still knows the
+    // others (AIR's SSA pass used to continue after the closure body's dead end with the
+    // versions from inside it, which nothing outside constrained); what the closure modifies
+    // stays unknown, inside and after
+    #[test] mut_capture_other_fields_kept verus_code! {
+        use vstd::prelude::*;
+        pub struct S { pub depth: u64, pub msgs: Vec<u8> }
+        fn warn(emit: impl FnOnce(u8)) requires forall |m: u8| call_requires(emit, (m,)) { emit(1); }
+        fn by_ref(s: &mut S) requires old(s).depth == 5 {
+            warn(|m: u8| s.msgs.push(m));
+            assert(s.depth == 5);
+        }
+        fn owned(mut s: S, y: u64) requires s.depth == 5, y == 3 {
+            let f = |m: u8| { s.msgs = Vec::new(); };
+            assert(s.depth == 5 && y == 3);
+        }
+        fn captured_field(mut s: S) requires s.msgs@.len() == 0 {
+            warn(|m: u8| s.msgs.push(m));
+            assert(s.msgs@.len() == 0); // FAILS
+        }
+        fn modified_field(mut s: S) requires s.depth == 5 {
+            warn(|m: u8| { s.depth = 6; });
+            assert(s.depth == 5); // FAILS
+        }
+        fn inside(mut x: u64) requires x == 5 {
+            let f = |m: u8| { assert(x == 5); x = 7; }; // FAILS
+        }
+    } => Err(err) => assert_fails(err, 3)
+}

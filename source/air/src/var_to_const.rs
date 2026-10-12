@@ -16,6 +16,8 @@ pub enum SsaJoin {
     Fallthrough,
     /// A `Break` brought up to the versions at its `Breakable`'s exit.
     Break,
+    /// The state after a `DeadEnd`, which is the state before it.
+    DeadEnd,
 }
 
 /// Why this pass generated an `Assume`. `source` is the process-local pointer
@@ -258,8 +260,44 @@ fn lower_stmt(
             Arc::new(StmtX::Block(Arc::new(vec![])))
         }
         StmtX::DeadEnd(s) => {
-            let s = lower_stmt(state, versions, snapshots, types, s);
-            Arc::new(StmtX::DeadEnd(s))
+            // wp(deadend(s), P) = wp(s, true) /\ P: execution continues from the state before
+            // `s`, so the statements after it must see the versions from before it. (Lowering
+            // `s` in place left `versions` at s's last versions, which only `s`'s own
+            // assumptions constrain: after a dead end that assigns or havocs a variable, e.g. a
+            // closure body modifying a capture, everything known about the variable was lost.)
+            let mut versions_s = versions.clone();
+            let mut snapshots_s = snapshots.clone();
+            let s = lower_stmt(state, &mut versions_s, &mut snapshots_s, types, s);
+            state.all_snapshots.extend(snapshots_s);
+            // later versions must not reuse the names `s` declared: move each variable `s`
+            // changed to a fresh version, equal to its version before `s`
+            let mut stmts = vec![Arc::new(StmtX::DeadEnd(s))];
+            for (x, n_s) in versions_s.iter() {
+                let n = find_version(&versions, x);
+                if *n_s > n {
+                    let fresh = Arc::new(rename_var(x, n_s + 1));
+                    if !state.version_decls.contains(&fresh) {
+                        state.decls.push(Arc::new(DeclX::Const(fresh.clone(), types[x].clone())));
+                        state.version_decls.insert(fresh.clone());
+                    }
+                    let before = Arc::new(ExprX::Var(Arc::new(rename_var(x, n))));
+                    let eq = Arc::new(ExprX::Binary(BinaryOp::Eq, Arc::new(ExprX::Var(fresh)), before));
+                    let assume = Arc::new(StmtX::Assume(eq));
+                    state.trace.generated.push((
+                        Arc::as_ptr(&assume) as usize,
+                        SsaOrigin::Reconcile {
+                            source,
+                            join: SsaJoin::DeadEnd,
+                            var: x.clone(),
+                            from: n,
+                            to: n_s + 1,
+                        },
+                    ));
+                    stmts.push(assume);
+                    versions.insert(x.clone(), n_s + 1);
+                }
+            }
+            if stmts.len() == 1 { stmts.pop().unwrap() } else { Arc::new(StmtX::Block(Arc::new(stmts))) }
         }
         StmtX::Breakable(label, s) => {
             state

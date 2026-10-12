@@ -90,6 +90,7 @@ fn ssa_join(join: air::var_to_const::SsaJoin) -> SsaJoin {
         air::var_to_const::SsaJoin::SwitchArm(i) => SsaJoin::SwitchArm(i as u32),
         air::var_to_const::SsaJoin::Fallthrough => SsaJoin::Fallthrough,
         air::var_to_const::SsaJoin::Break => SsaJoin::Break,
+        air::var_to_const::SsaJoin::DeadEnd => SsaJoin::DeadEnd,
     }
 }
 

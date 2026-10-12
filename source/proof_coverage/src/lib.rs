@@ -3142,6 +3142,7 @@ impl<'a> QueryWalk<'a> {
                 SsaJoin::SwitchArm(arm) => record::SsaJoinKind::SwitchArm { arm: *arm },
                 SsaJoin::Fallthrough => record::SsaJoinKind::Fallthrough,
                 SsaJoin::Break => record::SsaJoinKind::Break,
+                SsaJoin::DeadEnd => record::SsaJoinKind::DeadEnd,
             };
             self.sites.push(site.clone());
             self.occurrences.push(Occurrence {

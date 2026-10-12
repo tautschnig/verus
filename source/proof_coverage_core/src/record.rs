@@ -436,6 +436,7 @@ pub enum SsaJoinKind {
     SwitchArm { arm: u32 },
     Fallthrough,
     Break,
+    DeadEnd,
 }
 
 /// Why an occurrence exists in its query.

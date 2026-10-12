@@ -42,6 +42,8 @@ pub enum SsaJoin {
     Fallthrough,
     /// A `Break` brought up to the versions at its `Breakable`'s exit.
     Break,
+    /// The state after a `DeadEnd`, which is the state before it.
+    DeadEnd,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
