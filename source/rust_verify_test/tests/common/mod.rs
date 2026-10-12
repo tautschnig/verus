@@ -325,6 +325,8 @@ pub fn run_verus(
             verus_args.push("--counterexample".to_string());
         } else if *option == "--check-compute" {
             verus_args.push("--check-compute".to_string());
+        } else if *option == "--build-sst" {
+            verus_args.push("--build-sst".to_string());
         } else if *option == "--reveal-strlits" {
             verus_args.push("--reveal-strlits".to_string());
         } else if *option == "--check-compute-all" {
