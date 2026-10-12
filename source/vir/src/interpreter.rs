@@ -36,7 +36,6 @@ use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::iter::FromIterator;
-use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
@@ -117,11 +116,9 @@ impl<T> PtrSet<T> {
     fn new() -> Self {
         Self { store: HashMap::new() }
     }
-    #[cfg_attr(verus_only, verus_verify(external_body))]
     fn insert(&mut self, v: &Arc<T>) {
         self.store.insert(Arc::as_ptr(&v), v.clone());
     }
-    #[cfg_attr(verus_only, verus_verify(external_body))]
     fn contains(&mut self, v: &Arc<T>) -> bool {
         self.store.contains_key(&Arc::as_ptr(&v))
     }
@@ -329,6 +326,7 @@ verus! {
 /// restored and the limit is not exceeded
 spec fn eval_post(pre: &State, post: &State, ctx: &Ctx, ok: bool) -> bool {
     &&& state_inv(post, ctx)
+    &&& post.iterations >= pre.iterations
     &&& post.steps.len() >= pre.steps.len()
     &&& post.open_steps@ == pre.open_steps@
     &&& post.env.scope_keys().len() >= pre.env.scope_keys().len()
@@ -348,6 +346,7 @@ verus! {
 /// restored, the outer scopes unchanged
 spec fn frame(pre: &State, post: &State, ctx: &Ctx, extra: nat) -> bool {
     &&& eval_pre(post, ctx)
+    &&& post.iterations >= pre.iterations
     &&& post.steps.len() >= pre.steps.len()
     &&& post.open_steps@ == pre.open_steps@
     &&& post.depth == pre.depth
@@ -442,256 +441,427 @@ trait SyntacticEquality {
     fn definitely_ne(&self, other: &Self) -> bool {
         matches!(self.syntactic_eq(other), Some(false))
     }
-    /// If we cannot definitively establish equality, we conservatively return `None`
-    fn conservative_eq(&self, other: &Self) -> Option<bool> {
-        self.definitely_eq(other).then(|| true)
-    }
 }
+
+// The impls delegate to free functions, which recurse into each other directly: recursion
+// through the impls (the impl for `Typ` calling the impl for `Arc<Vec<Typ>>`, which calls the
+// impl for `Typ`) is a cycle of trait implementations, which Verus rejects. The loops are
+// `iter().zip(..).try_fold(..)` written out, in the same order and with the same
+// short-circuiting.
 
 #[cfg_attr(verus_only, verus_verify)]
 // Automatically get syntactic equality over typs, exps, ... once we know syntactic equality over typ, exp, ...
 impl<T: SyntacticEquality> SyntacticEquality for Arc<Vec<T>> {
-    #[cfg_attr(verus_only, verus_verify(external_body))]
     fn syntactic_eq(&self, other: &Self) -> Option<bool> {
         if self.len() != other.len() {
-            Some(false)
-        } else {
-            let check = self.iter().zip(other.iter()).try_fold(true, |def_true, (l, r)| {
-                match l.syntactic_eq(r) {
-                    None => ControlFlow::Continue(false), // We still continue, since we might see a definitely false result
-                    Some(false) => ControlFlow::Break(()), // Short circuit
-                    Some(true) => ControlFlow::Continue(def_true),
-                }
-            });
-            match check {
-                ControlFlow::Break(_) => Some(false),
-                ControlFlow::Continue(def_true) => {
-                    if def_true {
-                        Some(true)
-                    } else {
-                        None
-                    }
-                }
-            }
+            return Some(false);
         }
+        let mut def_true = true;
+        let mut i: usize = 0;
+        #[cfg_attr(verus_only, verus_spec(
+            invariant self@.len() == other@.len(), i <= self@.len(),
+            decreases self@.len() - i
+        ))]
+        while i < self.len() {
+            match self[i].syntactic_eq(&other[i]) {
+                None => def_true = false, // We still continue, since we might see a definitely false result
+                Some(false) => return Some(false), // Short circuit
+                Some(true) => {}
+            }
+            i += 1;
+        }
+        if def_true { Some(true) } else { None }
     }
 }
 
 #[cfg_attr(verus_only, verus_verify)]
 impl<T: Clone + SyntacticEquality> SyntacticEquality for Vector<T> {
-    #[cfg_attr(verus_only, verus_verify(external_body))]
     fn syntactic_eq(&self, other: &Self) -> Option<bool> {
         if self.len() != other.len() {
-            Some(false)
-        } else {
-            let check = self.iter().zip(other.iter()).try_fold(true, |def_true, (l, r)| {
-                match l.syntactic_eq(r) {
-                    None => ControlFlow::Continue(false), // We still continue, since we might see a definitely false result
-                    Some(false) => ControlFlow::Break(()), // Short circuit
-                    Some(true) => ControlFlow::Continue(def_true),
-                }
-            });
-            match check {
-                ControlFlow::Break(_) => Some(false),
-                ControlFlow::Continue(def_true) => {
-                    if def_true {
-                        Some(true)
-                    } else {
-                        None
-                    }
-                }
-            }
+            return Some(false);
         }
+        let mut def_true = true;
+        let mut i: usize = 0;
+        #[cfg_attr(verus_only, verus_spec(
+            invariant self.len() == other.len(), i <= self.len(),
+            decreases self.len() - i
+        ))]
+        while i < self.len() {
+            match self[i].syntactic_eq(&other[i]) {
+                None => def_true = false, // We still continue, since we might see a definitely false result
+                Some(false) => return Some(false), // Short circuit
+                Some(true) => {}
+            }
+            i += 1;
+        }
+        if def_true { Some(true) } else { None }
     }
 }
 
 #[cfg_attr(verus_only, verus_verify)]
 impl SyntacticEquality for Typ {
-    #[cfg_attr(verus_only, verus_verify(external_body))]
     fn syntactic_eq(&self, other: &Self) -> Option<bool> {
-        use TypX::*;
-        match (undecorate_typ(self).as_ref(), undecorate_typ(other).as_ref()) {
-            (Bool, Bool) => Some(true),
-            (Int(l), Int(r)) => Some(l == r),
-            (SpecFn(formals_l, res_l), SpecFn(formals_r, res_r)) => {
-                Some(formals_l.syntactic_eq(formals_r)? && res_l.syntactic_eq(res_r)?)
-            }
-            (Datatype(path_l, typs_l, _), Datatype(path_r, typs_r, _)) => {
-                Some(path_l == path_r && typs_l.syntactic_eq(typs_r)?)
-            }
-            (TypParam(l), TypParam(r)) => {
-                if l == r {
-                    Some(true)
-                } else {
-                    None
-                }
-            }
-            (TypeId, TypeId) => Some(true),
-            (Air(l), Air(r)) => Some(l == r),
-            _ => None,
-        }
+        typ_syntactic_eq(self, other)
     }
 }
 
 #[cfg_attr(verus_only, verus_verify)]
 impl SyntacticEquality for Bnd {
     fn syntactic_eq(&self, other: &Self) -> Option<bool> {
-        use BndX::*;
-        match (&self.x, &other.x) {
-            (Let(bnds_l), Let(bnds_r)) => {
-                if bnds_l.syntactic_eq(bnds_r)? {
-                    Some(true)
-                } else {
-                    None
-                }
-            }
-            (Quant(q_l, bnds_l, _trigs_l, _), Quant(q_r, bnds_r, _trigs_r, _)) => {
-                Some(q_l == q_r && bnds_l.conservative_eq(bnds_r)?)
-            }
-            (Lambda(bnds_l, _trigs_l), Lambda(bnds_r, _trigs_r)) => bnds_l.conservative_eq(bnds_r),
-            (Choose(bnds_l, _trigs_l, e_l), Choose(bnds_r, _trigs_r, e_r)) => {
-                Some(bnds_l.conservative_eq(bnds_r)? && e_l.syntactic_eq(e_r)?)
-            }
-            _ => None,
-        }
+        bnd_syntactic_eq(self, other)
     }
 }
 
 #[cfg_attr(verus_only, verus_verify)]
 // XXX: Generalize over `Binders<T>`?
 impl SyntacticEquality for Binders<Typ> {
-    #[cfg_attr(verus_only, verus_verify(external_body))]
     fn syntactic_eq(&self, other: &Self) -> Option<bool> {
-        self.iter().zip(other.iter()).try_fold(true, |acc, (bnd_l, bnd_r)| {
-            Some(acc && bnd_l.name == bnd_r.name && bnd_l.a.syntactic_eq(&bnd_r.a)?)
-        })
+        binders_typ_syntactic_eq(self, other)
     }
 }
 #[cfg_attr(verus_only, verus_verify)]
 impl SyntacticEquality for Binders<Exp> {
-    #[cfg_attr(verus_only, verus_verify(external_body))]
     fn syntactic_eq(&self, other: &Self) -> Option<bool> {
-        self.iter().zip(other.iter()).try_fold(true, |acc, (bnd_l, bnd_r)| {
-            Some(acc && bnd_l.name == bnd_r.name && bnd_l.a.syntactic_eq(&bnd_r.a)?)
-        })
+        binders_exp_syntactic_eq(self, other)
     }
 }
 
 #[cfg_attr(verus_only, verus_verify)]
 impl SyntacticEquality for VarBinders<Typ> {
-    #[cfg_attr(verus_only, verus_verify(external_body))]
     fn syntactic_eq(&self, other: &Self) -> Option<bool> {
-        self.iter().zip(other.iter()).try_fold(true, |acc, (bnd_l, bnd_r)| {
-            Some(acc && bnd_l.name == bnd_r.name && bnd_l.a.syntactic_eq(&bnd_r.a)?)
-        })
+        var_binders_typ_syntactic_eq(self, other)
     }
 }
 #[cfg_attr(verus_only, verus_verify)]
 impl SyntacticEquality for VarBinders<Exp> {
-    #[cfg_attr(verus_only, verus_verify(external_body))]
     fn syntactic_eq(&self, other: &Self) -> Option<bool> {
-        self.iter().zip(other.iter()).try_fold(true, |acc, (bnd_l, bnd_r)| {
-            Some(acc && bnd_l.name == bnd_r.name && bnd_l.a.syntactic_eq(&bnd_r.a)?)
-        })
+        var_binders_exp_syntactic_eq(self, other)
     }
 }
 
 #[cfg_attr(verus_only, verus_verify)]
 impl SyntacticEquality for Exp {
     // We expect to only call this after eval_expr has been called on both expressions
-    #[cfg_attr(verus_only, verus_verify(external_body))]
     fn syntactic_eq(&self, other: &Self) -> Option<bool> {
-        // Easy case where the pointers match
-        if Arc::ptr_eq(self, other) {
-            return Some(true);
-        }
-        // If we can't definitively establish equality, we conservatively return None
-        let def_eq = |b| if b { Some(true) } else { None };
-        use ExpX::*;
-        match (&self.x, &other.x) {
-            (Const(l), Const(r)) => {
-                // Explicitly enumerate cases here, in case we someday introduce
-                // a constant type that doesn't have a unique representation
-                use Constant::*;
-                match (l, r) {
-                    (Bool(l), Bool(r)) => Some(l == r),
-                    (Int(l), Int(r)) => Some(l == r),
-                    (StrSlice(l), StrSlice(r)) => Some(l == r),
-                    (ByteStr(l), ByteStr(r)) => Some(l == r),
-                    (Char(l), Char(r)) => Some(l == r),
-                    _ => None,
-                }
-            }
-            (Var(l), Var(r)) => def_eq(l == r),
-            (VarLoc(l), VarLoc(r)) => def_eq(l == r),
-            (VarAt(l, at_l), VarAt(r, at_r)) => def_eq(l == r && at_l == at_r),
-            (Loc(l), Loc(r)) => l.syntactic_eq(r),
-            (Old(id_l, unique_id_l), Old(id_r, unique_id_r)) => {
-                def_eq(id_l == id_r && unique_id_l == unique_id_r)
-            }
-            (
-                Call(CallFun::Fun(f_l, resolved_l), typs_l, exps_l),
-                Call(CallFun::Fun(f_r, resolved_r), typs_r, exps_r),
-            ) => {
-                // Resolve first, so that we compare the functions that actually get called
-                let (f_l, typs_l) = resolve_call(f_l, resolved_l, typs_l);
-                let (f_r, typs_r) = resolve_call(f_r, resolved_r, typs_r);
-                if f_l == f_r && n_types_equal(typs_l, typs_r) && exps_l.len() == exps_r.len() {
-                    def_eq(exps_l.syntactic_eq(exps_r)?)
-                } else {
-                    None
-                }
-            }
-            (CallLambda(exp_l, exps_l), CallLambda(exp_r, exps_r)) => {
-                Some(exp_l.syntactic_eq(exp_r)? && exps_l.syntactic_eq(exps_r)?)
-            }
+        exp_syntactic_eq(self, other)
+    }
+}
 
-            (Ctor(path_l, id_l, bnds_l), Ctor(path_r, id_r, bnds_r)) => {
-                if path_l != path_r || id_l != id_r {
-                    // These are definitely different datatypes or different
-                    // constructors of the same datatype
-                    Some(false)
-                } else if bnds_l.syntactic_eq(bnds_r)? {
-                    // Matching fields only make the values equal if the datatypes are
-                    // instantiated at the same type arguments.  We ignore decorations
-                    // (e.g., `&T` vs. `T`), since they don't change a datatype's value,
-                    // and `==` permits them to differ (see `builtin::SpecEq`).
-                    def_eq(types_equal(&undecorate_typ(&self.typ), &undecorate_typ(&other.typ)))
-                } else {
-                    Some(false)
-                }
-            }
-            (Unary(op_l, e_l), Unary(op_r, e_r)) => def_eq(op_l == op_r && e_l.syntactic_eq(e_r)?),
-            (UnaryOpr(op_l, e_l), UnaryOpr(op_r, e_r)) => {
-                use crate::ast::UnaryOpr::*;
-                let op_eq = match (op_l, op_r) {
-                    (HasType(l), HasType(r)) => def_eq(l.syntactic_eq(r)?),
-                    (
-                        IsVariant { datatype: dt_l, variant: var_l },
-                        IsVariant { datatype: dt_r, variant: var_r },
-                    ) => def_eq(dt_l == dt_r && var_l == var_r),
-                    (Field(l), Field(r)) => def_eq(l == r),
-                    _ => None,
-                };
-                def_eq(op_eq? && e_l.syntactic_eq(e_r)?)
-            }
-            (Binary(op_l, e1_l, e2_l), Binary(op_r, e1_r, e2_r)) => {
-                def_eq(op_l == op_r && e1_l.syntactic_eq(e1_r)? && e2_l.syntactic_eq(e2_r)?)
-            }
-            (If(e1_l, e2_l, e3_l), If(e1_r, e2_r, e3_r)) => Some(
-                e1_l.syntactic_eq(e1_r)? && e2_l.syntactic_eq(e2_r)? && e3_l.syntactic_eq(e3_r)?,
-            ),
-            (WithTriggers(_trigs_l, e_l), WithTriggers(_trigs_r, e_r)) => e_l.syntactic_eq(e_r),
-            (Bind(bnd_l, e_l), Bind(bnd_r, e_r)) => {
-                Some(bnd_l.syntactic_eq(bnd_r)? && e_l.syntactic_eq(e_r)?)
-            }
-            (Interp(l), Interp(r)) => match (l, r) {
-                (InterpExp::FreeVar(l), InterpExp::FreeVar(r)) => def_eq(l == r),
-                (InterpExp::Seq(l), InterpExp::Seq(r)) => l.syntactic_eq(r),
-                _ => None,
-            },
-            _ => None,
+/// `SyntacticEquality` for `Typs`
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verus_spec(decreases l))]
+fn typs_syntactic_eq(l: &Typs, r: &Typs) -> Option<bool> {
+    if l.len() != r.len() {
+        return Some(false);
+    }
+    let mut def_true = true;
+    let mut i: usize = 0;
+    #[cfg_attr(verus_only, verus_spec(
+        invariant l@.len() == r@.len(), i <= l@.len(),
+        decreases l@.len() - i
+    ))]
+    while i < l.len() {
+        match typ_syntactic_eq(&l[i], &r[i]) {
+            None => def_true = false,
+            Some(false) => return Some(false),
+            Some(true) => {}
         }
+        i += 1;
+    }
+    if def_true { Some(true) } else { None }
+}
+
+/// `SyntacticEquality` for `Exps`
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verus_spec(decreases l))]
+fn exps_syntactic_eq(l: &Exps, r: &Exps) -> Option<bool> {
+    if l.len() != r.len() {
+        return Some(false);
+    }
+    let mut def_true = true;
+    let mut i: usize = 0;
+    #[cfg_attr(verus_only, verus_spec(
+        invariant l@.len() == r@.len(), i <= l@.len(),
+        decreases l@.len() - i
+    ))]
+    while i < l.len() {
+        match exp_syntactic_eq(&l[i], &r[i]) {
+            None => def_true = false,
+            Some(false) => return Some(false),
+            Some(true) => {}
+        }
+        i += 1;
+    }
+    if def_true { Some(true) } else { None }
+}
+
+/// `SyntacticEquality` for `Vector<Exp>`
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verus_spec(decreases l))]
+fn vector_exps_syntactic_eq(l: &Vector<Exp>, r: &Vector<Exp>) -> Option<bool> {
+    if l.len() != r.len() {
+        return Some(false);
+    }
+    let mut def_true = true;
+    let mut i: usize = 0;
+    #[cfg_attr(verus_only, verus_spec(
+        invariant l.len() == r.len(), i <= l.len(),
+        decreases l.len() - i
+    ))]
+    while i < l.len() {
+        match exp_syntactic_eq(&l[i], &r[i]) {
+            None => def_true = false,
+            Some(false) => return Some(false),
+            Some(true) => {}
+        }
+        i += 1;
+    }
+    if def_true { Some(true) } else { None }
+}
+
+/// `SyntacticEquality` for `Binders<Typ>`. (As the `try_fold` over `zip` it replaces, it
+/// compares the pairs up to the shorter length.)
+#[cfg_attr(verus_only, verus_verify)]
+fn binders_typ_syntactic_eq(l: &Binders<Typ>, r: &Binders<Typ>) -> Option<bool> {
+    let n = if l.len() < r.len() { l.len() } else { r.len() };
+    let mut acc = true;
+    let mut i: usize = 0;
+    #[cfg_attr(verus_only, verus_spec(
+        invariant n <= l@.len(), n <= r@.len(), i <= n,
+        decreases n - i
+    ))]
+    while i < n {
+        acc = acc && l[i].name == r[i].name && typ_syntactic_eq(&l[i].a, &r[i].a)?;
+        i += 1;
+    }
+    Some(acc)
+}
+
+/// `SyntacticEquality` for `Binders<Exp>` (pairs up to the shorter length, as `zip`)
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verus_spec(decreases l))]
+fn binders_exp_syntactic_eq(l: &Binders<Exp>, r: &Binders<Exp>) -> Option<bool> {
+    let n = if l.len() < r.len() { l.len() } else { r.len() };
+    let mut acc = true;
+    let mut i: usize = 0;
+    #[cfg_attr(verus_only, verus_spec(
+        invariant n <= l@.len(), n <= r@.len(), i <= n,
+        decreases n - i
+    ))]
+    while i < n {
+        acc = acc && l[i].name == r[i].name && exp_syntactic_eq(&l[i].a, &r[i].a)?;
+        i += 1;
+    }
+    Some(acc)
+}
+
+/// `SyntacticEquality` for `VarBinders<Typ>` (pairs up to the shorter length, as `zip`)
+#[cfg_attr(verus_only, verus_verify)]
+fn var_binders_typ_syntactic_eq(l: &VarBinders<Typ>, r: &VarBinders<Typ>) -> Option<bool> {
+    let n = if l.len() < r.len() { l.len() } else { r.len() };
+    let mut acc = true;
+    let mut i: usize = 0;
+    #[cfg_attr(verus_only, verus_spec(
+        invariant n <= l@.len(), n <= r@.len(), i <= n,
+        decreases n - i
+    ))]
+    while i < n {
+        acc = acc && l[i].name == r[i].name && typ_syntactic_eq(&l[i].a, &r[i].a)?;
+        i += 1;
+    }
+    Some(acc)
+}
+
+/// `SyntacticEquality` for `VarBinders<Exp>` (pairs up to the shorter length, as `zip`)
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verus_spec(decreases l))]
+fn var_binders_exp_syntactic_eq(l: &VarBinders<Exp>, r: &VarBinders<Exp>) -> Option<bool> {
+    let n = if l.len() < r.len() { l.len() } else { r.len() };
+    let mut acc = true;
+    let mut i: usize = 0;
+    #[cfg_attr(verus_only, verus_spec(
+        invariant n <= l@.len(), n <= r@.len(), i <= n,
+        decreases n - i
+    ))]
+    while i < n {
+        acc = acc && l[i].name == r[i].name && exp_syntactic_eq(&l[i].a, &r[i].a)?;
+        i += 1;
+    }
+    Some(acc)
+}
+
+/// `conservative_eq` for `VarBinders<Typ>`: `Some(true)` if definitely equal, else `None`
+#[cfg_attr(verus_only, verus_verify)]
+fn var_binders_typ_conservative_eq(l: &VarBinders<Typ>, r: &VarBinders<Typ>) -> Option<bool> {
+    if matches!(var_binders_typ_syntactic_eq(l, r), Some(true)) { Some(true) } else { None }
+}
+
+/// `undecorate_typ` without the clone: the type under the decorations, a part of `t` (which is
+/// what the termination of `typ_syntactic_eq` rests on)
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verus_spec(r =>
+    // `decreases_to!(*t => *r)`
+    ensures r == t || is_smaller_than_lexicographic((*r,), (*t,)),
+    decreases t
+))]
+fn undecorate_typ_ref(t: &Typ) -> &Typ {
+    match &**t {
+        TypX::Decorate(_, _, u) => undecorate_typ_ref(u),
+        _ => t,
+    }
+}
+
+/// `SyntacticEquality` for `Typ`
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verus_spec(decreases l))]
+fn typ_syntactic_eq(l: &Typ, r: &Typ) -> Option<bool> {
+    use TypX::*;
+    let (lu, ru) = (undecorate_typ_ref(l), undecorate_typ_ref(r));
+    match (&**lu, &**ru) {
+        (Bool, Bool) => Some(true),
+        (Int(l), Int(r)) => Some(l == r),
+        (SpecFn(formals_l, res_l), SpecFn(formals_r, res_r)) => {
+            Some(typs_syntactic_eq(formals_l, formals_r)? && typ_syntactic_eq(res_l, res_r)?)
+        }
+        (Datatype(path_l, typs_l, _), Datatype(path_r, typs_r, _)) => {
+            Some(path_l == path_r && typs_syntactic_eq(typs_l, typs_r)?)
+        }
+        (TypParam(l), TypParam(r)) => {
+            if l == r {
+                Some(true)
+            } else {
+                None
+            }
+        }
+        (TypeId, TypeId) => Some(true),
+        (Air(l), Air(r)) => Some(l == r),
+        _ => None,
+    }
+}
+
+/// `SyntacticEquality` for `Bnd`
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verus_spec(decreases l))]
+fn bnd_syntactic_eq(l: &Bnd, r: &Bnd) -> Option<bool> {
+    use BndX::*;
+    match (&l.x, &r.x) {
+        (Let(bnds_l), Let(bnds_r)) => {
+            if var_binders_exp_syntactic_eq(bnds_l, bnds_r)? {
+                Some(true)
+            } else {
+                None
+            }
+        }
+        (Quant(q_l, bnds_l, _trigs_l, _), Quant(q_r, bnds_r, _trigs_r, _)) => {
+            Some(q_l == q_r && var_binders_typ_conservative_eq(bnds_l, bnds_r)?)
+        }
+        (Lambda(bnds_l, _trigs_l), Lambda(bnds_r, _trigs_r)) => {
+            var_binders_typ_conservative_eq(bnds_l, bnds_r)
+        }
+        (Choose(bnds_l, _trigs_l, e_l), Choose(bnds_r, _trigs_r, e_r)) => {
+            Some(var_binders_typ_conservative_eq(bnds_l, bnds_r)? && exp_syntactic_eq(e_l, e_r)?)
+        }
+        _ => None,
+    }
+}
+
+/// `SyntacticEquality` for `Exp`. We expect to only call this after eval_expr has been called
+/// on both expressions
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verus_spec(decreases l))]
+fn exp_syntactic_eq(l: &Exp, r: &Exp) -> Option<bool> {
+    // Easy case where the pointers match
+    if Arc::ptr_eq(l, r) {
+        return Some(true);
+    }
+    // If we can't definitively establish equality, we conservatively return None
+    let def_eq = |b| if b { Some(true) } else { None };
+    use ExpX::*;
+    match (&l.x, &r.x) {
+        (Const(cl), Const(cr)) => {
+            // Explicitly enumerate cases here, in case we someday introduce
+            // a constant type that doesn't have a unique representation
+            use Constant::*;
+            match (cl, cr) {
+                (Bool(a), Bool(b)) => Some(a == b),
+                (Int(a), Int(b)) => Some(a == b),
+                (StrSlice(a), StrSlice(b)) => Some(a == b),
+                (ByteStr(a), ByteStr(b)) => Some(a == b),
+                (Char(a), Char(b)) => Some(a == b),
+                _ => None,
+            }
+        }
+        (Var(a), Var(b)) => def_eq(a == b),
+        (VarLoc(a), VarLoc(b)) => def_eq(a == b),
+        (VarAt(a, at_l), VarAt(b, at_r)) => def_eq(a == b && at_l == at_r),
+        (Loc(a), Loc(b)) => exp_syntactic_eq(a, b),
+        (Old(id_l, unique_id_l), Old(id_r, unique_id_r)) => {
+            def_eq(id_l == id_r && unique_id_l == unique_id_r)
+        }
+        (
+            Call(CallFun::Fun(f_l, resolved_l), typs_l, exps_l),
+            Call(CallFun::Fun(f_r, resolved_r), typs_r, exps_r),
+        ) => {
+            // Resolve first, so that we compare the functions that actually get called
+            let (f_l, typs_l) = resolve_call(f_l, resolved_l, typs_l);
+            let (f_r, typs_r) = resolve_call(f_r, resolved_r, typs_r);
+            if f_l == f_r && n_types_equal(typs_l, typs_r) && exps_l.len() == exps_r.len() {
+                def_eq(exps_syntactic_eq(exps_l, exps_r)?)
+            } else {
+                None
+            }
+        }
+        (CallLambda(exp_l, exps_l), CallLambda(exp_r, exps_r)) => {
+            Some(exp_syntactic_eq(exp_l, exp_r)? && exps_syntactic_eq(exps_l, exps_r)?)
+        }
+
+        (Ctor(path_l, id_l, bnds_l), Ctor(path_r, id_r, bnds_r)) => {
+            if path_l != path_r || id_l != id_r {
+                // These are definitely different datatypes or different
+                // constructors of the same datatype
+                Some(false)
+            } else if binders_exp_syntactic_eq(bnds_l, bnds_r)? {
+                // Matching fields only make the values equal if the datatypes are
+                // instantiated at the same type arguments.  We ignore decorations
+                // (e.g., `&T` vs. `T`), since they don't change a datatype's value,
+                // and `==` permits them to differ (see `builtin::SpecEq`).
+                def_eq(types_equal(&undecorate_typ(&l.typ), &undecorate_typ(&r.typ)))
+            } else {
+                Some(false)
+            }
+        }
+        (Unary(op_l, e_l), Unary(op_r, e_r)) => def_eq(op_l == op_r && exp_syntactic_eq(e_l, e_r)?),
+        (UnaryOpr(op_l, e_l), UnaryOpr(op_r, e_r)) => {
+            use crate::ast::UnaryOpr::*;
+            let op_eq = match (op_l, op_r) {
+                (HasType(a), HasType(b)) => def_eq(typ_syntactic_eq(a, b)?),
+                (
+                    IsVariant { datatype: dt_l, variant: var_l },
+                    IsVariant { datatype: dt_r, variant: var_r },
+                ) => def_eq(dt_l == dt_r && var_l == var_r),
+                (Field(a), Field(b)) => def_eq(a == b),
+                _ => None,
+            };
+            def_eq(op_eq? && exp_syntactic_eq(e_l, e_r)?)
+        }
+        (Binary(op_l, e1_l, e2_l), Binary(op_r, e1_r, e2_r)) => {
+            def_eq(op_l == op_r && exp_syntactic_eq(e1_l, e1_r)? && exp_syntactic_eq(e2_l, e2_r)?)
+        }
+        (If(e1_l, e2_l, e3_l), If(e1_r, e2_r, e3_r)) => Some(
+            exp_syntactic_eq(e1_l, e1_r)?
+                && exp_syntactic_eq(e2_l, e2_r)?
+                && exp_syntactic_eq(e3_l, e3_r)?,
+        ),
+        (WithTriggers(_trigs_l, e_l), WithTriggers(_trigs_r, e_r)) => exp_syntactic_eq(e_l, e_r),
+        (Bind(bnd_l, e_l), Bind(bnd_r, e_r)) => {
+            Some(bnd_syntactic_eq(bnd_l, bnd_r)? && exp_syntactic_eq(e_l, e_r)?)
+        }
+        (Interp(a), Interp(b)) => match (a, b) {
+            (InterpExp::FreeVar(a), InterpExp::FreeVar(b)) => def_eq(a == b),
+            (InterpExp::Seq(a), InterpExp::Seq(b)) => vector_exps_syntactic_eq(a, b),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -699,50 +869,102 @@ impl SyntacticEquality for Exp {
  * Functionality needed to hash expressions  *
  *********************************************/
 
-// Convenience function to simplify repetitive hashing behavior over an iterator.
-#[cfg_attr(verus_only, verus_verify(external_body))]
-fn hash_iter<H: Hasher, K: Hash, V>(
-    state: &mut H,
-    it: impl Iterator<Item = (K, V)>,
-    f: impl Fn(&mut H, V),
-) {
-    it.for_each(|(k, v)| {
-        k.hash(state);
-        f(state, v);
-    })
+// (These were written with a `hash_iter(state, it, f)` helper taking the function for the
+// elements as a value; recursion through a function passed as a value (`hash_exp` to
+// `hash_iter` inside `hash_exp`) is a cycle of specifications for Verus. The loops hash the
+// same sequence: each element's index (or name) and then the element.)
+
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verus_spec(decreases xs))]
+fn hash_exps<H: Hasher>(state: &mut H, xs: &Exps) {
+    let mut i: usize = 0;
+    #[cfg_attr(verus_only, verus_spec(
+        invariant i <= xs@.len(),
+        decreases xs@.len() - i
+    ))]
+    while i < xs.len() {
+        i.hash(state);
+        hash_exp(state, &xs[i]);
+        i += 1;
+    }
 }
 
 #[cfg_attr(verus_only, verus_verify)]
-fn hash_exps<H: Hasher>(state: &mut H, exps: &Exps) {
-    hash_iter(state, exps.iter().enumerate(), hash_exp)
+#[cfg_attr(verus_only, verus_spec(decreases xs))]
+fn hash_exps_vector<H: Hasher>(state: &mut H, xs: &Vector<Exp>) {
+    let mut i: usize = 0;
+    #[cfg_attr(verus_only, verus_spec(
+        invariant i <= xs.len(),
+        decreases xs.len() - i
+    ))]
+    while i < xs.len() {
+        i.hash(state);
+        hash_exp(state, &xs[i]);
+        i += 1;
+    }
 }
 
 #[cfg_attr(verus_only, verus_verify)]
-fn hash_exps_vector<H: Hasher>(state: &mut H, exps: &Vector<Exp>) {
-    hash_iter(state, exps.iter().enumerate(), hash_exp)
+#[cfg_attr(verus_only, verus_spec(decreases xs))]
+fn hash_trigs<H: Hasher>(state: &mut H, xs: &Trigs) {
+    let mut i: usize = 0;
+    #[cfg_attr(verus_only, verus_spec(
+        invariant i <= xs@.len(),
+        decreases xs@.len() - i
+    ))]
+    while i < xs.len() {
+        i.hash(state);
+        hash_exps(state, &xs[i]);
+        i += 1;
+    }
 }
 
 #[cfg_attr(verus_only, verus_verify)]
-fn hash_trigs<H: Hasher>(state: &mut H, trigs: &Trigs) {
-    hash_iter(state, trigs.iter().enumerate(), hash_exps)
-}
-
-#[cfg_attr(verus_only, verus_verify(external_body))]
-fn hash_var_binders_typ<H: Hasher>(state: &mut H, bnds: &VarBinders<Typ>) {
-    hash_iter(state, bnds.iter().map(|b| (&b.name, &b.a)), |st, v| v.hash(st))
+fn hash_var_binders_typ<H: Hasher>(state: &mut H, xs: &VarBinders<Typ>) {
+    let mut i: usize = 0;
+    #[cfg_attr(verus_only, verus_spec(
+        invariant i <= xs@.len(),
+        decreases xs@.len() - i
+    ))]
+    while i < xs.len() {
+        xs[i].name.hash(state);
+        xs[i].a.hash(state);
+        i += 1;
+    }
 }
 
 #[cfg_attr(verus_only, verus_verify)]
-fn hash_binders_exp<H: Hasher>(state: &mut H, bnds: &Binders<Exp>) {
-    hash_iter(state, bnds.iter().map(|b| (&b.name, &b.a)), hash_exp)
+#[cfg_attr(verus_only, verus_spec(decreases xs))]
+fn hash_binders_exp<H: Hasher>(state: &mut H, xs: &Binders<Exp>) {
+    let mut i: usize = 0;
+    #[cfg_attr(verus_only, verus_spec(
+        invariant i <= xs@.len(),
+        decreases xs@.len() - i
+    ))]
+    while i < xs.len() {
+        xs[i].name.hash(state);
+        hash_exp(state, &xs[i].a);
+        i += 1;
+    }
 }
 
 #[cfg_attr(verus_only, verus_verify)]
-fn hash_var_binders_exp<H: Hasher>(state: &mut H, bnds: &VarBinders<Exp>) {
-    hash_iter(state, bnds.iter().map(|b| (&b.name, &b.a)), hash_exp)
+#[cfg_attr(verus_only, verus_spec(decreases xs))]
+fn hash_var_binders_exp<H: Hasher>(state: &mut H, xs: &VarBinders<Exp>) {
+    let mut i: usize = 0;
+    #[cfg_attr(verus_only, verus_spec(
+        invariant i <= xs@.len(),
+        decreases xs@.len() - i
+    ))]
+    while i < xs.len() {
+        xs[i].name.hash(state);
+        hash_exp(state, &xs[i].a);
+        i += 1;
+    }
 }
 
-#[cfg_attr(verus_only, verus_verify(external_body))]
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verus_spec(decreases bnd))]
 fn hash_bnd<H: Hasher>(state: &mut H, bnd: &Bnd) {
     use BndX::*;
     macro_rules! dohash {
@@ -763,7 +985,8 @@ fn hash_bnd<H: Hasher>(state: &mut H, bnd: &Bnd) {
     }
 }
 
-#[cfg_attr(verus_only, verus_verify(external_body))]
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verus_spec(decreases exp))]
 fn hash_exp<H: Hasher>(state: &mut H, exp: &Exp) {
     use ExpX::*;
     macro_rules! dohash {
@@ -790,7 +1013,7 @@ fn hash_exp<H: Hasher>(state: &mut H, exp: &Exp) {
         Call(fun, typs, exps) => dohash!(6, fun, typs; hash_exps(exps)),
         CallLambda(lambda, args) => {
             dohash!(7; hash_exp(lambda));
-            hash_iter(state, args.iter().enumerate(), hash_exp);
+            hash_exps(state, args);
         }
         Ctor(path, id, bnds) => dohash!(8, path, id; hash_binders_exp(bnds)),
         NullaryOpr(op) => dohash!(-1, op),
@@ -1130,6 +1353,7 @@ pub(crate) fn is_seq_to_sst_fun(fun: &Fun) -> bool {
 }
 
 #[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
 /// Convert an interpreter-internal sequence representation back into a
 /// representation we can pass to AIR.  The algorithm follows the seq_internal
 /// macro definition in vstd's seq.rs.
@@ -1138,7 +1362,8 @@ fn seq_to_sst(span: &Span, inner_typ: Typ, s: &Vector<Exp>) -> Result<Exp, VirEr
     seq_to_sst_with(span, inner_typ, s, false)
 }
 
-#[cfg_attr(verus_only, verus_verify(external_body))]
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
 /// `push_chain`: always `Seq::empty().push(..)..`, never a view of an array literal
 /// (`array_view` is only in the context of queries that use arrays)
 fn seq_to_sst_with(
@@ -1169,10 +1394,18 @@ fn seq_to_sst_with(
         let fun_push = Arc::new(FunX { path: path_push });
         let empty =
             new_seq_exp(ExpX::Call(CallFun::Fun(fun_empty, None), typs.clone(), Arc::new(vec![])));
-        let seq = s.iter().fold(empty, |acc, e| {
-            let args = Arc::new(vec![acc, e.clone()]);
-            new_seq_exp(ExpX::Call(CallFun::Fun(fun_push.clone(), None), typs.clone(), args))
-        });
+        // (as `s.iter().fold(empty, ..)`)
+        let mut seq = empty;
+        let mut i: usize = 0;
+        #[cfg_attr(verus_only, verus_spec(
+            invariant i <= s.len(), forall |e: ExpX| call_requires(new_seq_exp, (e,)),
+            decreases s.len() - i
+        ))]
+        while i < s.len() {
+            let args = Arc::new(vec![seq, s[i].clone()]);
+            seq = new_seq_exp(ExpX::Call(CallFun::Fun(fun_push.clone(), None), typs.clone(), args));
+            i += 1;
+        }
         Ok(seq)
     } else {
         // Describe the sequence in terms of a view on an array literal
@@ -1254,7 +1487,6 @@ fn seq_call_with(
 }
 
 #[cfg_attr(verus_only, verus_verify)]
-#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
 /// Custom interpretation for sequence functions.
 /// Expects to be called after is_sequence_fn has already identified
 /// the relevant sequence function.  We still pass in the original Call Exp,
@@ -1262,7 +1494,8 @@ fn seq_call_with(
 #[cfg_attr(verus_only, verifier::loop_isolation(false))]
 #[cfg_attr(verus_only, verus_spec(r =>
     requires eval_pre(old(state), ctx),
-    ensures eval_post(old(state), final(state), ctx, r is Ok)
+    ensures eval_post(old(state), final(state), ctx, r is Ok),
+    decreases ctx.max_iterations + 2 - old(state).iterations, 1int
 ))]
 fn eval_seq(
     ctx: &Ctx,
@@ -1490,13 +1723,13 @@ fn eval_array_index(
  ********************/
 
 #[cfg_attr(verus_only, verus_verify)]
-#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
 #[cfg_attr(verus_only, verifier::rlimit(400))]
 #[cfg_attr(verus_only, verifier::loop_isolation(false))]
 /// The `Call(CallFun::Fun(..))` case of `eval_expr_internal` (split off for verification)
 #[cfg_attr(verus_only, verus_spec(r =>
     requires eval_pre(old(state), ctx),
-    ensures eval_post(old(state), final(state), ctx, r is Ok)
+    ensures eval_post(old(state), final(state), ctx, r is Ok),
+    decreases ctx.max_iterations + 2 - old(state).iterations, 2int
 ))]
 fn eval_call(
     ctx: &Ctx,
@@ -1648,13 +1881,13 @@ fn eval_call(
 }
 
 #[cfg_attr(verus_only, verus_verify)]
-#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
 #[cfg_attr(verus_only, verifier::rlimit(400))]
 #[cfg_attr(verus_only, verifier::loop_isolation(false))]
 /// A case of `eval_expr_internal` (split off for verification)
 #[cfg_attr(verus_only, verus_spec(r =>
     requires eval_pre(old(state), ctx),
-    ensures eval_post(old(state), final(state), ctx, r is Ok)
+    ensures eval_post(old(state), final(state), ctx, r is Ok),
+    decreases ctx.max_iterations + 2 - old(state).iterations, 1int
 ))]
 fn eval_unary(
     ctx: &Ctx,
@@ -1836,13 +2069,13 @@ fn eval_unary(
 }
 
 #[cfg_attr(verus_only, verus_verify)]
-#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
 #[cfg_attr(verus_only, verifier::rlimit(400))]
 #[cfg_attr(verus_only, verifier::loop_isolation(false))]
 /// A case of `eval_expr_internal` (split off for verification)
 #[cfg_attr(verus_only, verus_spec(r =>
     requires eval_pre(old(state), ctx),
-    ensures eval_post(old(state), final(state), ctx, r is Ok)
+    ensures eval_post(old(state), final(state), ctx, r is Ok),
+    decreases ctx.max_iterations + 2 - old(state).iterations, 1int
 ))]
 fn eval_binary(
     ctx: &Ctx,
@@ -2091,8 +2324,181 @@ fn eval_binary(
     }
 }
 
+/// Insert a closure's captured environment into the innermost scope of `env`. (A loop of its
+/// own: its termination rests on `HashMap`'s iterator, whose model in vstd needs
+/// `obeys_key_model::<VarIdent>()`, which nothing states.)
 #[cfg_attr(verus_only, verus_verify)]
 #[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
+#[cfg_attr(verus_only, verifier::loop_isolation(false))]
+#[cfg_attr(verus_only, verus_spec(r =>
+    requires old(env).scope_keys().len() > 0,
+    ensures
+        final(env).scope_keys().len() == old(env).scope_keys().len(),
+        final(env).scope_keys().subrange(0, old(env).scope_keys().len() - 1)
+            =~= old(env).scope_keys().subrange(0, old(env).scope_keys().len() - 1),
+        final(env).all_shadowing() == old(env).all_shadowing(),
+))]
+fn insert_context(env: &mut Env, context: &HashMap<UniqueIdent, Exp>) -> Result<(), ()> {
+    #[cfg(verus_only)]
+    proof_decl! { let ghost e0 = *env; }
+    #[cfg_attr(verus_only, verus_spec(
+        invariant
+            env.scope_keys().len() == e0.scope_keys().len(),
+            env.scope_keys().subrange(0, e0.scope_keys().len() - 1)
+                =~= e0.scope_keys().subrange(0, e0.scope_keys().len() - 1),
+            env.all_shadowing() == e0.all_shadowing(),
+    ))]
+    for (k, v) in context.iter() {
+        env.insert(k.clone(), v.clone())?;
+    }
+    Ok(())
+}
+
+/// Applying a closure (a case of `eval_expr_internal`, split off for verification)
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verifier::rlimit(400))]
+#[cfg_attr(verus_only, verifier::loop_isolation(false))]
+#[cfg_attr(verus_only, verus_spec(r =>
+    requires eval_pre(old(state), ctx),
+    ensures eval_post(old(state), final(state), ctx, r is Ok),
+    decreases ctx.max_iterations + 2 - old(state).iterations, 2int
+))]
+fn eval_call_lambda(
+    ctx: &Ctx,
+    state: &mut State,
+    exp: &Exp,
+    lambda: &Exp,
+    args: &Exps,
+) -> Result<Exp, VirErr> {
+    use ExpX::*;
+    let ok: Result<Exp, VirErr> = Ok(exp.clone());
+    let lambda = eval_expr_internal(ctx, state, lambda)?;
+    match &lambda.x {
+        Interp(InterpExp::Closure(lambda, context)) => match &lambda.x {
+            Bind(bnd, body) => match &bnd.x {
+                BndX::Lambda(bnds, _trigs) => {
+                    let new_args: Result<Vec<Exp>, VirErr> =
+                        eval_exps(ctx, state, args);
+                    let new_args = Arc::new(new_args?);
+                    #[cfg(verus_only)]
+                    proof_decl! { let ghost s_mid = *state; }
+                    state.env.push_scope(true);
+                    #[cfg(verus_only)]
+                    proof! { assert(frame(&s_mid, state, ctx, 1)); } // (proof hint)
+                    // Process the original context first, so formal args take precedence
+                    // (was `for_each` with a closure capturing `state.env`)
+                    if insert_context(&mut state.env, context).is_err() {
+                        return Err(error(&exp.span, "internal error: duplicate binder"));
+                    }
+                    #[cfg(verus_only)]
+                    proof! { assert(frame(&s_mid, state, ctx, 1)); } // (proof hint)
+                    state.env.push_scope(true);
+                    #[cfg(verus_only)]
+                    proof! { assert(frame(&s_mid, state, ctx, 2)); } // (proof hint)
+                    // (as `for (formal, actual) in bnds.iter().zip(new_args.iter())`)
+                    let n = if bnds.len() < new_args.len() { bnds.len() } else { new_args.len() };
+                    let mut i: usize = 0;
+                    #[cfg_attr(verus_only, verus_spec(
+                        invariant frame(&s_mid, state, ctx, 2), i <= n, n <= bnds@.len(), n <= new_args@.len(),
+                        decreases n - i
+                    ))]
+                    while i < n {
+                        let formal_id = bnds[i].name.clone();
+                        if state.env.insert(formal_id, new_args[i].clone()).is_err() {
+                            return Err(error(&exp.span, "internal error: duplicate binder"));
+                        }
+                        i += 1;
+                    }
+                    let e = eval_expr_internal(ctx, state, body);
+                    state.env.pop_scope();
+                    state.env.pop_scope();
+                    #[cfg(verus_only)]
+                    proof! { assert(e is Ok ==> state.env.scope_keys() =~= s_mid.env.scope_keys()); }
+                    e
+                }
+                _ => Err(error(&exp.span, format!(
+                    "internal error: Expected CallLambda's binder to contain a lambda.  Instead found {:?}",
+                    bnd
+                ))),
+            },
+            _ => ok,
+        },
+        _ => ok,
+    }
+}
+
+/// A binder (let, lambda, quantifier) (a case of `eval_expr_internal`, split off for verification)
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verifier::rlimit(400))]
+#[cfg_attr(verus_only, verifier::loop_isolation(false))]
+#[cfg_attr(verus_only, verus_spec(r =>
+    requires eval_pre(old(state), ctx),
+    ensures eval_post(old(state), final(state), ctx, r is Ok),
+    decreases ctx.max_iterations + 2 - old(state).iterations, 1int
+))]
+fn eval_bind(
+    ctx: &Ctx,
+    state: &mut State,
+    exp: &Exp,
+    bnd: &Bnd,
+    e: &Exp,
+) -> Result<Exp, VirErr> {
+    use ExpX::*;
+    let ok: Result<Exp, VirErr> = Ok(exp.clone());
+    let exp_new = |e: ExpX| -> Result<Exp, VirErr> { Ok(SpannedTyped::new(&exp.span, &exp.typ, e)) };
+    match &bnd.x {
+    BndX::Let(bnds) => {
+        #[cfg(verus_only)]
+        proof_decl! { let ghost s_mid = *state; }
+        state.env.push_scope(true);
+        #[cfg_attr(verus_only, verus_spec(
+            invariant frame(&s_mid, state, ctx, 1)
+        ))]
+        for b in bnds.iter() {
+            let id = b.name.clone();
+            let val = eval_expr_internal(ctx, state, &b.a)?;
+            if state.env.insert(id, val).is_err() {
+                return Err(error(&exp.span, "internal error: duplicate binder"));
+            }
+        }
+        let e = eval_expr_internal(ctx, state, e);
+        state.env.pop_scope();
+        e
+    }
+    BndX::Lambda(_, _) => {
+        let mut env = HashMap::new();
+        env.extend(state.env.map().iter().map(|(k, v)| (k.clone(), v.clone())));
+        exp_new(Interp(InterpExp::Closure(exp.clone(), env)))
+    }
+    BndX::Quant(_quant_type, bnds, _triggers, _by_locals) => {
+        #[cfg(verus_only)]
+        proof_decl! { let ghost s_mid = *state; }
+        state.env.push_scope(true);
+        #[cfg_attr(verus_only, verus_spec(
+            invariant frame(&s_mid, state, ctx, 1)
+        ))]
+        for b in bnds.iter() {
+            let id = b.name.clone();
+            let val = SpannedTyped::new(&e.span, &b.a, ExpX::Var(id.clone()));
+            if state.env.insert(id, val).is_err() {
+                return Err(error(&exp.span, "internal error: duplicate binder"));
+            }
+        }
+        let e = eval_expr_internal(ctx, state, e)?;
+        state.env.pop_scope();
+        if let ExpX::Const(Constant::Bool(_)) = e.x {
+            // We simplified the body so far that we can eliminate the quantifier too
+            Ok(e)
+        } else {
+            // Restore the quantifier with a (hopefully) simpler body
+            exp_new(Bind(bnd.clone(), e))
+        }
+    }
+    _ => ok,
+    }
+}
+
+#[cfg_attr(verus_only, verus_verify)]
 /// Evaluate each expression in order, stopping at the first error (as
 /// `exps.iter().map(|e| eval_expr_internal(ctx, state, e)).collect()`, written as a loop so
 /// that what is known about `state` survives)
@@ -2101,7 +2507,8 @@ fn eval_binary(
     requires eval_pre(old(state), ctx),
     ensures
         eval_post(old(state), final(state), ctx, r is Ok),
-        r matches Ok(v) ==> v@.len() == exps@.len()
+        r matches Ok(v) ==> v@.len() == exps@.len(),
+    decreases ctx.max_iterations + 2 - old(state).iterations, 1int
 ))]
 fn eval_exps(ctx: &Ctx, state: &mut State, exps: &[Exp]) -> Result<Vec<Exp>, VirErr> {
     #[cfg(verus_only)]
@@ -2124,7 +2531,6 @@ fn eval_exps(ctx: &Ctx, state: &mut State, exps: &[Exp]) -> Result<Vec<Exp>, Vir
 }
 
 #[cfg_attr(verus_only, verus_verify)]
-#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
 /// Symbolically execute the expression as far as we can,
 /// stopping when we hit a symbolic control-flow decision
 #[cfg_attr(verus_only, verifier::rlimit(400))]
@@ -2132,7 +2538,8 @@ fn eval_exps(ctx: &Ctx, state: &mut State, exps: &[Exp]) -> Result<Vec<Exp>, Vir
 #[cfg_attr(verus_only, verifier::loop_isolation(false))]
 #[cfg_attr(verus_only, verus_spec(r =>
     requires eval_pre(old(state), ctx),
-    ensures eval_post(old(state), final(state), ctx, r is Ok)
+    ensures eval_post(old(state), final(state), ctx, r is Ok),
+    decreases ctx.max_iterations + 2 - old(state).iterations, 0int
 ))]
 fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, VirErr> {
     state.iterations += 1;
@@ -2303,102 +2710,11 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
             exp_new(Call(fun.clone(), typs.clone(), new_args.clone()))
         }
         CallLambda(lambda, args) => {
-            let lambda = eval_expr_internal(ctx, state, lambda)?;
-            match &lambda.x {
-                Interp(InterpExp::Closure(lambda, context)) => match &lambda.x {
-                    Bind(bnd, body) => match &bnd.x {
-                        BndX::Lambda(bnds, _trigs) => {
-                            let new_args: Result<Vec<Exp>, VirErr> =
-                                eval_exps(ctx, state, args);
-                            let new_args = Arc::new(new_args?);
-                            #[cfg(verus_only)]
-                            proof_decl! { let ghost s_mid = *state; }
-                            state.env.push_scope(true);
-                            // Process the original context first, so formal args take precedence
-                            // (a loop, was `for_each` with a closure capturing `state.env`)
-                            #[cfg_attr(verus_only, verus_spec(
-                                invariant frame(&s_mid, state, ctx, 1)
-                            ))]
-                            for (k, v) in context.iter() {
-                                if state.env.insert(k.clone(), v.clone()).is_err() {
-                                    return Err(error(&exp.span, "internal error: duplicate binder"));
-                                }
-                            }
-                            state.env.push_scope(true);
-                            #[cfg_attr(verus_only, verus_spec(
-                                invariant frame(&s_mid, state, ctx, 2)
-                            ))]
-                            for (formal, actual) in bnds.iter().zip(new_args.iter()) {
-                                let formal_id = formal.name.clone();
-                                if state.env.insert(formal_id, actual.clone()).is_err() {
-                                    return Err(error(&exp.span, "internal error: duplicate binder"));
-                                }
-                            }
-                            let e = eval_expr_internal(ctx, state, body);
-                            state.env.pop_scope();
-                            state.env.pop_scope();
-                            e
-                        }
-                        _ => Err(error(&exp.span, format!(
-                            "internal error: Expected CallLambda's binder to contain a lambda.  Instead found {:?}",
-                            bnd
-                        ))),
-                    },
-                    _ => ok,
-                },
-                _ => ok,
-            }
+            eval_call_lambda(ctx, state, exp, lambda, args)
         }
-        Bind(bnd, e) => match &bnd.x {
-            BndX::Let(bnds) => {
-                #[cfg(verus_only)]
-                proof_decl! { let ghost s_mid = *state; }
-                state.env.push_scope(true);
-                #[cfg_attr(verus_only, verus_spec(
-                    invariant frame(&s_mid, state, ctx, 1)
-                ))]
-                for b in bnds.iter() {
-                    let id = b.name.clone();
-                    let val = eval_expr_internal(ctx, state, &b.a)?;
-                    if state.env.insert(id, val).is_err() {
-                        return Err(error(&exp.span, "internal error: duplicate binder"));
-                    }
-                }
-                let e = eval_expr_internal(ctx, state, e);
-                state.env.pop_scope();
-                e
-            }
-            BndX::Lambda(_, _) => {
-                let mut env = HashMap::new();
-                env.extend(state.env.map().iter().map(|(k, v)| (k.clone(), v.clone())));
-                exp_new(Interp(InterpExp::Closure(exp.clone(), env)))
-            }
-            BndX::Quant(_quant_type, bnds, _triggers, _by_locals) => {
-                #[cfg(verus_only)]
-                proof_decl! { let ghost s_mid = *state; }
-                state.env.push_scope(true);
-                #[cfg_attr(verus_only, verus_spec(
-                    invariant frame(&s_mid, state, ctx, 1)
-                ))]
-                for b in bnds.iter() {
-                    let id = b.name.clone();
-                    let val = SpannedTyped::new(&e.span, &b.a, ExpX::Var(id.clone()));
-                    if state.env.insert(id, val).is_err() {
-                        return Err(error(&exp.span, "internal error: duplicate binder"));
-                    }
-                }
-                let e = eval_expr_internal(ctx, state, e)?;
-                state.env.pop_scope();
-                if let ExpX::Const(Constant::Bool(_)) = e.x {
-                    // We simplified the body so far that we can eliminate the quantifier too
-                    Ok(e)
-                } else {
-                    // Restore the quantifier with a (hopefully) simpler body
-                    exp_new(Bind(bnd.clone(), e))
-                }
-            }
-            _ => ok,
-        },
+        Bind(bnd, e) => {
+            eval_bind(ctx, state, exp, bnd, e)
+        }
         Ctor(path, id, bnds) => {
             let mut new_bnds: Vec<Binder<Exp>> = Vec::new();
             #[cfg(verus_only)]
@@ -2591,7 +2907,8 @@ fn eval_expr_top(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Simplificati
     }
 }
 
-#[cfg_attr(verus_only, verus_verify(external_body))]
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verifier::loop_isolation(false))]
 /// We run the interpreter on a separate thread, so that we can give it a larger-than-default stack
 fn eval_expr_launch(
     global: &GlobalCtx,
@@ -2665,13 +2982,13 @@ fn eval_expr_launch(
                     funs: st.funs.clone(),
                     children,
                 }),
-                _ => t.unexpressible += 1,
+                _ => t.unexpressible = t.unexpressible.saturating_add(1),
             }
         }
         for f in state.top_facts.iter() {
             match clean(f) {
                 Some(f) => t.top.push(f),
-                None => t.unexpressible += 1,
+                None => t.unexpressible = t.unexpressible.saturating_add(1),
             }
         }
         t
@@ -2764,7 +3081,16 @@ where
     eval_expr_with_trace(ctx, exp, diagnostics, fun_ssts, rlimit, arch, mode, log).map(|(e, _)| e)
 }
 
+/// A new global context for the interpreter's thread, and the current function (trusted: Verus
+/// sees `crate::context::Ctx`'s fields as opaque)
 #[cfg_attr(verus_only, verus_verify(external_body))]
+fn global_and_current_fun(ctx: &crate::context::Ctx) -> (GlobalCtx, Option<Fun>) {
+    let global = ctx.global.from_self_with_log(ctx.global.interpreter_log.clone());
+    let current_fun = ctx.fun.as_ref().map(|f| f.current_fun.clone());
+    (global, current_fun)
+}
+
+#[cfg_attr(verus_only, verus_verify)]
 /// `eval_expr`, also returning the calls evaluated (empty unless `--check-compute`)
 pub fn eval_expr_with_trace<D>(
     ctx: &crate::context::Ctx,
@@ -2780,8 +3106,7 @@ where
     D: air::messages::Diagnostics + ?Sized,
 {
     // Make a new global so we can move it into the new thread
-    let global = ctx.global.from_self_with_log(ctx.global.interpreter_log.clone());
-    let current_fun = ctx.fun.as_ref().map(|f| f.current_fun.clone());
+    let (global, current_fun) = global_and_current_fun(ctx);
 
     let builder =
         thread::Builder::new().name("interpreter".to_string()).stack_size(1024 * 1024 * 1024); // 1 GB
@@ -2790,13 +3115,12 @@ where
     let (taken_log, res) = {
         let handler = {
             // Create local versions that we own and hence can pass to the closure
-            let exp = exp.clone();
-            builder
-                .spawn(move || {
+            let thread_exp = exp.clone();
+            let spawned = builder.spawn(move || {
                     let res = eval_expr_launch(
                         &global,
                         current_fun,
-                        exp,
+                        thread_exp,
                         &*fun_ssts,
                         rlimit,
                         arch,
@@ -2805,10 +3129,25 @@ where
                         quiet,
                     );
                     (taken_log, res)
-                })
-                .unwrap()
+                });
+            // (both were `unwrap()`, a panic of the verifier: the thread cannot be created, or
+            // it panicked)
+            match spawned {
+                Ok(h) => h,
+                Err(e) => {
+                    return Err(error(
+                        &exp.span,
+                        format!("assert_by_compute could not start the interpreter's thread: {}", e),
+                    ));
+                }
+            }
         };
-        handler.join().unwrap()
+        match handler.join() {
+            Ok(r) => r,
+            Err(_) => {
+                return Err(error(&exp.span, "internal error: the interpreter's thread panicked"));
+            }
+        }
     };
     *log = taken_log;
     let (e, msgs, trace) = res?;
