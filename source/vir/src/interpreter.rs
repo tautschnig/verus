@@ -1377,7 +1377,7 @@ fn eval_seq(
                                     &exp.span,
                                     &WarningAllow::AssertComputeUnsimplified,
                                     || "Computation tried to index into a sequence using a value that does not fit into usize",
-                                    { let msgs = &mut state.msgs; move |msg| msgs.push(msg) },
+                                    |msg| state.msgs.push(msg),
                                 );
                                 seq_call_with(exp, fun, typs, args, 0, &s)
                             }
@@ -1389,7 +1389,7 @@ fn eval_seq(
                                         &exp.span,
                                         &WarningAllow::AssertComputeUnsimplified,
                                         || "Computation tried to index past the length of a sequence",
-                                        { let msgs = &mut state.msgs; move |msg| msgs.push(msg) },
+                                        |msg| state.msgs.push(msg),
                                     );
                                     seq_call_with(exp, fun, typs, args, 0, &s)
                                 }
@@ -1461,7 +1461,7 @@ fn eval_array_index(
                         &exp.span,
                         &WarningAllow::AssertComputeUnsimplified,
                         || "Computation tried to index into an array using a value that does not fit into usize",
-                        { let msgs = &mut state.msgs; move |msg| msgs.push(msg) },
+                        |msg| state.msgs.push(msg),
                     );
                     ok
                 }
@@ -1473,7 +1473,7 @@ fn eval_array_index(
                             &exp.span,
                             &WarningAllow::AssertComputeUnsimplified,
                             || "Computation tried to index past the length of an array",
-                            { let msgs = &mut state.msgs; move |msg| msgs.push(msg) },
+                            |msg| state.msgs.push(msg),
                         );
                         ok
                     }
@@ -1715,14 +1715,13 @@ fn eval_unary(
                 Clip { range, truncate: _ } => {
                     let in_range =
                         |lower: BigInt, upper: BigInt| !(i < &lower || i > &upper);
-                    // (the closures take the message list: capturing `state` would hide all of it)
-                    let apply_range = |msgs: &mut Vec<Message>, lower: BigInt, upper: BigInt| {
+                    let mut apply_range = |lower: BigInt, upper: BigInt| {
                         if !in_range(lower, upper) {
                             ctx.warning(
                                 &exp.span,
                                 &WarningAllow::AssertComputeUnsimplified,
                                 || "Computation clipped an integer that was out of range",
-                                move |msg| msgs.push(msg),
+                                |msg| state.msgs.push(msg),
                             );
                             ok.clone()
                         } else {
@@ -1731,6 +1730,8 @@ fn eval_unary(
                             Ok(SpannedTyped::new(&e.span, &exp.typ, e.x.clone()))
                         }
                     };
+                    // (takes the message list, not `state`: a closure has no specification, so passing it
+                    // `&mut State` would leave nothing known about the state)
                     let apply_unicode_scalar_range = |msgs: &mut Vec<Message>| {
                         if !valid_unicode_scalar_bigint(i) {
                             ctx.warning(
@@ -1748,17 +1749,17 @@ fn eval_unary(
                     };
                     match range {
                         IntRange::Int => ok,
-                        IntRange::Nat => apply_range(&mut state.msgs, BigInt::zero(), i.clone()),
+                        IntRange::Nat => apply_range(BigInt::zero(), i.clone()),
                         IntRange::Char => apply_unicode_scalar_range(&mut state.msgs),
                         IntRange::U(n) => {
-                            let u = apply_range(&mut state.msgs, 
+                            let u = apply_range(
                                 BigInt::zero(),
                                 (BigInt::one() << n) - BigInt::one(),
                             );
                             u
                         }
                         IntRange::I(0) => Err(error(&exp.span, "internal error: signed integer type of width 0")),
-                        IntRange::I(n) => apply_range(&mut state.msgs, 
+                        IntRange::I(n) => apply_range(
                             -1 * (BigInt::one() << (n - 1)),
                             (BigInt::one() << (n - 1)) - BigInt::one(),
                         ),
@@ -1769,19 +1770,19 @@ fn eval_unary(
                                 ArchWordBits::Either32Or64 => {
                                     if in_range(lower.clone(), upper(32)) {
                                         // then must be in range of 64 too
-                                        apply_range(&mut state.msgs, lower, upper(32))
+                                        apply_range(lower, upper(32))
                                     } else {
                                         // may or may not be in range of 64, we must conservatively give up.
                                         ctx.warning(
                                             &exp.span,
                                             &WarningAllow::AssertComputeUnsimplified,
                                             || "Computation clipped an arch-dependent integer that was out of range",
-                                            { let msgs = &mut state.msgs; move |msg| msgs.push(msg) },
+                                            |msg| state.msgs.push(msg),
                                         );
                                         ok.clone()
                                     }
                                 }
-                                ArchWordBits::Exactly(n) => apply_range(&mut state.msgs, lower, upper(n)),
+                                ArchWordBits::Exactly(n) => apply_range(lower, upper(n)),
                             }
                         }
                         IntRange::ISize => {
@@ -1789,20 +1790,20 @@ fn eval_unary(
                                 ArchWordBits::Either32Or64 => {
                                     if in_range(isize_lower(32), isize_upper(32)) {
                                         // then must be in range of 64 too
-                                        apply_range(&mut state.msgs, isize_lower(32), isize_upper(32))
+                                        apply_range(isize_lower(32), isize_upper(32))
                                     } else {
                                         // may or may not be in range of 64, we must conservatively give up.
                                         ctx.warning(
                                             &exp.span,
                                             &WarningAllow::AssertComputeUnsimplified,
                                             || "Computation clipped an arch-dependent integer that was out of range",
-                                            { let msgs = &mut state.msgs; move |msg| msgs.push(msg) },
+                                            |msg| state.msgs.push(msg),
                                         );
                                         ok.clone()
                                     }
                                 }
                                 ArchWordBits::Exactly(0) => Err(error(&exp.span, "internal error: word size 0")),
-                                ArchWordBits::Exactly(n) => apply_range(&mut state.msgs, isize_lower(n), isize_upper(n)),
+                                ArchWordBits::Exactly(n) => apply_range(isize_lower(n), isize_upper(n)),
                             }
                         }
                     }
@@ -2724,7 +2725,7 @@ fn eval_expr_launch(
                                 exp.x.to_user_string(&ctx.global),
                             )
                         },
-                        { let msgs = &mut state.msgs; move |msg| msgs.push(msg) },
+                        |msg| state.msgs.push(msg),
                     );
                 }
                 Ok((res, state.msgs, trace))
