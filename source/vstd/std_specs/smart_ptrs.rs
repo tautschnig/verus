@@ -38,6 +38,9 @@ pub assume_specification<T: core::default::Default>[ <Rc<
         T::default.ensures((), *res),
 ;
 
+/// The address of the pointee (no content: Verus does not model addresses)
+pub assume_specification<T: ?Sized, A: Allocator>[ Arc::<T, A>::as_ptr ](this: &Arc<T, A>) -> *const T;
+
 pub assume_specification<T>[ Arc::<T>::new ](t: T) -> (v: Arc<T>)
     ensures
         *v == t,

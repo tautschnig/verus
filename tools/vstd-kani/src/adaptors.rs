@@ -1887,3 +1887,57 @@ fn debug_elements_containers() {
         if let Some(s) = run(&hm) { for (k, v) in hm.iter() { assert!(s.contains(&format!("{:?}: {:?}", k, v))); } }
     }
 }
+
+/// vstd `Option::replace`: returns the old content and leaves `Some(value)`
+/// (exec test; `cargo test option_replace_spec`).
+#[cfg(test)]
+#[test]
+fn option_replace_spec() {
+    for init in [None, Some(1u8), Some(7)] {
+        for v in [0u8, 3, 255] {
+            let mut o = init;
+            let r = o.replace(v);
+            assert_eq!(r, init);
+            assert_eq!(o, Some(v));
+        }
+    }
+}
+
+/// vstd `ExHash::hash` has no precondition: `Hash::hash` of std types (integers, strings,
+/// `Arc`, `Vec`, `Option`, tuples, references) and of derived impls does not panic with std's
+/// hashers (exec test over extreme values; `cargo test hash_never_panics`).
+#[cfg(test)]
+#[test]
+fn hash_never_panics() {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{BuildHasher, Hash, Hasher, RandomState};
+    use std::sync::Arc;
+    #[allow(dead_code)]
+    #[derive(Hash)]
+    enum E { A, B(u64, String), C { x: Arc<E>, v: Vec<i128> } }
+    fn h<T: Hash + ?Sized>(t: &T) -> u64 {
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut d = DefaultHasher::new(); t.hash(&mut d);
+            let mut e = RandomState::new().build_hasher(); t.hash(&mut e);
+            d.finish() ^ e.finish()
+        }));
+        r.expect("Hash::hash panicked")
+    }
+    for x in [0u64, 1, u64::MAX] { h(&x); h(&(x as usize)); h(&(x as i32)); h(&(x as u128)); }
+    h(&i128::MIN); h(&isize::MAX); h(&'\u{10FFFF}'); h(&true); h(""); h(&"x".repeat(1000));
+    h(&Arc::new(5u8)); h(&vec![1u32; 100]); h(&Some(Some(3u16))); h(&(1u8, "a", Arc::new(vec![2i64])));
+    let deep = (0..200).fold(E::A, |acc, i| E::C { x: Arc::new(acc), v: vec![i as i128, i128::MAX] });
+    h(&deep); h(&E::B(u64::MAX, String::new())); h(&&&E::A);
+}
+
+/// vstd `thread::Builder::spawn`: as `std::thread::spawn`; `Ok(h)`: `join` returns the
+/// closure's result (exec test; `cargo test builder_spawn_spec`).
+#[cfg(test)]
+#[test]
+fn builder_spawn_spec() {
+    for k in 0u64..4 {
+        let b = std::thread::Builder::new().name(format!("t{k}")).stack_size(1 << 20);
+        let h = b.spawn(move || k * 3).expect("spawn");
+        assert_eq!(h.join().unwrap(), k * 3);
+    }
+}

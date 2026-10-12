@@ -52,4 +52,28 @@ pub assume_specification<T>[ JoinHandle::<T>::join ](h: JoinHandle<T>) -> (r: st
         r matches Ok(v) ==> join_handle_predicate(h, v),
 ;
 
+/// `std::thread::Builder` configures a thread before spawning it. Content-free: the name and
+/// the stack size are not modelled.
+#[verifier::external_type_specification]
+#[verifier::external_body]
+pub struct ExBuilder(std::thread::Builder);
+
+pub assume_specification[ std::thread::Builder::new ]() -> std::thread::Builder;
+
+pub assume_specification[ std::thread::Builder::name ](b: std::thread::Builder, name: alloc::string::String) -> std::thread::Builder;
+
+pub assume_specification[ std::thread::Builder::stack_size ](b: std::thread::Builder, size: usize) -> std::thread::Builder;
+
+/// As `spawn`, except that it returns an error instead of panicking when the thread cannot be
+/// created
+pub assume_specification<F, T>[ std::thread::Builder::spawn::<F, T> ](b: std::thread::Builder, f: F) -> (r: std::io::Result<JoinHandle<T>>)
+    where
+        F: FnOnce() -> T + Send + 'static,
+        T: Send + 'static,
+    requires
+        f.requires(()),
+    ensures
+        r matches Ok(h) ==> forall|ret: T| #[trigger] join_handle_predicate(h, ret) ==> f.ensures((), ret),
+;
+
 } // verus!

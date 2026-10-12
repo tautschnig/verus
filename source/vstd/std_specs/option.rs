@@ -229,6 +229,13 @@ pub assume_specification<T>[ Option::<T>::expect ](option: Option<T>, msg: &str)
 ;
 
 // take
+/// `replace` puts `value` in and returns the old content
+pub assume_specification<T>[ Option::<T>::replace ](option: &mut Option<T>, value: T) -> (t: Option<T>)
+    ensures
+        t == *old(option),
+        *final(option) == Some(value),
+;
+
 pub assume_specification<T>[ Option::<T>::take ](option: &mut Option<T>) -> (t: Option<T>)
     ensures
         t == *old(option),
