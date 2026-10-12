@@ -4,6 +4,12 @@
 //!
 //! Current target is supporting proof by computation
 //! https://github.com/secure-foundations/verus/discussions/120
+#[cfg(verus_only)]
+use vstd::prelude::*;
+#[cfg(verus_only)]
+verus! {
+broadcast use {verus_spec_num_bigint::group_bigint, verus_spec_im::group_im};
+}
 
 use crate::ast::{
     ArchWordBits, ArrayKind, BitwiseOp, ComputeMode, Constant, CrateId, Dt, Fun, FunX, Ident,
@@ -17,7 +23,7 @@ use crate::messages::{Message, Span, ToAny, WarningAllow, error};
 use crate::sst::{
     ArithOp, BinaryOp, Bnd, BndX, CallFun, Exp, ExpX, Exps, FunctionSst, Trigs, UniqueIdent,
 };
-use crate::sst_util::{free_vars_exp, subst_exp};
+use crate::sst_util::subst_exp;
 use crate::unicode::valid_unicode_scalar_bigint;
 use air::ast::{Binder, BinderX, Binders};
 use air::scope_map::ScopeMap;
@@ -36,9 +42,11 @@ use std::thread;
 use std::time::Instant;
 use vir_macros::ToDebugSNode;
 
+#[cfg_attr(verus_only, verus_verify)]
 // An approximation of how many interpreter invocations we can do in 1 second (in release mode)
 const RLIMIT_MULTIPLIER: u64 = 400_000;
 
+#[cfg_attr(verus_only, verus_verify)]
 // Depth limit multiplier: max recursion depth as a multiplier of rlimit.
 //
 // This is set to be generous enough for legitimate use cases (like complex mathematical
@@ -46,12 +54,14 @@ const RLIMIT_MULTIPLIER: u64 = 400_000;
 // around 50,000+ recursion levels, so this gives us good protection.
 const DEPTH_LIMIT_MULTIPLIER: u64 = 500;
 
+#[cfg_attr(verus_only, verus_verify)]
 // Time-based warning interval in seconds
 const WARNING_INTERVAL_SECS: u64 = 2;
 
 type Env = ScopeMap<UniqueIdent, Exp>;
 type TypeEnv = ScopeMap<Ident, Typ>;
 
+#[cfg_attr(verus_only, verus_verify)]
 /// A call's type and value arguments, supporting `Hash` and `Eq`, so that we can use them
 /// as a key when caching the call's result.  Intended to never leave this module.
 struct CallKey {
@@ -59,6 +69,7 @@ struct CallKey {
     args: Exps,
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 impl Hash for CallKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // We hash only the value arguments to improve caching (hashing less is always safe)
@@ -66,6 +77,7 @@ impl Hash for CallKey {
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 impl PartialEq for CallKey {
     fn eq(&self, other: &Self) -> bool {
         // Include the type arguments, since a polymorphic function may return
@@ -74,14 +86,17 @@ impl PartialEq for CallKey {
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 impl Eq for CallKey {}
 
+#[cfg_attr(verus_only, verus_verify)]
 impl From<(&Typs, &Exps)> for CallKey {
     fn from((typs, e): (&Typs, &Exps)) -> Self {
         Self { typs: typs.clone(), args: e.clone() }
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 /// A set that allows membership queries to `Arc`'d values, such that pointer equality is necessary
 /// to be called a member.
 ///
@@ -97,18 +112,22 @@ struct PtrSet<T> {
     store: HashMap<*const T, Arc<T>>,
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 impl<T> PtrSet<T> {
     fn new() -> Self {
         Self { store: HashMap::new() }
     }
+    #[cfg_attr(verus_only, verus_verify(external_body))]
     fn insert(&mut self, v: &Arc<T>) {
         self.store.insert(Arc::as_ptr(&v), v.clone());
     }
+    #[cfg_attr(verus_only, verus_verify(external_body))]
     fn contains(&mut self, v: &Arc<T>) -> bool {
         self.store.contains_key(&Arc::as_ptr(&v))
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 /// One call the interpreter evaluated (`--check-compute`): `call` (the call as written, with
 /// the evaluated arguments) equals `result`, given the definitions of `funs` and the facts in
 /// `children` (the calls made while evaluating the body, each itself a step).
@@ -120,6 +139,7 @@ pub struct ComputeStep {
     pub children: Vec<(Exp, Exp)>,
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 /// The steps of one `by (compute)` evaluation: the steps, the facts the final result rests on
 /// directly (`top`), and how many steps could not be expressed in SST (closures)
 #[derive(Clone, Default)]
@@ -129,6 +149,7 @@ pub struct ComputeTrace {
     pub unexpressible: usize,
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 /// Mutable interpreter state
 struct State {
     /// `--check-compute`: record the calls evaluated
@@ -140,6 +161,8 @@ struct State {
     depth: usize,
     /// Symbol table mapping bound variables to their values
     env: Env,
+    /// Symbol table mapping bound type arguments to their types
+    type_env: TypeEnv,
     /// Number of iterations computed thus far
     iterations: u64,
     /// Log to write out extra info
@@ -169,8 +192,12 @@ struct State {
     last_warning_time: Instant,
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 // Define the function-call cache's API
 impl State {
+    #[cfg_attr(verus_only, verus_spec(
+        ensures same_core(old(self), final(self))
+    ))]
     fn insert_call(&mut self, f: &Fun, typs: &Typs, args: &Exps, result: &Exp, memoize: bool) {
         if self.enable_cache && memoize {
             self.cache.entry(f.clone()).or_default().insert((typs, args).into(), result.clone());
@@ -178,6 +205,9 @@ impl State {
     }
 
     /// Check time-based warnings and emit warning if enough time has passed.  Do so only in debug mode.
+    #[cfg_attr(verus_only, verus_spec(
+        ensures same_core(old(self), final(self))
+    ))]
     fn check_time_warning(&mut self, ctx: &Ctx) {
         if !cfg!(debug_assertions) {
             return;
@@ -196,11 +226,21 @@ impl State {
         }
     }
 
+    #[cfg_attr(verus_only, verus_spec(
+        ensures same_core(old(self), final(self))
+    ))]
     fn lookup_call(&mut self, f: &Fun, typs: &Typs, args: &Exps, memoize: bool) -> Option<Exp> {
         if self.enable_cache && memoize {
             if self.perf {
-                let count = self.fun_calls.entry(f.clone()).or_default();
-                *count += 1;
+                // (as in `eval_expr_internal`'s statistics; was `entry(..).or_default()`)
+                match self.fun_calls.get_mut(f) {
+                    None => {
+                        self.fun_calls.insert(f.clone(), 1);
+                    }
+                    Some(count) => {
+                        *count = count.saturating_add(1);
+                    }
+                }
             }
             self.cache.get(f)?.get(&(typs, args).into()).cloned()
         } else {
@@ -209,6 +249,10 @@ impl State {
     }
 
     /// A call fact used by the innermost open step (or by the final result)
+    #[cfg_attr(verus_only, verus_spec(
+        requires forall |j: int| 0 <= j < old(self).open_steps.len() ==> #[trigger] old(self).open_steps[j] < old(self).steps.len(),
+        ensures same_core(old(self), final(self))
+    ))]
     fn add_fact(&mut self, call: Exp, result: Exp) {
         match self.open_steps.last() {
             Some(&p) => self.steps[p].children.push((call, result)),
@@ -216,13 +260,22 @@ impl State {
         }
     }
 
-    fn log(&self, s: String) {
+    /// Append a line to the interpreter's log (`--log interpreter`), if there is one; a write
+    /// error is reported as an error of the computation (was a panic)
+    fn log(&self, s: String) -> Result<(), VirErr> {
         if let Some(mut log) = self.log.as_ref() {
-            writeln!(log, "{}", s).expect("I/O error writing to the interpreter's log");
+            if let Err(e) = writeln!(log, "{}", s) {
+                return Err(crate::messages::error_bare(format!(
+                    "I/O error writing to the interpreter's log: {}",
+                    e
+                )));
+            }
         }
+        Ok(())
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 /// Static context for the interpreter
 struct Ctx<'a> {
     /// Maps each function to the SST expression representing its body
@@ -237,7 +290,93 @@ struct Ctx<'a> {
     report_long_running: bool,
 }
 
+#[cfg(verus_only)]
+verus! {
+/// The limits leave room for the counters (`eval_expr_launch` clamps them)
+spec fn ctx_ok(ctx: &Ctx) -> bool {
+    &&& ctx.max_iterations <= u64::MAX / 4
+    &&& ctx.max_depth <= usize::MAX / 4
+}
+}
+
+#[cfg(verus_only)]
+verus! {
+/// What every interpreter state satisfies: iterations and depth stay near their limits,
+/// open steps index into `steps`, and the scopes allow shadowing. (The statistics counters
+/// saturate and need no bound.)
+spec fn state_inv(s: &State, ctx: &Ctx) -> bool {
+    &&& ctx_ok(ctx)
+    &&& s.iterations <= ctx.max_iterations + 2
+    &&& s.depth <= ctx.max_depth + 1
+    &&& forall |j: int| 0 <= j < s.open_steps.len() ==> #[trigger] s.open_steps[j] < s.steps.len()
+    &&& s.env.all_shadowing()
+    &&& s.type_env.all_shadowing()
+}
+}
+
+#[cfg(verus_only)]
+verus! {
+/// Precondition of evaluation: within the iteration limit
+spec fn eval_pre(s: &State, ctx: &Ctx) -> bool {
+    state_inv(s, ctx) && s.iterations <= ctx.max_iterations + 1
+}
+}
+
+#[cfg(verus_only)]
+verus! {
+/// Postcondition of evaluation (`ok`: it returned `Ok`): steps only grow and the open steps
+/// are restored; scope stacks do not shrink; on success the depth and the scope stacks are
+/// restored and the limit is not exceeded
+spec fn eval_post(pre: &State, post: &State, ctx: &Ctx, ok: bool) -> bool {
+    &&& state_inv(post, ctx)
+    &&& post.steps.len() >= pre.steps.len()
+    &&& post.open_steps@ == pre.open_steps@
+    &&& post.env.scope_keys().len() >= pre.env.scope_keys().len()
+    &&& post.type_env.scope_keys().len() >= pre.type_env.scope_keys().len()
+    &&& ok ==> {
+        &&& post.iterations <= ctx.max_iterations + 1
+        &&& post.depth == pre.depth
+        &&& post.env.scope_keys() == pre.env.scope_keys()
+        &&& post.type_env.scope_keys() == pre.type_env.scope_keys()
+    }
+}
+}
+
+#[cfg(verus_only)]
+verus! {
+/// Inside an evaluation that pushed `extra` scopes onto `env` since `pre`: everything else
+/// restored, the outer scopes unchanged
+spec fn frame(pre: &State, post: &State, ctx: &Ctx, extra: nat) -> bool {
+    &&& eval_pre(post, ctx)
+    &&& post.steps.len() >= pre.steps.len()
+    &&& post.open_steps@ == pre.open_steps@
+    &&& post.depth == pre.depth
+    &&& post.type_env.scope_keys() == pre.type_env.scope_keys()
+    &&& post.env.scope_keys().len() == pre.env.scope_keys().len() + extra
+    &&& post.env.scope_keys().subrange(0, pre.env.scope_keys().len() as int) =~= pre.env.scope_keys()
+}
+}
+
+#[cfg(verus_only)]
+verus! {
+/// Nothing evaluation tracks changed
+spec fn same_core(pre: &State, post: &State) -> bool {
+    &&& post.iterations == pre.iterations
+    &&& post.depth == pre.depth
+    &&& post.steps.len() == pre.steps.len()
+    &&& post.open_steps@ == pre.open_steps@
+    &&& post.env.scope_keys() == pre.env.scope_keys() && post.env.all_shadowing() == pre.env.all_shadowing()
+    &&& post.type_env.scope_keys() == pre.type_env.scope_keys() && post.type_env.all_shadowing() == pre.type_env.all_shadowing()
+}
+}
+
+#[cfg_attr(verus_only, verus_verify)]
 impl<'a> Ctx<'a> {
+    #[cfg_attr(verus_only, verus_spec(
+        requires
+            call_requires(note, ()),
+            forall |m: crate::messages::Message| call_requires(emit, (m,))
+    ))]
     pub(crate) fn warning<S: Into<String>>(
         &self,
         span: &Span,
@@ -245,8 +384,11 @@ impl<'a> Ctx<'a> {
         note: impl FnOnce() -> S,
         emit: impl FnOnce(crate::messages::Message) -> (),
     ) {
-        if let Some(current_fun) = &self.current_fun {
-            let check_allow = &self.global.warning_ctx.fun_warn_configs[current_fun];
+        // (was `fun_warn_configs[current_fun]`, a panic for a function without a config;
+        // such a function now gets the warning, as when there is no current function)
+        if let Some(check_allow) =
+            self.current_fun.as_ref().and_then(|f| self.global.warning_ctx.fun_warn_configs.get(f))
+        {
             crate::messages::warning_maybe_if_in_local_crate(check_allow, span, allow, note, emit);
         } else {
             emit(crate::messages::warning(span, note()));
@@ -254,6 +396,7 @@ impl<'a> Ctx<'a> {
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 /// Interpreter-internal expressions
 #[derive(Debug, Clone, ToDebugSNode)]
 pub enum InterpExp {
@@ -272,6 +415,7 @@ pub enum InterpExp {
  * Functionality needed to compute equality between expressions  *
  *****************************************************************/
 
+#[cfg_attr(verus_only, verus_verify)]
 /// A call to a trait method may resolve to a specific implementation, in which case the
 /// resolved function and its type arguments are the ones that determine the call's meaning.
 fn resolve_call<'a>(
@@ -285,6 +429,7 @@ fn resolve_call<'a>(
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 /// Trait to compute syntactic equality of two objects.
 trait SyntacticEquality {
     /// Compute syntactic equality. Returns `Some(b)` if syntactically, equality can be guaranteed,
@@ -303,8 +448,10 @@ trait SyntacticEquality {
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 // Automatically get syntactic equality over typs, exps, ... once we know syntactic equality over typ, exp, ...
 impl<T: SyntacticEquality> SyntacticEquality for Arc<Vec<T>> {
+    #[cfg_attr(verus_only, verus_verify(external_body))]
     fn syntactic_eq(&self, other: &Self) -> Option<bool> {
         if self.len() != other.len() {
             Some(false)
@@ -330,7 +477,9 @@ impl<T: SyntacticEquality> SyntacticEquality for Arc<Vec<T>> {
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 impl<T: Clone + SyntacticEquality> SyntacticEquality for Vector<T> {
+    #[cfg_attr(verus_only, verus_verify(external_body))]
     fn syntactic_eq(&self, other: &Self) -> Option<bool> {
         if self.len() != other.len() {
             Some(false)
@@ -356,7 +505,9 @@ impl<T: Clone + SyntacticEquality> SyntacticEquality for Vector<T> {
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 impl SyntacticEquality for Typ {
+    #[cfg_attr(verus_only, verus_verify(external_body))]
     fn syntactic_eq(&self, other: &Self) -> Option<bool> {
         use TypX::*;
         match (undecorate_typ(self).as_ref(), undecorate_typ(other).as_ref()) {
@@ -382,6 +533,7 @@ impl SyntacticEquality for Typ {
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 impl SyntacticEquality for Bnd {
     fn syntactic_eq(&self, other: &Self) -> Option<bool> {
         use BndX::*;
@@ -394,70 +546,60 @@ impl SyntacticEquality for Bnd {
                 }
             }
             (Quant(q_l, bnds_l, _trigs_l, _), Quant(q_r, bnds_r, _trigs_r, _)) => {
-                if q_l == q_r {
-                    bnds_l.conservative_eq(bnds_r)
-                } else {
-                    None
-                }
+                Some(q_l == q_r && bnds_l.conservative_eq(bnds_r)?)
             }
             (Lambda(bnds_l, _trigs_l), Lambda(bnds_r, _trigs_r)) => bnds_l.conservative_eq(bnds_r),
             (Choose(bnds_l, _trigs_l, e_l), Choose(bnds_r, _trigs_r, e_r)) => {
-                Some(bnds_l.conservative_eq(bnds_r)? && e_l.conservative_eq(e_r)?)
+                Some(bnds_l.conservative_eq(bnds_r)? && e_l.syntactic_eq(e_r)?)
             }
             _ => None,
         }
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 // XXX: Generalize over `Binders<T>`?
 impl SyntacticEquality for Binders<Typ> {
+    #[cfg_attr(verus_only, verus_verify(external_body))]
     fn syntactic_eq(&self, other: &Self) -> Option<bool> {
         self.iter().zip(other.iter()).try_fold(true, |acc, (bnd_l, bnd_r)| {
             Some(acc && bnd_l.name == bnd_r.name && bnd_l.a.syntactic_eq(&bnd_r.a)?)
         })
     }
 }
-
-// Constructor fields may appear in any source order. Use the same order for equality and hashing.
-fn sorted_ctor_fields(fields: &Binders<Exp>) -> Vec<&Binder<Exp>> {
-    let mut fields: Vec<_> = fields.iter().collect();
-    fields.sort_unstable_by(|l, r| l.name.cmp(&r.name));
-    fields
-}
-
+#[cfg_attr(verus_only, verus_verify)]
 impl SyntacticEquality for Binders<Exp> {
+    #[cfg_attr(verus_only, verus_verify(external_body))]
     fn syntactic_eq(&self, other: &Self) -> Option<bool> {
-        sorted_ctor_fields(self).into_iter().zip(sorted_ctor_fields(other)).try_fold(
-            true,
-            |acc, (bnd_l, bnd_r)| {
-                Some(acc && bnd_l.name == bnd_r.name && bnd_l.a.syntactic_eq(&bnd_r.a)?)
-            },
-        )
+        self.iter().zip(other.iter()).try_fold(true, |acc, (bnd_l, bnd_r)| {
+            Some(acc && bnd_l.name == bnd_r.name && bnd_l.a.syntactic_eq(&bnd_r.a)?)
+        })
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 impl SyntacticEquality for VarBinders<Typ> {
+    #[cfg_attr(verus_only, verus_verify(external_body))]
     fn syntactic_eq(&self, other: &Self) -> Option<bool> {
-        if self.len() != other.len() {
-            return None;
-        }
         self.iter().zip(other.iter()).try_fold(true, |acc, (bnd_l, bnd_r)| {
             Some(acc && bnd_l.name == bnd_r.name && bnd_l.a.syntactic_eq(&bnd_r.a)?)
         })
     }
 }
+#[cfg_attr(verus_only, verus_verify)]
 impl SyntacticEquality for VarBinders<Exp> {
+    #[cfg_attr(verus_only, verus_verify(external_body))]
     fn syntactic_eq(&self, other: &Self) -> Option<bool> {
-        if self.len() != other.len() {
-            return None;
-        }
         self.iter().zip(other.iter()).try_fold(true, |acc, (bnd_l, bnd_r)| {
             Some(acc && bnd_l.name == bnd_r.name && bnd_l.a.syntactic_eq(&bnd_r.a)?)
         })
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 impl SyntacticEquality for Exp {
+    // We expect to only call this after eval_expr has been called on both expressions
+    #[cfg_attr(verus_only, verus_verify(external_body))]
     fn syntactic_eq(&self, other: &Self) -> Option<bool> {
         // Easy case where the pointers match
         if Arc::ptr_eq(self, other) {
@@ -501,7 +643,7 @@ impl SyntacticEquality for Exp {
                 }
             }
             (CallLambda(exp_l, exps_l), CallLambda(exp_r, exps_r)) => {
-                Some(exp_l.conservative_eq(exp_r)? && exps_l.conservative_eq(exps_r)?)
+                Some(exp_l.syntactic_eq(exp_r)? && exps_l.syntactic_eq(exps_r)?)
             }
 
             (Ctor(path_l, id_l, bnds_l), Ctor(path_r, id_r, bnds_r)) => {
@@ -519,14 +661,7 @@ impl SyntacticEquality for Exp {
                     Some(false)
                 }
             }
-            (Unary(op_l, e_l), Unary(op_r, e_r)) => {
-                // A cast's target type is recorded in the expression's type, so we check that too
-                def_eq(
-                    op_l == op_r
-                        && types_equal(&undecorate_typ(&self.typ), &undecorate_typ(&other.typ))
-                        && e_l.syntactic_eq(e_r)?,
-                )
-            }
+            (Unary(op_l, e_l), Unary(op_r, e_r)) => def_eq(op_l == op_r && e_l.syntactic_eq(e_r)?),
             (UnaryOpr(op_l, e_l), UnaryOpr(op_r, e_r)) => {
                 use crate::ast::UnaryOpr::*;
                 let op_eq = match (op_l, op_r) {
@@ -543,40 +678,13 @@ impl SyntacticEquality for Exp {
             (Binary(op_l, e1_l, e2_l), Binary(op_r, e1_r, e2_r)) => {
                 def_eq(op_l == op_r && e1_l.syntactic_eq(e1_r)? && e2_l.syntactic_eq(e2_r)?)
             }
-            (If(e1_l, e2_l, e3_l), If(e1_r, e2_r, e3_r)) => {
-                if !e1_l.definitely_eq(e1_r) {
-                    return None;
-                }
-                let then_eq = e2_l.syntactic_eq(e2_r)?;
-                let else_eq = e3_l.syntactic_eq(e3_r)?;
-                if then_eq == else_eq { Some(then_eq) } else { None }
-            }
+            (If(e1_l, e2_l, e3_l), If(e1_r, e2_r, e3_r)) => Some(
+                e1_l.syntactic_eq(e1_r)? && e2_l.syntactic_eq(e2_r)? && e3_l.syntactic_eq(e3_r)?,
+            ),
             (WithTriggers(_trigs_l, e_l), WithTriggers(_trigs_r, e_r)) => e_l.syntactic_eq(e_r),
-            (Bind(bnd_l, e_l), Bind(bnd_r, e_r)) => match (&bnd_l.x, &bnd_r.x) {
-                (BndX::Quant(q_l, bnds_l, ..), BndX::Quant(q_r, bnds_r, ..)) => {
-                    if q_l != q_r || bnds_l.len() != bnds_r.len() {
-                        return None;
-                    }
-                    let e_l = cleanup_exp(e_l).ok()?;
-                    let e_r = cleanup_exp(e_r).ok()?;
-                    let mut free_vars = free_vars_exp(&e_l);
-                    for b in bnds_l.iter() {
-                        free_vars.remove(&b.name);
-                    }
-                    let mut substs = HashMap::new();
-                    for (b_l, b_r) in bnds_l.iter().zip(bnds_r.iter()) {
-                        if !types_equal(&b_l.a, &b_r.a) || free_vars.contains_key(&b_r.name) {
-                            return None;
-                        }
-                        let var = SpannedTyped::new(&e_l.span, &b_r.a, Var(b_r.name.clone()));
-                        substs.insert(b_l.name.clone(), var);
-                    }
-                    let empty_substs = HashMap::new();
-                    let e_l = subst_exp(&empty_substs, &substs, &e_l);
-                    def_eq(e_l.syntactic_eq(&e_r)?)
-                }
-                _ => def_eq(bnd_l.syntactic_eq(bnd_r)? && e_l.syntactic_eq(e_r)?),
-            },
+            (Bind(bnd_l, e_l), Bind(bnd_r, e_r)) => {
+                Some(bnd_l.syntactic_eq(bnd_r)? && e_l.syntactic_eq(e_r)?)
+            }
             (Interp(l), Interp(r)) => match (l, r) {
                 (InterpExp::FreeVar(l), InterpExp::FreeVar(r)) => def_eq(l == r),
                 (InterpExp::Seq(l), InterpExp::Seq(r)) => l.syntactic_eq(r),
@@ -592,6 +700,7 @@ impl SyntacticEquality for Exp {
  *********************************************/
 
 // Convenience function to simplify repetitive hashing behavior over an iterator.
+#[cfg_attr(verus_only, verus_verify(external_body))]
 fn hash_iter<H: Hasher, K: Hash, V>(
     state: &mut H,
     it: impl Iterator<Item = (K, V)>,
@@ -603,30 +712,37 @@ fn hash_iter<H: Hasher, K: Hash, V>(
     })
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 fn hash_exps<H: Hasher>(state: &mut H, exps: &Exps) {
     hash_iter(state, exps.iter().enumerate(), hash_exp)
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 fn hash_exps_vector<H: Hasher>(state: &mut H, exps: &Vector<Exp>) {
     hash_iter(state, exps.iter().enumerate(), hash_exp)
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 fn hash_trigs<H: Hasher>(state: &mut H, trigs: &Trigs) {
     hash_iter(state, trigs.iter().enumerate(), hash_exps)
 }
 
+#[cfg_attr(verus_only, verus_verify(external_body))]
 fn hash_var_binders_typ<H: Hasher>(state: &mut H, bnds: &VarBinders<Typ>) {
     hash_iter(state, bnds.iter().map(|b| (&b.name, &b.a)), |st, v| v.hash(st))
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 fn hash_binders_exp<H: Hasher>(state: &mut H, bnds: &Binders<Exp>) {
-    hash_iter(state, sorted_ctor_fields(bnds).into_iter().map(|b| (&b.name, &b.a)), hash_exp)
+    hash_iter(state, bnds.iter().map(|b| (&b.name, &b.a)), hash_exp)
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 fn hash_var_binders_exp<H: Hasher>(state: &mut H, bnds: &VarBinders<Exp>) {
     hash_iter(state, bnds.iter().map(|b| (&b.name, &b.a)), hash_exp)
 }
 
+#[cfg_attr(verus_only, verus_verify(external_body))]
 fn hash_bnd<H: Hasher>(state: &mut H, bnd: &Bnd) {
     use BndX::*;
     macro_rules! dohash {
@@ -638,13 +754,16 @@ fn hash_bnd<H: Hasher>(state: &mut H, bnd: &Bnd) {
     }
     match &bnd.x {
         Let(bnds) => dohash!(0; hash_var_binders_exp(bnds)),
-        Quant(quant, bnds, _, _) => dohash!(1, quant, bnds.len()),
+        Quant(quant, bnds, trigs, _) => {
+            dohash!(1, quant; hash_var_binders_typ(bnds), hash_trigs(trigs))
+        }
         Lambda(bnds, trigs) => dohash!(2; hash_var_binders_typ(bnds), hash_trigs(trigs)),
         Choose(bnds, trigs, e) => dohash!(3;
                     hash_var_binders_typ(bnds), hash_trigs(trigs), hash_exp(e)),
     }
 }
 
+#[cfg_attr(verus_only, verus_verify(external_body))]
 fn hash_exp<H: Hasher>(state: &mut H, exp: &Exp) {
     use ExpX::*;
     macro_rules! dohash {
@@ -681,13 +800,7 @@ fn hash_exp<H: Hasher>(state: &mut H, exp: &Exp) {
         BinaryOpr(op, e1, e2) => dohash!(111, op; hash_exp(e1), hash_exp(e2)),
         If(e1, e2, e3) => dohash!(12; hash_exp(e1), hash_exp(e2), hash_exp(e3)),
         WithTriggers(trigs, e) => dohash!(13; hash_trigs(trigs), hash_exp(e)),
-        Bind(bnd, e) => {
-            dohash!(14; hash_bnd(bnd));
-            // Alpha-equivalent quantifiers need identical hashes.
-            if !matches!(&bnd.x, BndX::Quant(..)) {
-                hash_exp(state, e);
-            }
-        }
+        Bind(bnd, e) => dohash!(14; hash_bnd(bnd), hash_exp(e)),
         Interp(e) => {
             dohash!(15);
             match e {
@@ -712,120 +825,149 @@ fn hash_exp<H: Hasher>(state: &mut H, exp: &Exp) {
  * Utility functions  *
  **********************/
 
+#[cfg_attr(verus_only, verus_verify)]
 /// Truncate a u128 to a fixed width BigInt
-fn u128_to_fixed_width(u: u128, width: u32) -> BigInt {
+fn u128_to_fixed_width(u: u128, width: u32) -> Option<BigInt> {
+    // (was a panic for any other width: a malformed type)
     match width {
         8 => BigInt::from_u8(u as u8),
         16 => BigInt::from_u16(u as u16),
         32 => BigInt::from_u32(u as u32),
         64 => BigInt::from_u64(u as u64),
         128 => BigInt::from_u128(u),
-        _ => panic!("Unexpected fixed-width integer type U({})", width),
+        _ => None,
     }
-    .unwrap()
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 /// Truncate an i128 to a fixed width BigInt
-fn i128_to_fixed_width(i: i128, width: u32) -> BigInt {
+fn i128_to_fixed_width(i: i128, width: u32) -> Option<BigInt> {
+    // (was a panic for any other width: a malformed type)
     match width {
         8 => BigInt::from_i8(i as i8),
         16 => BigInt::from_i16(i as i16),
         32 => BigInt::from_i32(i as i32),
         64 => BigInt::from_i64(i as i64),
         128 => BigInt::from_i128(i),
-        _ => panic!("Unexpected fixed-width integer type U({})", width),
+        _ => None,
     }
-    .unwrap()
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 /// Truncate a u128 to an arch-specific BigInt, if possible
 fn u128_to_arch_width(u: u128, arch: ArchWordBits) -> Option<BigInt> {
     match arch {
         ArchWordBits::Either32Or64 => {
             let v32 = u128_to_fixed_width(u, 32);
             let v64 = u128_to_fixed_width(u, 64);
-            if v32 == v64 { Some(v32) } else { None }
+            if v32 == v64 { v32 } else { None }
         }
-        ArchWordBits::Exactly(v) => Some(u128_to_fixed_width(u, v)),
+        ArchWordBits::Exactly(v) => u128_to_fixed_width(u, v),
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 /// Truncate an i128 to an arch-specific BigInt, if possible
 fn i128_to_arch_width(i: i128, arch: ArchWordBits) -> Option<BigInt> {
     match arch {
         ArchWordBits::Either32Or64 => {
             let v32 = i128_to_fixed_width(i, 32);
             let v64 = i128_to_fixed_width(i, 64);
-            if v32 == v64 { Some(v32) } else { None }
+            if v32 == v64 { v32 } else { None }
         }
-        ArchWordBits::Exactly(v) => Some(i128_to_fixed_width(i, v)),
+        ArchWordBits::Exactly(v) => i128_to_fixed_width(i, v),
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 fn u128_to_width(u: u128, width: IntegerTypeBitwidth, arch: ArchWordBits) -> Option<BigInt> {
     match width {
-        IntegerTypeBitwidth::Width(w) => Some(u128_to_fixed_width(u, w)),
+        IntegerTypeBitwidth::Width(w) => u128_to_fixed_width(u, w),
         IntegerTypeBitwidth::ArchWordSize => u128_to_arch_width(u, arch),
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 fn i128_to_width(i: i128, width: IntegerTypeBitwidth, arch: ArchWordBits) -> Option<BigInt> {
     match width {
-        IntegerTypeBitwidth::Width(w) => Some(i128_to_fixed_width(i, w)),
+        IntegerTypeBitwidth::Width(w) => i128_to_fixed_width(i, w),
         IntegerTypeBitwidth::ArchWordSize => i128_to_arch_width(i, arch),
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 /// Displays data for profiling/debugging the interpreter
-fn display_perf_stats(state: &State) {
+/// Descending by count (for `display_perf_stats`)
+#[cfg_attr(verus_only, verus_spec(o =>
+    ensures o == vstd::std_specs::cmp::OrdSpec::cmp_spec(&b.1, &a.1)
+))]
+fn by_count_desc(a: &(&Fun, usize), b: &(&Fun, usize)) -> std::cmp::Ordering {
+    b.1.cmp(&a.1)
+}
+
+#[cfg_attr(verus_only, verus_verify)]
+/// Descending by count (for `display_perf_stats`)
+#[cfg_attr(verus_only, verus_spec(o =>
+    ensures o == vstd::std_specs::cmp::OrdSpec::cmp_spec(b.1, a.1)
+))]
+fn by_ref_count_desc(a: &(&Fun, &u64), b: &(&Fun, &u64)) -> std::cmp::Ordering {
+    (*b.1).cmp(a.1)
+}
+
+#[cfg_attr(verus_only, verus_verify)]
+fn display_perf_stats(state: &State) -> Result<(), VirErr> {
     if state.perf {
-        state.log(format!("\n{}\nPerformance Stats\n{}\n", "*".repeat(80), "*".repeat(80)));
-        state.log(format!("Performed {} interpreter iterations", state.iterations));
+        state.log(format!("\n{}\nPerformance Stats\n{}\n", "*".repeat(80), "*".repeat(80)))?;
+        state.log(format!("Performed {} interpreter iterations", state.iterations))?;
         if state.enable_simplified_cache {
-            let sum = state.ptr_hits + state.ptr_misses;
+            let sum = state.ptr_hits.saturating_add(state.ptr_misses);
             let hit_perc = 100.0 * (state.ptr_hits as f64 / sum as f64);
             state.log(format!(
                 "Simplified cache had {} hits out of {} ({:.1}%)",
                 state.ptr_hits, sum, hit_perc
-            ));
+            ))?;
         } else {
-            state.log("Simplified cache was disabled".to_string());
+            state.log("Simplified cache was disabled".to_string())?;
         }
         if state.enable_cache {
-            let sum = state.cache_hits + state.cache_misses;
+            let sum = state.cache_hits.saturating_add(state.cache_misses);
             let hit_perc = 100.0 * (state.cache_hits as f64 / sum as f64);
             state.log(format!(
                 "Call result cache had {} hits out of {} ({:.1}%)",
                 state.cache_hits, sum, hit_perc
-            ));
+            ))?;
 
             let mut cache_stats: Vec<(&Fun, usize)> =
                 state.cache.iter().map(|(fun, vec)| (fun, vec.len())).collect();
-            cache_stats.sort_by_key(|a| std::cmp::Reverse(a.1));
+            // (was `sort_by_key(|a| Reverse(a.1))`: the same stable order)
+            cache_stats.sort_by(by_count_desc);
             for (fun, calls) in &cache_stats {
-                state.log(format!("{:?} cached {} distinct invocations", fun.path, calls));
+                state.log(format!("{:?} cached {} distinct invocations", fun.path, calls))?;
             }
         } else {
-            state.log("Function-call cache was disabled".to_string());
+            state.log("Function-call cache was disabled".to_string())?;
         }
-        state.log(format!("\nRaw call numbers:"));
+        state.log(format!("\nRaw call numbers:"))?;
         let mut fun_call_stats: Vec<(&Fun, _)> = state.fun_calls.iter().collect();
-        fun_call_stats.sort_by(|a, b| b.1.cmp(&a.1));
+        fun_call_stats.sort_by(by_ref_count_desc);
         for (fun, count) in fun_call_stats {
-            state.log(format!("{:?} called {} times", fun.path, count));
+            state.log(format!("{:?} called {} times", fun.path, count))?;
         }
     }
+    Ok(())
 }
 
 /***********************************************
  * Special handling for interpreting arrays    *
  ***********************************************/
 
+#[cfg_attr(verus_only, verus_verify)]
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
 pub enum ArrayFn {
     View,
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 // TODO: Make the matching here more robust to changes in vstd
 /// Identify array functions for which we provide custom interpretation
 pub(crate) fn is_array_fn(fun: &Fun) -> Option<ArrayFn> {
@@ -836,11 +978,16 @@ pub(crate) fn is_array_fn(fun: &Fun) -> Option<ArrayFn> {
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 /// Custom interpretation for array functions.
 /// Expects to be called after is_array_fn has already identified
 /// the relevant array function, and the args have already been simplified.
 /// We still pass in the original Call Exp,
 /// so that we can return it as a default if we encounter symbolic values
+#[cfg_attr(verus_only, verus_spec(r =>
+    requires eval_pre(old(_state), ctx),
+    ensures eval_post(old(_state), final(_state), ctx, r is Ok)
+))]
 fn eval_array(
     ctx: &Ctx,
     _state: &mut State,
@@ -855,24 +1002,27 @@ fn eval_array(
             use ArrayFn::*;
             match array_fn {
                 View => {
+                    if args.len() < 1 {
+                        return Err(error(&exp.span, "internal error: array_view without an argument"));
+                    }
                     let array_exp = &args[0];
                     match &array_exp.x {
                         Interp(Array(es)) => {
                             let im_vec: Vector<Exp> =
                                 Vector::from_iter(es.iter().map(|e| e.clone()));
                             let inner_typ = match &*array_exp.typ {
-                                TypX::Primitive(Primitive::Array, typs) => typs[0].clone(),
+                                TypX::Primitive(Primitive::Array, typs) if typs.len() >= 1 => typs[0].clone(),
                                 TypX::Decorate(_, _, t) => match &**t {
-                                    TypX::Primitive(Primitive::Array, typs) => typs[0].clone(),
-                                    _ => panic!(
-                                        "Expected array_view with decorated argument to contain an array type.  Got: {:?}",
+                                    TypX::Primitive(Primitive::Array, typs) if typs.len() >= 1 => typs[0].clone(),
+                                    _ => return Err(error(&exp.span, format!(
+                                        "internal error: Expected array_view with decorated argument to contain an array type.  Got: {:?}",
                                         array_exp.typ
-                                    ),
+                                    ))),
                                 },
-                                _ => panic!(
-                                    "Expected array_view to be called with an array or decorated type.  Got: {:?}",
+                                _ => return Err(error(&exp.span, format!(
+                                    "internal error: Expected array_view to be called with an array or decorated type.  Got: {:?}",
                                     array_exp.typ
-                                ),
+                                ))),
                             };
                             let seq_type_path = Arc::new(PathX {
                                 krate: CrateId::Vstd,
@@ -886,24 +1036,25 @@ fn eval_array(
                             let e = SpannedTyped::new(&exp.span, &seq_typ, Interp(Seq(im_vec)));
                             Ok(e)
                         }
-                        _ => panic!(
-                            "Expected the argument to array_view to already be an Interp(Array(_)).  Got: {:?}",
+                        _ => Err(error(&exp.span, format!(
+                            "internal error: Expected the argument to array_view to already be an Interp(Array(_)).  Got: {:?}",
                             array_exp
-                        ),
+                        ))),
                     }
                 }
             }
         }
-        _ => panic!(
-            "Expected array expression to be a Call.  Got {:} instead.",
+        _ => Err(error(&exp.span, format!(
+            "internal error: Expected array expression to be a Call.  Got {:} instead.",
             exp.x.to_user_string(&ctx.global)
-        ),
+        ))),
     }
 }
 /***********************************************
  * Special handling for interpreting sequences *
  ***********************************************/
 
+#[cfg_attr(verus_only, verus_verify)]
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
 pub enum SeqFn {
     Empty,
@@ -918,6 +1069,7 @@ pub enum SeqFn {
     Last,
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 // TODO: Make the matching here more robust to changes in vstd
 /// Identify sequence functions for which we provide custom interpretation
 pub(crate) fn is_sequence_fn(fun: &Fun) -> Option<SeqFn> {
@@ -937,11 +1089,39 @@ pub(crate) fn is_sequence_fn(fun: &Fun) -> Option<SeqFn> {
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 fn strs_to_idents(s: Vec<&str>) -> Idents {
     let idents = s.iter().map(|s| Arc::new(s.to_string())).collect();
     Arc::new(idents)
 }
 
+#[cfg(verus_only)]
+verus! {
+/// The number of arguments each sequence function takes
+spec fn spec_seq_arity(f: SeqFn) -> usize {
+    match f {
+        SeqFn::Empty => 0,
+        SeqFn::Len | SeqFn::Last => 1,
+        SeqFn::New | SeqFn::Push | SeqFn::Add | SeqFn::Index | SeqFn::ExtEqual => 2,
+        SeqFn::Update | SeqFn::Subrange => 3,
+    }
+}
+}
+
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verus_spec(n =>
+    ensures n == spec_seq_arity(*f)
+))]
+fn seq_arity(f: &SeqFn) -> usize {
+    match f {
+        SeqFn::Empty => 0,
+        SeqFn::Len | SeqFn::Last => 1,
+        SeqFn::New | SeqFn::Push | SeqFn::Add | SeqFn::Index | SeqFn::ExtEqual => 2,
+        SeqFn::Update | SeqFn::Subrange => 3,
+    }
+}
+
+#[cfg_attr(verus_only, verus_verify)]
 pub(crate) fn is_seq_to_sst_fun(fun: &Fun) -> bool {
     match is_sequence_fn(fun) {
         Some(SeqFn::Empty | SeqFn::Push) => true,
@@ -949,6 +1129,7 @@ pub(crate) fn is_seq_to_sst_fun(fun: &Fun) -> bool {
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 /// Convert an interpreter-internal sequence representation back into a
 /// representation we can pass to AIR.  The algorithm follows the seq_internal
 /// macro definition in vstd's seq.rs.
@@ -957,6 +1138,7 @@ fn seq_to_sst(span: &Span, inner_typ: Typ, s: &Vector<Exp>) -> Result<Exp, VirEr
     seq_to_sst_with(span, inner_typ, s, false)
 }
 
+#[cfg_attr(verus_only, verus_verify(external_body))]
 /// `push_chain`: always `Seq::empty().push(..)..`, never a view of an array literal
 /// (`array_view` is only in the context of queries that use arrays)
 fn seq_to_sst_with(
@@ -1010,6 +1192,8 @@ fn seq_to_sst_with(
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
 /// Convert an interpreter-internal array representation back into a
 /// representation we can pass to AIR
 fn array_to_sst(span: &Span, typ: Typ, arr: &Vector<Exp>) -> Result<Exp, VirErr> {
@@ -1031,10 +1215,55 @@ fn array_to_sst(span: &Span, typ: Typ, arr: &Vector<Exp>) -> Result<Exp, VirErr>
     Ok(exp)
 }
 
+#[cfg_attr(verus_only, verus_verify)]
+/// The lowest value of a signed integer type of width `n`
+#[cfg_attr(verus_only, verus_spec(
+    requires n >= 1
+))]
+fn isize_lower(n: u32) -> BigInt {
+    -1 * (BigInt::one() << (n - 1))
+}
+
+#[cfg_attr(verus_only, verus_verify)]
+/// The highest value of a signed integer type of width `n`
+#[cfg_attr(verus_only, verus_spec(
+    requires n >= 1
+))]
+fn isize_upper(n: u32) -> BigInt {
+    (BigInt::one() << (n - 1)) - BigInt::one()
+}
+
+#[cfg_attr(verus_only, verus_verify)]
+/// We made partial progress, so convert the internal sequence back to SST and reassemble the
+/// call with the sequence in its original argument position (for `eval_seq`)
+#[cfg_attr(verus_only, verus_spec(r =>
+    requires index < args@.len(), typs@.len() >= 1
+))]
+fn seq_call_with(
+    exp: &Exp,
+    fun: &CallFun,
+    typs: &Typs,
+    args: &Exps,
+    index: usize,
+    seq: &Vector<Exp>,
+) -> Result<Exp, VirErr> {
+    let mut new_args = (**args).clone();
+    new_args[index] = seq_to_sst(&args[index].span, typs[0].clone(), &seq)?;
+    let new_args = Arc::new(new_args);
+    Ok(SpannedTyped::new(&exp.span, &exp.typ, ExpX::Call(fun.clone(), typs.clone(), new_args)))
+}
+
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
 /// Custom interpretation for sequence functions.
 /// Expects to be called after is_sequence_fn has already identified
 /// the relevant sequence function.  We still pass in the original Call Exp,
 /// so that we can return it as a default if we encounter symbolic values
+#[cfg_attr(verus_only, verifier::loop_isolation(false))]
+#[cfg_attr(verus_only, verus_spec(r =>
+    requires eval_pre(old(state), ctx),
+    ensures eval_post(old(state), final(state), ctx, r is Ok)
+))]
 fn eval_seq(
     ctx: &Ctx,
     state: &mut State,
@@ -1046,6 +1275,10 @@ fn eval_seq(
     use InterpExp::*;
     match &exp.x {
         Call(fun, typs, _old_args) => {
+            // (was a panic on indexing: a malformed call)
+            if args.len() < seq_arity(&seq_fn) || typs.len() < 1 {
+                return Err(error(&exp.span, "internal error: sequence function with too few arguments"));
+            }
             let exp_new = |e: ExpX| SpannedTyped::new(&exp.span, &exp.typ, e);
             let bool_new = |b: bool| Ok(exp_new(Const(Constant::Bool(b))));
             let int_new = |i: BigInt| Ok(exp_new(Const(Constant::Int(i))));
@@ -1054,12 +1287,6 @@ fn eval_seq(
             let ok = Ok(exp_new(Call(fun.clone(), typs.clone(), args.clone())));
             // We made partial progress, so convert the internal sequence back to SST
             // and reassemble the call with the sequence in its original argument position.
-            let ok_seq = |index: usize, seq: &Vector<Exp>| {
-                let mut new_args = args.as_ref().clone();
-                new_args[index] = seq_to_sst(&args[index].span, typs[0].clone(), &seq)?;
-                let new_args = Arc::new(new_args);
-                Ok(exp_new(Call(fun.clone(), typs.clone(), new_args)))
-            };
             let get_int = |e: &Exp| match &e.x {
                 Const(Constant::Int(index)) => match BigInt::to_usize(index) {
                     Some(i) => Some(i),
@@ -1076,15 +1303,22 @@ fn eval_seq(
                             // Extract the lambda argument passed to Seq::new
                             let lambda = &args[1];
                             // Apply the lambda to each index of the new sequence
-                            let vec: Result<Vec<Exp>, VirErr> = (0..len)
-                                .map(|i| {
-                                    let int_i = exp_new(Const(Constant::Int(BigInt::from(i))));
-                                    let args = Arc::new(vec![int_i]);
-                                    let call = exp_new(CallLambda(lambda.clone(), args));
-                                    eval_expr_internal(ctx, state, &call)
-                                })
-                                .collect();
-                            let im_vec: Vector<Exp> = vec?.into_iter().collect();
+                            let mut vec: Vec<Exp> = Vec::new();
+                            #[cfg(verus_only)]
+                            proof_decl! { let ghost s0 = *state; }
+                            #[cfg_attr(verus_only, verus_spec(
+                                invariant
+                                    eval_pre(state, ctx),
+                                    eval_post(&s0, state, ctx, true),
+                                    forall |e: ExpX| call_requires(exp_new, (e,))
+                            ))]
+                            for i in 0..len {
+                                let int_i = exp_new(Const(Constant::Int(BigInt::from(i))));
+                                let args = Arc::new(vec![int_i]);
+                                let call = exp_new(CallLambda(lambda.clone(), args));
+                                vec.push(eval_expr_internal(ctx, state, &call)?);
+                            }
+                            let im_vec: Vector<Exp> = vec.into_iter().collect();
                             seq_new(im_vec)
                         }
                         _ => ok,
@@ -1104,7 +1338,7 @@ fn eval_seq(
                             let s = s.update(index, args[2].clone());
                             seq_new(s)
                         }
-                        _ => ok_seq(0, &s),
+                        _ => seq_call_with(exp, fun, typs, args, 0, &s),
                     },
                     _ => ok,
                 },
@@ -1116,7 +1350,7 @@ fn eval_seq(
                             (Some(start), Some(end)) if start <= end && end <= s.len() => {
                                 seq_new(s.clone().slice(start..end))
                             }
-                            _ => ok_seq(0, &s),
+                            _ => seq_call_with(exp, fun, typs, args, 0, &s),
                         }
                     }
                     _ => ok,
@@ -1127,8 +1361,8 @@ fn eval_seq(
                         s.append(s2.clone());
                         seq_new(s)
                     }
-                    (_, Interp(Seq(s2))) => ok_seq(1, &s2),
-                    (Interp(Seq(s1)), _) => ok_seq(0, &s1),
+                    (_, Interp(Seq(s2))) => seq_call_with(exp, fun, typs, args, 1, &s2),
+                    (Interp(Seq(s1)), _) => seq_call_with(exp, fun, typs, args, 0, &s1),
                     _ => ok,
                 },
                 Len => match &args[0].x {
@@ -1143,9 +1377,9 @@ fn eval_seq(
                                     &exp.span,
                                     &WarningAllow::AssertComputeUnsimplified,
                                     || "Computation tried to index into a sequence using a value that does not fit into usize",
-                                    |msg| state.msgs.push(msg),
+                                    { let msgs = &mut state.msgs; move |msg| msgs.push(msg) },
                                 );
-                                ok_seq(0, &s)
+                                seq_call_with(exp, fun, typs, args, 0, &s)
                             }
                             Some(index) => {
                                 if index < s.len() {
@@ -1155,13 +1389,13 @@ fn eval_seq(
                                         &exp.span,
                                         &WarningAllow::AssertComputeUnsimplified,
                                         || "Computation tried to index past the length of a sequence",
-                                        |msg| state.msgs.push(msg),
+                                        { let msgs = &mut state.msgs; move |msg| msgs.push(msg) },
                                     );
-                                    ok_seq(0, &s)
+                                    seq_call_with(exp, fun, typs, args, 0, &s)
                                 }
                             }
                         },
-                        _ => ok_seq(0, &s),
+                        _ => seq_call_with(exp, fun, typs, args, 0, &s),
                     },
                     _ => ok,
                 },
@@ -1177,8 +1411,8 @@ fn eval_seq(
                         }
                         Some(b) => bool_new(b),
                     },
-                    (_, Interp(Seq(r))) => ok_seq(1, &r),
-                    (Interp(Seq(l)), _) => ok_seq(0, &l),
+                    (_, Interp(Seq(r))) => seq_call_with(exp, fun, typs, args, 1, &r),
+                    (Interp(Seq(l)), _) => seq_call_with(exp, fun, typs, args, 0, &l),
                     _ => ok,
                 },
                 Last => match &args[0].x {
@@ -1186,21 +1420,26 @@ fn eval_seq(
                         if s.len() > 0 {
                             Ok(s.last().unwrap().clone())
                         } else {
-                            ok_seq(0, &s)
+                            seq_call_with(exp, fun, typs, args, 0, &s)
                         }
                     }
                     _ => ok,
                 },
             }
         }
-        _ => panic!(
-            "Expected sequence expression to be a Call.  Got {:} instead.",
+        _ => Err(error(&exp.span, format!(
+            "internal error: Expected sequence expression to be a Call.  Got {:} instead.",
             exp.x.to_user_string(&ctx.global)
-        ),
+        ))),
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 /// Custom interpretation for array_index
+#[cfg_attr(verus_only, verus_spec(r =>
+    requires eval_pre(old(state), ctx),
+    ensures eval_post(old(state), final(state), ctx, r is Ok)
+))]
 fn eval_array_index(
     ctx: &Ctx,
     state: &mut State,
@@ -1222,7 +1461,7 @@ fn eval_array_index(
                         &exp.span,
                         &WarningAllow::AssertComputeUnsimplified,
                         || "Computation tried to index into an array using a value that does not fit into usize",
-                        |msg| state.msgs.push(msg),
+                        { let msgs = &mut state.msgs; move |msg| msgs.push(msg) },
                     );
                     ok
                 }
@@ -1234,7 +1473,7 @@ fn eval_array_index(
                             &exp.span,
                             &WarningAllow::AssertComputeUnsimplified,
                             || "Computation tried to index past the length of an array",
-                            |msg| state.msgs.push(msg),
+                            { let msgs = &mut state.msgs; move |msg| msgs.push(msg) },
                         );
                         ok
                     }
@@ -1250,8 +1489,650 @@ fn eval_array_index(
  * Core interpreter *
  ********************/
 
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
+#[cfg_attr(verus_only, verifier::rlimit(400))]
+#[cfg_attr(verus_only, verifier::loop_isolation(false))]
+/// The `Call(CallFun::Fun(..))` case of `eval_expr_internal` (split off for verification)
+#[cfg_attr(verus_only, verus_spec(r =>
+    requires eval_pre(old(state), ctx),
+    ensures eval_post(old(state), final(state), ctx, r is Ok)
+))]
+fn eval_call(
+    ctx: &Ctx,
+    state: &mut State,
+    exp: &Exp,
+    fun: &Fun,
+    resolved_method: &Option<(Fun, Typs)>,
+    typs: &Typs,
+    args: &Exps,
+) -> Result<Exp, VirErr> {
+    use ExpX::*;
+    let exp_new = |e: ExpX| Ok(SpannedTyped::new(&exp.span, &exp.typ, e));
+    let (orig_fun, orig_typs) = (fun, typs);
+    let (fun, typs) = resolve_call(fun, resolved_method, typs);
+    if state.perf {
+        // Record the call for later performance analysis
+        match state.fun_calls.get_mut(fun) {
+            None => {
+                state.fun_calls.insert(fun.clone(), 1);
+            }
+            Some(count) => {
+                *count = count.saturating_add(1);
+            }
+        }
+    }
+    // Simplify arguments
+    let new_args: Result<Vec<Exp>, VirErr> =
+        eval_exps(ctx, state, args);
+    let new_args = Arc::new(new_args?);
+    if let Some(array_fn) = is_array_fn(&fun) {
+        eval_array(ctx, state, array_fn, exp, &new_args)
+    } else if let Some(seq_fn) = is_sequence_fn(&fun) {
+        eval_seq(ctx, state, seq_fn, exp, &new_args)
+    } else {
+        // Try to find the function's body
+        match ctx.fun_ssts.get(fun) {
+            Some(func)
+                if func.x.axioms.spec_axioms.is_some() && func.x.kind.inline_okay() =>
+            {
+                let memoize = func.x.attrs.memoize;
+                let call_exp = SpannedTyped::new(
+                    &exp.span,
+                    &exp.typ,
+                    Call(
+                        CallFun::Fun(orig_fun.clone(), resolved_method.clone()),
+                        orig_typs.clone(),
+                        new_args.clone(),
+                    ),
+                );
+                match state.lookup_call(&fun, &typs, &new_args, memoize) {
+                    Some(prev_result) => {
+                        state.cache_hits = state.cache_hits.saturating_add(1);
+                        if state.record_steps {
+                            state.add_fact(call_exp, prev_result.clone());
+                        }
+                        Ok(prev_result)
+                    }
+                    None => {
+                        let step_idx = if state.record_steps {
+                            state.steps.push(ComputeStep {
+                                call: call_exp.clone(),
+                                result: call_exp.clone(),
+                                funs: if orig_fun == fun {
+                                    vec![fun.clone()]
+                                } else {
+                                    vec![orig_fun.clone(), fun.clone()]
+                                },
+                                children: vec![],
+                            });
+                            state.open_steps.push(state.steps.len() - 1);
+                            Some(state.steps.len() - 1)
+                        } else {
+                            None
+                        };
+                        let typ_params = &func.x.typ_params;
+                        let pars = &func.x.pars;
+                        let body = &func.x.axioms.spec_axioms.as_ref().unwrap().body_exp;
+                        state.cache_misses = state.cache_misses.saturating_add(1);
+                        // Substitute the actual arguments for the formals, and the
+                        // type arguments for the type parameters, then evaluate the
+                        // (now closed) body in an empty environment. `subst_exp` is
+                        // capture-avoiding: a binder of the body whose name occurs free
+                        // in an argument is renamed. Looking the formals up in the
+                        // caller's environment instead (lazily, by name) mixed the two
+                        // scopes: `f(y) = exists|x| .. x != y` applied to a quantified
+                        // `x` became `exists|x| .. x != x`; a caller's closure
+                        // mentioning its `y` read the callee's `y`; a caller's const
+                        // generic `N` read the callee's `N` (upstream #3088); and a body
+                        // the interpreter leaves alone (a `choose`) kept the formal
+                        // itself (upstream #3089).
+                        let mut typ_substs: HashMap<Ident, Typ> = HashMap::new();
+                        let mut var_substs: HashMap<VarIdent, Exp> = HashMap::new();
+                        for (formal, actual) in pars.iter().zip(new_args.iter()) {
+                            var_substs.insert(formal.x.name.clone(), actual.clone());
+                        }
+                        for (formal, actual) in typ_params.iter().zip(typs.iter()) {
+                            typ_substs.insert(formal.clone(), actual.clone());
+                            // Const generics: `{ N => 7 }` for the formal `N`
+                            if let TypX::ConstInt(c) = &**actual {
+                                let formal_id = VarIdent(
+                                    formal.clone(),
+                                    VarIdentDisambiguate::TypParamBare,
+                                );
+                                let value = SpannedTyped::new(
+                                    &exp.span,
+                                    &exp.typ,
+                                    Const(Constant::Int(c.clone())),
+                                );
+                                var_substs.insert(formal_id, value);
+                            }
+                        }
+                        let body = subst_exp(&typ_substs, &var_substs, body);
+                        let saved_env = std::mem::replace(&mut state.env, ScopeMap::new());
+                        let saved_type_env =
+                            std::mem::replace(&mut state.type_env, ScopeMap::new());
+                        state.env.push_scope(true);
+                        state.type_env.push_scope(true);
+                        let result = eval_expr_internal(ctx, state, &body);
+                        state.env = saved_env;
+                        state.type_env = saved_type_env;
+                        if let Some(i) = step_idx {
+                            state.open_steps.pop();
+                            if let Ok(r) = &result {
+                                state.steps[i].result = r.clone();
+                                state.add_fact(call_exp, r.clone());
+                            }
+                        }
+                        #[cfg(verus_only)]
+                        proof! {
+                            assert(state_inv(state, ctx));
+                            assert(state.open_steps@ == old(state).open_steps@);
+                            assert(state.steps.len() >= old(state).steps.len());
+                        }
+                        state.insert_call(fun, &typs, &new_args, &result.clone()?, memoize);
+                        result
+                    }
+                }
+            }
+            _ => {
+                // We don't have the body for this function, so we can't simplify further
+                exp_new(Call(
+                    CallFun::Fun(fun.clone(), resolved_method.clone()),
+                    typs.clone(),
+                    new_args.clone(),
+                ))
+            }
+        }
+    }
+}
+
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
+#[cfg_attr(verus_only, verifier::rlimit(400))]
+#[cfg_attr(verus_only, verifier::loop_isolation(false))]
+/// A case of `eval_expr_internal` (split off for verification)
+#[cfg_attr(verus_only, verus_spec(r =>
+    requires eval_pre(old(state), ctx),
+    ensures eval_post(old(state), final(state), ctx, r is Ok)
+))]
+fn eval_unary(
+    ctx: &Ctx,
+    state: &mut State,
+    exp: &Exp,
+    op: &UnaryOp,
+    e: &Exp,
+) -> Result<Exp, VirErr> {
+    use ExpX::*;
+    let exp_new = |e: ExpX| -> Result<Exp, VirErr> { Ok(SpannedTyped::new(&exp.span, &exp.typ, e)) };
+    let bool_new = |b: bool| exp_new(Const(Constant::Bool(b)));
+    let int_new = |i: BigInt| exp_new(Const(Constant::Int(i)));
+    use Constant::*;
+    use UnaryOp::*;
+    let e = eval_expr_internal(ctx, state, e)?;
+    let ok = exp_new(Unary(*op, e.clone()));
+    match &e.x {
+        Const(Bool(b)) => {
+            // Explicitly enumerate UnaryOps, in case more are added
+            match op {
+                Not => bool_new(!b),
+                BitNot(..)
+                | Clip { .. }
+                | IntToReal
+                | RealToInt
+                | FloatToBits
+                | IeeeFloat(_)
+                | HeightTrigger
+                | Trigger(_)
+                | CoerceMode { .. }
+                | NewStrLit
+                | StrLen
+                | Length(..)
+                | CastToInteger
+                | MutRefCurrent
+                | MutRefFuture(_)
+                | MutRefFinal(_) => ok,
+                MustBeFinalized | UnaryOp::MustBeElaborated => Err(error(&exp.span, format!(
+                    "internal error: Found MustBeFinalized op {:?} after calling finalize_exp",
+                    exp
+                ))),
+            }
+        }
+        Const(Int(i)) => {
+            // Explicitly enumerate UnaryOps, in case more are added
+            match op {
+                BitNot(None) => match i.to_i128() {
+                    Some(i) => int_new(BigInt::from_i128(!i).unwrap()),
+                    None => ok,
+                },
+                BitNot(Some(w)) => match i.to_u128() {
+                    Some(i) => match u128_to_width(!i, *w, ctx.arch) {
+                        Some(i) => int_new(i),
+                        None => ok,
+                    },
+                    None => ok,
+                },
+                Clip { range, truncate: _ } => {
+                    let in_range =
+                        |lower: BigInt, upper: BigInt| !(i < &lower || i > &upper);
+                    // (the closures take the message list: capturing `state` would hide all of it)
+                    let apply_range = |msgs: &mut Vec<Message>, lower: BigInt, upper: BigInt| {
+                        if !in_range(lower, upper) {
+                            ctx.warning(
+                                &exp.span,
+                                &WarningAllow::AssertComputeUnsimplified,
+                                || "Computation clipped an integer that was out of range",
+                                move |msg| msgs.push(msg),
+                            );
+                            ok.clone()
+                        } else {
+                            // Use the type of clip, not the inner expression,
+                            // to reflect the type change imposed by clip
+                            Ok(SpannedTyped::new(&e.span, &exp.typ, e.x.clone()))
+                        }
+                    };
+                    let apply_unicode_scalar_range = |msgs: &mut Vec<Message>| {
+                        if !valid_unicode_scalar_bigint(i) {
+                            ctx.warning(
+                                &exp.span,
+                                &WarningAllow::AssertComputeUnsimplified,
+                                || "Computation clipped an integer that was out of range",
+                                move |msg| msgs.push(msg),
+                            );
+                            ok.clone()
+                        } else {
+                            // Use the type of clip, not the inner expression,
+                            // to reflect the type change imposed by clip
+                            Ok(SpannedTyped::new(&e.span, &exp.typ, e.x.clone()))
+                        }
+                    };
+                    match range {
+                        IntRange::Int => ok,
+                        IntRange::Nat => apply_range(&mut state.msgs, BigInt::zero(), i.clone()),
+                        IntRange::Char => apply_unicode_scalar_range(&mut state.msgs),
+                        IntRange::U(n) => {
+                            let u = apply_range(&mut state.msgs, 
+                                BigInt::zero(),
+                                (BigInt::one() << n) - BigInt::one(),
+                            );
+                            u
+                        }
+                        IntRange::I(0) => Err(error(&exp.span, "internal error: signed integer type of width 0")),
+                        IntRange::I(n) => apply_range(&mut state.msgs, 
+                            -1 * (BigInt::one() << (n - 1)),
+                            (BigInt::one() << (n - 1)) - BigInt::one(),
+                        ),
+                        IntRange::USize => {
+                            let lower = BigInt::zero();
+                            let upper = |n| (BigInt::one() << n) - BigInt::one();
+                            match ctx.arch {
+                                ArchWordBits::Either32Or64 => {
+                                    if in_range(lower.clone(), upper(32)) {
+                                        // then must be in range of 64 too
+                                        apply_range(&mut state.msgs, lower, upper(32))
+                                    } else {
+                                        // may or may not be in range of 64, we must conservatively give up.
+                                        ctx.warning(
+                                            &exp.span,
+                                            &WarningAllow::AssertComputeUnsimplified,
+                                            || "Computation clipped an arch-dependent integer that was out of range",
+                                            { let msgs = &mut state.msgs; move |msg| msgs.push(msg) },
+                                        );
+                                        ok.clone()
+                                    }
+                                }
+                                ArchWordBits::Exactly(n) => apply_range(&mut state.msgs, lower, upper(n)),
+                            }
+                        }
+                        IntRange::ISize => {
+                            match ctx.arch {
+                                ArchWordBits::Either32Or64 => {
+                                    if in_range(isize_lower(32), isize_upper(32)) {
+                                        // then must be in range of 64 too
+                                        apply_range(&mut state.msgs, isize_lower(32), isize_upper(32))
+                                    } else {
+                                        // may or may not be in range of 64, we must conservatively give up.
+                                        ctx.warning(
+                                            &exp.span,
+                                            &WarningAllow::AssertComputeUnsimplified,
+                                            || "Computation clipped an arch-dependent integer that was out of range",
+                                            { let msgs = &mut state.msgs; move |msg| msgs.push(msg) },
+                                        );
+                                        ok.clone()
+                                    }
+                                }
+                                ArchWordBits::Exactly(0) => Err(error(&exp.span, "internal error: word size 0")),
+                                ArchWordBits::Exactly(n) => apply_range(&mut state.msgs, isize_lower(n), isize_upper(n)),
+                            }
+                        }
+                    }
+                }
+                MustBeFinalized | UnaryOp::MustBeElaborated => Err(error(&exp.span, format!(
+                    "internal error: Found MustBeFinalized op {:?} after calling finalize_exp",
+                    exp
+                ))),
+                CastToInteger => Ok(e.clone()),
+                Not
+                | HeightTrigger
+                | Trigger(_)
+                | IntToReal
+                | RealToInt
+                | FloatToBits
+                | IeeeFloat(_)
+                | CoerceMode { .. }
+                | NewStrLit
+                | StrLen
+                | Length(..)
+                | MutRefCurrent
+                | MutRefFuture(_)
+                | MutRefFinal(_) => ok,
+            }
+        }
+        // !(!(e_inner)) == e_inner
+        Unary(Not, e_inner) if matches!(op, Not) => Ok(e_inner.clone()),
+        _ => ok,
+    }
+}
+
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
+#[cfg_attr(verus_only, verifier::rlimit(400))]
+#[cfg_attr(verus_only, verifier::loop_isolation(false))]
+/// A case of `eval_expr_internal` (split off for verification)
+#[cfg_attr(verus_only, verus_spec(r =>
+    requires eval_pre(old(state), ctx),
+    ensures eval_post(old(state), final(state), ctx, r is Ok)
+))]
+fn eval_binary(
+    ctx: &Ctx,
+    state: &mut State,
+    exp: &Exp,
+    op: &BinaryOp,
+    e1: &Exp,
+    e2: &Exp,
+) -> Result<Exp, VirErr> {
+    use ExpX::*;
+    let ok: Result<Exp, VirErr> = Ok(exp.clone());
+    let exp_new = |e: ExpX| -> Result<Exp, VirErr> { Ok(SpannedTyped::new(&exp.span, &exp.typ, e)) };
+    let bool_new = |b: bool| exp_new(Const(Constant::Bool(b)));
+    let int_new = |i: BigInt| exp_new(Const(Constant::Int(i)));
+    let zero = int_new(BigInt::zero());
+    use BinaryOp::*;
+    use Constant::*;
+    // We initially evaluate only e1, since op may short circuit
+    // e.g., x != 0 && y == 5 / x
+    let e1 = eval_expr_internal(ctx, state, e1)?;
+    // Create the default value with a possibly updated value for e2
+    let ok_e2 = |e2: Exp| exp_new(Binary(*op, e1.clone(), e2.clone()));
+    match op {
+        And => match &e1.x {
+            Const(Bool(true)) => eval_expr_internal(ctx, state, e2),
+            Const(Bool(false)) => bool_new(false),
+            _ => {
+                let e2 = eval_expr_internal(ctx, state, e2)?;
+                match &e2.x {
+                    Const(Bool(true)) => Ok(e1.clone()),
+                    Const(Bool(false)) => bool_new(false),
+                    _ => ok_e2(e2),
+                }
+            }
+        },
+        Or => match &e1.x {
+            Const(Bool(true)) => bool_new(true),
+            Const(Bool(false)) => eval_expr_internal(ctx, state, e2),
+            _ => {
+                let e2 = eval_expr_internal(ctx, state, e2)?;
+                match &e2.x {
+                    Const(Bool(true)) => bool_new(true),
+                    Const(Bool(false)) => Ok(e1.clone()),
+                    _ => ok_e2(e2),
+                }
+            }
+        },
+        Xor => {
+            let e2 = eval_expr_internal(ctx, state, e2)?;
+            match (&e1.x, &e2.x) {
+                (Const(Bool(b1)), Const(Bool(b2))) => {
+                    let r = (*b1 && !b2) || (!b1 && *b2);
+                    bool_new(r)
+                }
+                (Const(Bool(true)), _) => exp_new(Unary(UnaryOp::Not, e2.clone())),
+                (Const(Bool(false)), _) => Ok(e2.clone()),
+                (_, Const(Bool(true))) => exp_new(Unary(UnaryOp::Not, e1.clone())),
+                (_, Const(Bool(false))) => Ok(e1.clone()),
+                _ => ok_e2(e2),
+            }
+        }
+        Implies => {
+            match &e1.x {
+                Const(Bool(true)) => eval_expr_internal(ctx, state, e2),
+                Const(Bool(false)) => bool_new(true),
+                _ => {
+                    let e2 = eval_expr_internal(ctx, state, e2)?;
+                    match &e2.x {
+                        Const(Bool(true)) => bool_new(true),
+                        Const(Bool(false)) =>
+                        // Recurse in case we can simplify the new negation
+                        {
+                            eval_expr_internal(
+                                ctx,
+                                state,
+                                &exp_new(Unary(UnaryOp::Not, e1.clone()))?,
+                            )
+                        }
+                        _ => ok_e2(e2),
+                    }
+                }
+            }
+        }
+        Eq => {
+            let e2 = eval_expr_internal(ctx, state, e2)?;
+            match e1.syntactic_eq(&e2) {
+                None => ok_e2(e2),
+                Some(b) => bool_new(b),
+            }
+        }
+        Ne => {
+            let e2 = eval_expr_internal(ctx, state, e2)?;
+            match e1.syntactic_eq(&e2) {
+                None => ok_e2(e2),
+                Some(b) => bool_new(!b),
+            }
+        }
+        Inequality(op) => {
+            let e2 = eval_expr_internal(ctx, state, e2)?;
+            match (&e1.x, &e2.x) {
+                (Const(Int(i1)), Const(Int(i2))) => {
+                    use InequalityOp::*;
+                    let b = match op {
+                        Le => i1 <= i2,
+                        Ge => i1 >= i2,
+                        Lt => i1 < i2,
+                        Gt => i1 > i2,
+                    };
+                    bool_new(b)
+                }
+                _ => ok_e2(e2),
+            }
+        }
+        Arith(op) => {
+            let e2 = eval_expr_internal(ctx, state, e2)?;
+            use ArithOp::*;
+            match (&e1.x, &e2.x) {
+                // Ideal case where both sides are concrete
+                (Const(Int(i1)), Const(Int(i2))) => {
+                    use ArithOp::*;
+                    match op {
+                        Add => int_new(i1 + i2),
+                        Sub => int_new(i1 - i2),
+                        Mul => int_new(i1 * i2),
+                        EuclideanDiv => {
+                            if i2.is_zero() {
+                                ok_e2(e2) // Treat as symbolic instead of erroring
+                            } else {
+                                int_new(i1.div_euclid(i2))
+                            }
+                        }
+                        EuclideanMod => {
+                            if i2.is_zero() {
+                                ok_e2(e2) // Treat as symbolic instead of erroring
+                            } else {
+                                int_new(i1.rem_euclid(i2))
+                            }
+                        }
+                    }
+                }
+                // Special cases for certain concrete values
+                (Const(Int(i1)), _) if i1.is_zero() && matches!(op, Add) => Ok(e2.clone()),
+                (Const(Int(i1)), _) if i1.is_zero() && matches!(op, Mul) => zero,
+                (Const(Int(i1)), _) if i1.is_one() && matches!(op, Mul) => Ok(e2.clone()),
+                (_, Const(Int(i2))) if i2.is_zero() => {
+                    use ArithOp::*;
+                    match op {
+                        Add | Sub => Ok(e1.clone()),
+                        Mul => zero,
+                        EuclideanDiv => {
+                            ok_e2(e2) // Treat as symbolic instead of erroring
+                        }
+                        EuclideanMod => {
+                            ok_e2(e2) // Treat as symbolic instead of erroring
+                        }
+                    }
+                }
+                (_, Const(Int(i2))) if i2.is_one() && matches!(op, EuclideanMod) => {
+                    int_new(BigInt::zero())
+                }
+                (_, Const(Int(i2))) if i2.is_one() && matches!(op, Mul | EuclideanDiv) => {
+                    Ok(e1.clone())
+                }
+                _ => {
+                    match op {
+                        // X - X => 0
+                        ArithOp::Sub if e1.definitely_eq(&e2) => zero,
+                        _ => ok_e2(e2),
+                    }
+                }
+            }
+        }
+        Bitwise(op) => {
+            use BitwiseOp::*;
+            let e2 = eval_expr_internal(ctx, state, e2)?;
+            match (&e1.x, &e2.x) {
+                // Ideal case where both sides are concrete
+                (Const(Int(i1)), Const(Int(i2))) => match op {
+                    BitXor => int_new(i1 ^ i2),
+                    BitAnd => int_new(i1 & i2),
+                    BitOr => int_new(i1 | i2),
+                    Shr => match i2.to_u128() {
+                        None => ok,
+                        Some(i2) => int_new(i1 >> i2),
+                    },
+                    Shl(w, signed) => {
+                        if *signed {
+                            match (i1.to_i128(), i2.to_u128()) {
+                                (Some(i1), Some(i2)) => {
+                                    let i1_shifted =
+                                        if i2 >= 128 { 0i128 } else { i1 << i2 };
+                                    match i128_to_width(i1_shifted, *w, ctx.arch) {
+                                        Some(i) => int_new(i),
+                                        None => ok,
+                                    }
+                                }
+                                _ => ok,
+                            }
+                        } else {
+                            match (i1.to_u128(), i2.to_u128()) {
+                                (Some(i1), Some(i2)) => {
+                                    let i1_shifted =
+                                        if i2 >= 128 { 0u128 } else { i1 << i2 };
+                                    match u128_to_width(i1_shifted, *w, ctx.arch) {
+                                        Some(i) => int_new(i),
+                                        None => ok,
+                                    }
+                                }
+                                _ => ok,
+                            }
+                        }
+                    }
+                },
+                // Special cases for certain concrete values
+                (Const(Int(i)), _) | (_, Const(Int(i)))
+                    if i.is_zero() && matches!(op, BitAnd) =>
+                {
+                    zero
+                }
+                (Const(Int(i1)), _) if i1.is_zero() && matches!(op, BitOr) => {
+                    Ok(e2.clone())
+                }
+                (_, Const(Int(i2))) if i2.is_zero() && matches!(op, BitOr) => {
+                    Ok(e1.clone())
+                }
+                _ => {
+                    match op {
+                        // X ^ X => 0
+                        BitXor if e1.definitely_eq(&e2) => zero,
+                        // X & X = X, X | X = X
+                        BitAnd | BitOr if e1.definitely_eq(&e2) => Ok(e1.clone()),
+                        _ => ok_e2(e2),
+                    }
+                }
+            }
+        }
+        Index(ArrayKind::Array) => {
+            let e2 = eval_expr_internal(ctx, state, e2)?;
+            eval_array_index(ctx, state, exp, &e1, &e2)
+        }
+        Index(ArrayKind::Slice)
+        | HeightCompare { .. }
+        | StrGetChar
+        | RealArith(..)
+        | IeeeFloat(_) => ok_e2(eval_expr_internal(ctx, state, e2)?),
+    }
+}
+
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
+/// Evaluate each expression in order, stopping at the first error (as
+/// `exps.iter().map(|e| eval_expr_internal(ctx, state, e)).collect()`, written as a loop so
+/// that what is known about `state` survives)
+#[cfg_attr(verus_only, verifier::loop_isolation(false))]
+#[cfg_attr(verus_only, verus_spec(r =>
+    requires eval_pre(old(state), ctx),
+    ensures
+        eval_post(old(state), final(state), ctx, r is Ok),
+        r matches Ok(v) ==> v@.len() == exps@.len()
+))]
+fn eval_exps(ctx: &Ctx, state: &mut State, exps: &[Exp]) -> Result<Vec<Exp>, VirErr> {
+    #[cfg(verus_only)]
+    proof_decl! { let ghost s0 = *state; }
+    let mut out: Vec<Exp> = Vec::new();
+    let mut i: usize = 0;
+    #[cfg_attr(verus_only, verus_spec(
+        invariant
+            eval_pre(state, ctx),
+            eval_post(&s0, state, ctx, true),
+            out@.len() == i,
+            i <= exps@.len(),
+        decreases exps@.len() - i
+    ))]
+    while i < exps.len() {
+        out.push(eval_expr_internal(ctx, state, &exps[i])?);
+        i += 1;
+    }
+    Ok(out)
+}
+
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
 /// Symbolically execute the expression as far as we can,
 /// stopping when we hit a symbolic control-flow decision
+#[cfg_attr(verus_only, verifier::rlimit(400))]
+#[cfg_attr(verus_only, verifier::spinoff_prover)]
+#[cfg_attr(verus_only, verifier::loop_isolation(false))]
+#[cfg_attr(verus_only, verus_spec(r =>
+    requires eval_pre(old(state), ctx),
+    ensures eval_post(old(state), final(state), ctx, r is Ok)
+))]
 fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, VirErr> {
     state.iterations += 1;
     if state.iterations > ctx.max_iterations {
@@ -1266,236 +2147,75 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
         "{}Evaluating {:}",
         "\t".repeat(state.depth),
         exp.x.to_user_string(&ctx.global)
-    ));
+    ))?;
     let ok = Ok(exp.clone());
     if state.enable_simplified_cache && state.simplified.contains(exp) {
-        state.ptr_hits += 1;
+        state.ptr_hits = state.ptr_hits.saturating_add(1);
         state
-            .log(format!("{}=> already simplified as far as it will go", "\t".repeat(state.depth)));
+            .log(format!("{}=> already simplified as far as it will go", "\t".repeat(state.depth)))?;
         return Ok(exp.clone());
     }
-    state.ptr_misses += 1;
+    state.ptr_misses = state.ptr_misses.saturating_add(1);
     state.depth += 1;
     let exp_new = |e: ExpX| Ok(SpannedTyped::new(&exp.span, &exp.typ, e));
     let bool_new = |b: bool| exp_new(Const(Constant::Bool(b)));
     let int_new = |i: BigInt| exp_new(Const(Constant::Int(i)));
-    let zero = int_new(BigInt::zero());
     use ExpX::*;
     let r = match &exp.x {
         Const(_) => ok,
         Var(id) => match state.env.get(id) {
             None => {
-                state.log(format!("Failed to find a match for variable {:?}", id));
+                state.log(format!("Failed to find a match for variable {:?}", id))?;
                 // "Hide" the variable, so that we don't accidentally
                 // mix free and bound variables while interpreting
                 exp_new(Interp(InterpExp::FreeVar(id.clone())))
             }
             Some(e) => Ok(e.clone()),
         },
-        NullaryOpr(op) => match op {
-            crate::ast::NullaryOpr::ConstGeneric(typ) => match &**typ {
-                TypX::ConstInt(i) => {
-                    // Recursive definitions require const arguments to fit their declared type.
-                    match crate::ast_util::int_range_from_type(&exp.typ) {
-                        Some(IntRange::Int) => int_new(i.clone()),
-                        Some(range) => {
-                            let value = exp.new_x(Const(Constant::Int(i.clone())));
-                            let clipped =
-                                exp.new_x(Unary(UnaryOp::Clip { range, truncate: false }, value));
-                            let value = eval_expr_internal(ctx, state, &clipped)?;
-                            if matches!(&value.x, Const(Constant::Int(_))) { Ok(value) } else { ok }
-                        }
-                        None => ok,
-                    }
-                }
-                TypX::ConstBool(b) => bool_new(*b),
-                TypX::TypParam(id) => {
-                    let var_id = VarIdent(id.clone(), VarIdentDisambiguate::TypParamBare);
-                    exp_new(Interp(InterpExp::FreeVar(var_id)))
-                }
-                _ => ok,
-            },
-            _ => ok,
-        },
-        Unary(op, e) => {
-            use Constant::*;
-            use UnaryOp::*;
-            let e = eval_expr_internal(ctx, state, e)?;
-            let ok = exp_new(Unary(*op, e.clone()));
-            match &e.x {
-                Const(Bool(b)) => {
-                    // Explicitly enumerate UnaryOps, in case more are added
-                    match op {
-                        Not => bool_new(!b),
-                        BitNot(..)
-                        | Clip { .. }
-                        | IntToReal
-                        | RealToInt
-                        | FloatToBits
-                        | IeeeFloat(_)
-                        | HeightTrigger
-                        | Trigger(_)
-                        | CoerceMode { .. }
-                        | NewStrLit
-                        | StrLen
-                        | Length(..)
-                        | CastToInteger
-                        | MutRefCurrent
-                        | MutRefFuture(_)
-                        | MutRefFinal(_) => ok,
-                        MustBeFinalized | UnaryOp::MustBeElaborated => {
-                            panic!("Found MustBeFinalized op {:?} after calling finalize_exp", exp)
-                        }
-                    }
-                }
-                Const(Int(i)) => {
-                    // Explicitly enumerate UnaryOps, in case more are added
-                    match op {
-                        BitNot(None) => match i.to_i128() {
-                            Some(i) => int_new(BigInt::from_i128(!i).unwrap()),
-                            None => ok,
-                        },
-                        BitNot(Some(w)) => match i.to_u128() {
-                            Some(i) => match u128_to_width(!i, *w, ctx.arch) {
-                                Some(i) => int_new(i),
-                                None => ok,
-                            },
-                            None => ok,
-                        },
-                        Clip { range, truncate: _ } => {
-                            let in_range =
-                                |lower: BigInt, upper: BigInt| !(i < &lower || i > &upper);
-                            let mut apply_range = |lower: BigInt, upper: BigInt| {
-                                if !in_range(lower, upper) {
-                                    ctx.warning(
-                                        &exp.span,
-                                        &WarningAllow::AssertComputeUnsimplified,
-                                        || "Computation clipped an integer that was out of range",
-                                        |msg| state.msgs.push(msg),
-                                    );
-                                    ok.clone()
-                                } else {
-                                    // Use the type of clip, not the inner expression,
-                                    // to reflect the type change imposed by clip
-                                    Ok(SpannedTyped::new(&e.span, &exp.typ, e.x.clone()))
+        NullaryOpr(op) => {
+            match op {
+                crate::ast::NullaryOpr::ConstGeneric(typ) => {
+                    match &**typ {
+                        TypX::TypParam(id) => {
+                            let var_id = VarIdent(id.clone(), VarIdentDisambiguate::TypParamBare);
+                            match state.env.get(&var_id) {
+                                None => {
+                                    state.log(format!(
+                                        "Failed to find a match for const generic {:?}",
+                                        var_id
+                                    ))?;
+                                    // "Hide" the variable, so that we don't accidentally
+                                    // mix free and bound variables while interpreting
+                                    exp_new(Interp(InterpExp::FreeVar(var_id.clone())))
                                 }
-                            };
-                            let apply_unicode_scalar_range = |state: &mut State| {
-                                if !valid_unicode_scalar_bigint(i) {
-                                    ctx.warning(
-                                        &exp.span,
-                                        &WarningAllow::AssertComputeUnsimplified,
-                                        || "Computation clipped an integer that was out of range",
-                                        |msg| state.msgs.push(msg),
-                                    );
-                                    ok.clone()
-                                } else {
-                                    // Use the type of clip, not the inner expression,
-                                    // to reflect the type change imposed by clip
-                                    Ok(SpannedTyped::new(&e.span, &exp.typ, e.x.clone()))
-                                }
-                            };
-                            match range {
-                                IntRange::Int => ok,
-                                IntRange::Nat => apply_range(BigInt::zero(), i.clone()),
-                                IntRange::Char => apply_unicode_scalar_range(state),
-                                IntRange::U(n) => {
-                                    let u = apply_range(
-                                        BigInt::zero(),
-                                        (BigInt::one() << n) - BigInt::one(),
-                                    );
-                                    u
-                                }
-                                IntRange::I(n) => apply_range(
-                                    -1 * (BigInt::one() << (n - 1)),
-                                    (BigInt::one() << (n - 1)) - BigInt::one(),
-                                ),
-                                IntRange::USize => {
-                                    let lower = BigInt::zero();
-                                    let upper = |n| (BigInt::one() << n) - BigInt::one();
-                                    match ctx.arch {
-                                        ArchWordBits::Either32Or64 => {
-                                            if in_range(lower.clone(), upper(32)) {
-                                                // then must be in range of 64 too
-                                                apply_range(lower, upper(32))
-                                            } else {
-                                                // may or may not be in range of 64, we must conservatively give up.
-                                                ctx.warning(
-                                                    &exp.span,
-                                                    &WarningAllow::AssertComputeUnsimplified,
-                                                    || "Computation clipped an arch-dependent integer that was out of range",
-                                                    |msg| state.msgs.push(msg),
-                                                );
-                                                ok.clone()
-                                            }
-                                        }
-                                        ArchWordBits::Exactly(n) => apply_range(lower, upper(n)),
-                                    }
-                                }
-                                IntRange::ISize => {
-                                    let lower = |n| -1 * (BigInt::one() << (n - 1));
-                                    let upper = |n| (BigInt::one() << (n - 1)) - BigInt::one();
-                                    match ctx.arch {
-                                        ArchWordBits::Either32Or64 => {
-                                            if in_range(lower(32), upper(32)) {
-                                                // then must be in range of 64 too
-                                                apply_range(lower(32), upper(32))
-                                            } else {
-                                                // may or may not be in range of 64, we must conservatively give up.
-                                                ctx.warning(
-                                                    &exp.span,
-                                                    &WarningAllow::AssertComputeUnsimplified,
-                                                    || "Computation clipped an arch-dependent integer that was out of range",
-                                                    |msg| state.msgs.push(msg),
-                                                );
-                                                ok.clone()
-                                            }
-                                        }
-                                        ArchWordBits::Exactly(n) => apply_range(lower(n), upper(n)),
-                                    }
-                                }
+                                Some(e) => Ok(e.clone()),
                             }
                         }
-                        MustBeFinalized | UnaryOp::MustBeElaborated => {
-                            panic!("Found MustBeFinalized op {:?} after calling finalize_exp", exp)
-                        }
-                        CastToInteger => Ok(e.clone()),
-                        Not
-                        | HeightTrigger
-                        | Trigger(_)
-                        | IntToReal
-                        | RealToInt
-                        | FloatToBits
-                        | IeeeFloat(_)
-                        | CoerceMode { .. }
-                        | NewStrLit
-                        | StrLen
-                        | Length(..)
-                        | MutRefCurrent
-                        | MutRefFuture(_)
-                        | MutRefFinal(_) => ok,
+                        _ => ok,
                     }
                 }
-                // !(!(e_inner)) == e_inner
-                Unary(Not, e_inner) if matches!(op, Not) => Ok(e_inner.clone()),
                 _ => ok,
             }
+        }
+        Unary(op, e) => {
+            eval_unary(ctx, state, exp, op, e)
         }
         UnaryOpr(op, e) => {
             let e = eval_expr_internal(ctx, state, e)?;
             let ok = exp_new(UnaryOpr(op.clone(), e.clone()));
             use crate::ast::UnaryOpr::*;
             match op {
-                Box(_) | Unbox(_) => {
-                    panic!("Box/Unbox are added later; we shouldn't see them here")
-                }
+                Box(_) | Unbox(_) => Err(error(
+                    &exp.span,
+                    "internal error: Box/Unbox are added later; we shouldn't see them here",
+                )),
                 HasType(_) => ok,
                 IsVariant { datatype, variant } => match &e.x {
                     Ctor(dt, var, _) => bool_new(dt == datatype && var == variant),
                     _ => ok,
                 },
                 Field(f) => match &e.x {
-                    Ctor(_dt, var, binders) if var == &f.variant => {
+                    Ctor(_dt, _var, binders) => {
                         match binders.iter().position(|b| b.name == f.field) {
                             None => ok,
                             Some(i) => Ok(binders.get(i).unwrap().a.clone()),
@@ -1531,246 +2251,17 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
                         _ => ok,
                     }
                 }
-                ToDyn(_) => ok,
-                HasResolved(_) => ok,
+                ToDyn(_) => Ok(e),
                 CustomErr(_) => Ok(e),
                 AutoDecreases => Ok(e),
                 AutoLoopEnsures => Ok(e),
                 ProofNote(_) => Ok(e),
+                HasResolved(_) => Ok(e),
                 LoopIsolationBoundary(_) => Ok(e),
             }
         }
-        Binary(BinaryOp::Eq, e1, e2) if e1.definitely_eq(e2) => bool_new(true),
-        Binary(BinaryOp::Ne, e1, e2) if e1.definitely_eq(e2) => bool_new(false),
         Binary(op, e1, e2) => {
-            use BinaryOp::*;
-            use Constant::*;
-            // We initially evaluate only e1, since op may short circuit
-            // e.g., x != 0 && y == 5 / x
-            let e1 = eval_expr_internal(ctx, state, e1)?;
-            // Create the default value with a possibly updated value for e2
-            let ok_e2 = |e2: Exp| exp_new(Binary(*op, e1.clone(), e2.clone()));
-            match op {
-                And => match &e1.x {
-                    Const(Bool(true)) => eval_expr_internal(ctx, state, e2),
-                    Const(Bool(false)) => bool_new(false),
-                    _ => {
-                        let e2 = eval_expr_internal(ctx, state, e2)?;
-                        match &e2.x {
-                            Const(Bool(true)) => Ok(e1.clone()),
-                            Const(Bool(false)) => bool_new(false),
-                            _ => ok_e2(e2),
-                        }
-                    }
-                },
-                Or => match &e1.x {
-                    Const(Bool(true)) => bool_new(true),
-                    Const(Bool(false)) => eval_expr_internal(ctx, state, e2),
-                    _ => {
-                        let e2 = eval_expr_internal(ctx, state, e2)?;
-                        match &e2.x {
-                            Const(Bool(true)) => bool_new(true),
-                            Const(Bool(false)) => Ok(e1.clone()),
-                            _ => ok_e2(e2),
-                        }
-                    }
-                },
-                Xor => {
-                    let e2 = eval_expr_internal(ctx, state, e2)?;
-                    match (&e1.x, &e2.x) {
-                        (Const(Bool(b1)), Const(Bool(b2))) => {
-                            let r = (*b1 && !b2) || (!b1 && *b2);
-                            bool_new(r)
-                        }
-                        (Const(Bool(true)), _) => exp_new(Unary(UnaryOp::Not, e2.clone())),
-                        (Const(Bool(false)), _) => Ok(e2.clone()),
-                        (_, Const(Bool(true))) => exp_new(Unary(UnaryOp::Not, e1.clone())),
-                        (_, Const(Bool(false))) => Ok(e1.clone()),
-                        _ => ok_e2(e2),
-                    }
-                }
-                Implies => {
-                    match &e1.x {
-                        Const(Bool(true)) => eval_expr_internal(ctx, state, e2),
-                        Const(Bool(false)) => bool_new(true),
-                        _ => {
-                            let e2 = eval_expr_internal(ctx, state, e2)?;
-                            match &e2.x {
-                                Const(Bool(true)) => bool_new(true),
-                                Const(Bool(false)) =>
-                                // Recurse in case we can simplify the new negation
-                                {
-                                    eval_expr_internal(
-                                        ctx,
-                                        state,
-                                        &exp_new(Unary(UnaryOp::Not, e1.clone()))?,
-                                    )
-                                }
-                                _ => ok_e2(e2),
-                            }
-                        }
-                    }
-                }
-                Eq => {
-                    let e2 = eval_expr_internal(ctx, state, e2)?;
-                    match e1.syntactic_eq(&e2) {
-                        None => ok_e2(e2),
-                        Some(b) => bool_new(b),
-                    }
-                }
-                Ne => {
-                    let e2 = eval_expr_internal(ctx, state, e2)?;
-                    match e1.syntactic_eq(&e2) {
-                        None => ok_e2(e2),
-                        Some(b) => bool_new(!b),
-                    }
-                }
-                Inequality(op) => {
-                    let e2 = eval_expr_internal(ctx, state, e2)?;
-                    match (&e1.x, &e2.x) {
-                        (Const(Int(i1)), Const(Int(i2))) => {
-                            use InequalityOp::*;
-                            let b = match op {
-                                Le => i1 <= i2,
-                                Ge => i1 >= i2,
-                                Lt => i1 < i2,
-                                Gt => i1 > i2,
-                            };
-                            bool_new(b)
-                        }
-                        _ => ok_e2(e2),
-                    }
-                }
-                Arith(op) => {
-                    let e2 = eval_expr_internal(ctx, state, e2)?;
-                    use ArithOp::*;
-                    match (&e1.x, &e2.x) {
-                        // Ideal case where both sides are concrete
-                        (Const(Int(i1)), Const(Int(i2))) => {
-                            use ArithOp::*;
-                            match op {
-                                Add => int_new(i1 + i2),
-                                Sub => int_new(i1 - i2),
-                                Mul => int_new(i1 * i2),
-                                EuclideanDiv => {
-                                    if i2.is_zero() {
-                                        ok_e2(e2) // Treat as symbolic instead of erroring
-                                    } else {
-                                        int_new(i1.div_euclid(i2))
-                                    }
-                                }
-                                EuclideanMod => {
-                                    if i2.is_zero() {
-                                        ok_e2(e2) // Treat as symbolic instead of erroring
-                                    } else {
-                                        int_new(i1.rem_euclid(i2))
-                                    }
-                                }
-                            }
-                        }
-                        // Special cases for certain concrete values
-                        (Const(Int(i1)), _) if i1.is_zero() && matches!(op, Add) => Ok(e2.clone()),
-                        (Const(Int(i1)), _) if i1.is_zero() && matches!(op, Mul) => zero,
-                        (Const(Int(i1)), _) if i1.is_one() && matches!(op, Mul) => Ok(e2.clone()),
-                        (_, Const(Int(i2))) if i2.is_zero() => {
-                            use ArithOp::*;
-                            match op {
-                                Add | Sub => Ok(e1.clone()),
-                                Mul => zero,
-                                EuclideanDiv | EuclideanMod => {
-                                    ok_e2(e2) // Treat as symbolic instead of erroring
-                                }
-                            }
-                        }
-                        (_, Const(Int(i2))) if i2.is_one() && matches!(op, EuclideanMod) => {
-                            int_new(BigInt::zero())
-                        }
-                        (_, Const(Int(i2))) if i2.is_one() && matches!(op, Mul | EuclideanDiv) => {
-                            Ok(e1.clone())
-                        }
-                        _ => {
-                            match op {
-                                // X - X => 0
-                                ArithOp::Sub if e1.definitely_eq(&e2) => zero,
-                                _ => ok_e2(e2),
-                            }
-                        }
-                    }
-                }
-                Bitwise(op) => {
-                    use BitwiseOp::*;
-                    let e2 = eval_expr_internal(ctx, state, e2)?;
-                    match (&e1.x, &e2.x) {
-                        // Ideal case where both sides are concrete
-                        (Const(Int(i1)), Const(Int(i2))) => match op {
-                            BitXor => int_new(i1 ^ i2),
-                            BitAnd => int_new(i1 & i2),
-                            BitOr => int_new(i1 | i2),
-                            Shr => match i2.to_u128() {
-                                None => ok,
-                                Some(i2) => int_new(i1 >> i2),
-                            },
-                            Shl(w, signed) => {
-                                if *signed {
-                                    match (i1.to_i128(), i2.to_u128()) {
-                                        (Some(i1), Some(i2)) => {
-                                            let i1_shifted =
-                                                if i2 >= 128 { 0i128 } else { i1 << i2 };
-                                            match i128_to_width(i1_shifted, *w, ctx.arch) {
-                                                Some(i) => int_new(i),
-                                                None => ok,
-                                            }
-                                        }
-                                        _ => ok,
-                                    }
-                                } else {
-                                    match (i1.to_u128(), i2.to_u128()) {
-                                        (Some(i1), Some(i2)) => {
-                                            let i1_shifted =
-                                                if i2 >= 128 { 0u128 } else { i1 << i2 };
-                                            match u128_to_width(i1_shifted, *w, ctx.arch) {
-                                                Some(i) => int_new(i),
-                                                None => ok,
-                                            }
-                                        }
-                                        _ => ok,
-                                    }
-                                }
-                            }
-                        },
-                        // Special cases for certain concrete values
-                        (Const(Int(i)), _) | (_, Const(Int(i)))
-                            if i.is_zero() && matches!(op, BitAnd) =>
-                        {
-                            zero
-                        }
-                        (Const(Int(i1)), _) if i1.is_zero() && matches!(op, BitOr) => {
-                            Ok(e2.clone())
-                        }
-                        (_, Const(Int(i2))) if i2.is_zero() && matches!(op, BitOr) => {
-                            Ok(e1.clone())
-                        }
-                        _ => {
-                            match op {
-                                // X ^ X => 0
-                                BitXor if e1.definitely_eq(&e2) => zero,
-                                // X & X = X, X | X = X
-                                BitAnd | BitOr if e1.definitely_eq(&e2) => Ok(e1.clone()),
-                                _ => ok_e2(e2),
-                            }
-                        }
-                    }
-                }
-                Index(ArrayKind::Array) => {
-                    let e2 = eval_expr_internal(ctx, state, e2)?;
-                    eval_array_index(ctx, state, exp, &e1, &e2)
-                }
-                Index(ArrayKind::Slice)
-                | HeightCompare { .. }
-                | StrGetChar
-                | RealArith(..)
-                | IeeeFloat(_) => ok_e2(eval_expr_internal(ctx, state, e2)?),
-            }
+            eval_binary(ctx, state, exp, op, e1, e2)
         }
         BinaryOpr(op, e1, e2) => {
             let e1 = eval_expr_internal(ctx, state, e1)?;
@@ -1801,174 +2292,56 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
             }
         }
         Call(CallFun::Fun(fun, resolved_method), typs, args) => {
-            let (orig_fun, orig_typs) = (fun, typs);
-            let (fun, typs) = resolve_call(fun, resolved_method, typs);
-            if state.perf {
-                // Record the call for later performance analysis
-                match state.fun_calls.get_mut(fun) {
-                    None => {
-                        state.fun_calls.insert(fun.clone(), 1);
-                    }
-                    Some(count) => {
-                        *count += 1;
-                    }
-                }
-            }
-            // Simplify arguments
-            let new_args: Result<Vec<Exp>, VirErr> =
-                args.iter().map(|e| eval_expr_internal(ctx, state, e)).collect();
-            let new_args = Arc::new(new_args?);
-            if let Some(array_fn) = is_array_fn(&fun) {
-                eval_array(ctx, state, array_fn, exp, &new_args)
-            } else if let Some(seq_fn) = is_sequence_fn(&fun) {
-                eval_seq(ctx, state, seq_fn, exp, &new_args)
-            } else {
-                // Try to find the function's body
-                match ctx.fun_ssts.get(fun) {
-                    Some(func)
-                        if func.x.axioms.spec_axioms.is_some() && func.x.kind.inline_okay() =>
-                    {
-                        let memoize = func.x.attrs.memoize;
-                        let call_exp = SpannedTyped::new(
-                            &exp.span,
-                            &exp.typ,
-                            Call(
-                                CallFun::Fun(orig_fun.clone(), resolved_method.clone()),
-                                orig_typs.clone(),
-                                new_args.clone(),
-                            ),
-                        );
-                        match state.lookup_call(&fun, &typs, &new_args, memoize) {
-                            Some(prev_result) => {
-                                state.cache_hits += 1;
-                                if state.record_steps {
-                                    state.add_fact(call_exp, prev_result.clone());
-                                }
-                                Ok(prev_result)
-                            }
-                            None => {
-                                let step_idx = if state.record_steps {
-                                    state.steps.push(ComputeStep {
-                                        call: call_exp.clone(),
-                                        result: call_exp.clone(),
-                                        funs: if orig_fun == fun {
-                                            vec![fun.clone()]
-                                        } else {
-                                            vec![orig_fun.clone(), fun.clone()]
-                                        },
-                                        children: vec![],
-                                    });
-                                    state.open_steps.push(state.steps.len() - 1);
-                                    Some(state.steps.len() - 1)
-                                } else {
-                                    None
-                                };
-                                let typ_params = &func.x.typ_params;
-                                let pars = &func.x.pars;
-                                let body = &func.x.axioms.spec_axioms.as_ref().unwrap().body_exp;
-                                state.cache_misses += 1;
-                                // Substitute the actual arguments for the formals, and the
-                                // type arguments for the type parameters, then evaluate the
-                                // (now closed) body in an empty environment. `subst_exp` is
-                                // capture-avoiding: a binder of the body whose name occurs free
-                                // in an argument is renamed. Looking the formals up in the
-                                // caller's environment instead (lazily, by name) mixed the two
-                                // scopes: `f(y) = exists|x| .. x != y` applied to a quantified
-                                // `x` became `exists|x| .. x != x`; a caller's closure
-                                // mentioning its `y` read the callee's `y`; a caller's const
-                                // generic `N` read the callee's `N` (upstream #3088); and a body
-                                // the interpreter leaves alone (a `choose`) kept the formal
-                                // itself (upstream #3089).
-                                let mut typ_substs: HashMap<Ident, Typ> = HashMap::new();
-                                let mut var_substs: HashMap<VarIdent, Exp> = HashMap::new();
-                                for (formal, actual) in pars.iter().zip(new_args.iter()) {
-                                    var_substs.insert(formal.x.name.clone(), actual.clone());
-                                }
-                                for (formal, actual) in typ_params.iter().zip(typs.iter()) {
-                                    typ_substs.insert(formal.clone(), actual.clone());
-                                    // Const generics: `{ N => 7 }` for the formal `N`
-                                    if let TypX::ConstInt(c) = &**actual {
-                                        let formal_id = VarIdent(
-                                            formal.clone(),
-                                            VarIdentDisambiguate::TypParamBare,
-                                        );
-                                        let value = SpannedTyped::new(
-                                            &exp.span,
-                                            &exp.typ,
-                                            Const(Constant::Int(c.clone())),
-                                        );
-                                        var_substs.insert(formal_id, value);
-                                    }
-                                }
-                                let body = subst_exp(&typ_substs, &var_substs, body);
-                                let saved_env = std::mem::replace(&mut state.env, ScopeMap::new());
-                                let saved_type_env =
-                                    std::mem::replace(&mut state.type_env, ScopeMap::new());
-                                state.env.push_scope(true);
-                                state.type_env.push_scope(true);
-                                let result = eval_expr_internal(ctx, state, &body);
-                                state.env = saved_env;
-                                state.type_env = saved_type_env;
-                                if let Some(i) = step_idx {
-                                    state.open_steps.pop();
-                                    if let Ok(r) = &result {
-                                        state.steps[i].result = r.clone();
-                                        state.add_fact(call_exp, r.clone());
-                                    }
-                                }
-                                state.insert_call(fun, &typs, &new_args, &result.clone()?, memoize);
-                                result
-                            }
-                        }
-                    }
-                    _ => {
-                        // We don't have the body for this function, so we can't simplify further
-                        exp_new(Call(
-                            CallFun::Fun(fun.clone(), resolved_method.clone()),
-                            typs.clone(),
-                            new_args.clone(),
-                        ))
-                    }
-                }
-            }
+            eval_call(ctx, state, exp, fun, resolved_method, typs, args)
         }
         Call(CallFun::Recursive(_), _, _) => ok,
         Call(fun @ CallFun::InternalFun(_), typs, args) => {
             let new_args: Result<Vec<Exp>, VirErr> =
-                args.iter().map(|e| eval_expr_internal(ctx, state, e)).collect();
+                eval_exps(ctx, state, args);
             let new_args = Arc::new(new_args?);
             exp_new(Call(fun.clone(), typs.clone(), new_args.clone()))
         }
         CallLambda(lambda, args) => {
             let lambda = eval_expr_internal(ctx, state, lambda)?;
-            let new_args: Result<Vec<Exp>, VirErr> =
-                args.iter().map(|e| eval_expr_internal(ctx, state, e)).collect();
-            let new_args = Arc::new(new_args?);
-            let ok = exp_new(CallLambda(lambda.clone(), new_args.clone()));
             match &lambda.x {
                 Interp(InterpExp::Closure(lambda, context)) => match &lambda.x {
                     Bind(bnd, body) => match &bnd.x {
                         BndX::Lambda(bnds, _trigs) => {
-                            let mut env = Env::new();
-                            env.push_scope(true);
+                            let new_args: Result<Vec<Exp>, VirErr> =
+                                eval_exps(ctx, state, args);
+                            let new_args = Arc::new(new_args?);
+                            #[cfg(verus_only)]
+                            proof_decl! { let ghost s_mid = *state; }
+                            state.env.push_scope(true);
                             // Process the original context first, so formal args take precedence
-                            context.iter().for_each(|(k, v)| {
-                                env.insert(k.clone(), v.clone()).unwrap();
-                            });
-                            env.push_scope(true);
+                            // (a loop, was `for_each` with a closure capturing `state.env`)
+                            #[cfg_attr(verus_only, verus_spec(
+                                invariant frame(&s_mid, state, ctx, 1)
+                            ))]
+                            for (k, v) in context.iter() {
+                                if state.env.insert(k.clone(), v.clone()).is_err() {
+                                    return Err(error(&exp.span, "internal error: duplicate binder"));
+                                }
+                            }
+                            state.env.push_scope(true);
+                            #[cfg_attr(verus_only, verus_spec(
+                                invariant frame(&s_mid, state, ctx, 2)
+                            ))]
                             for (formal, actual) in bnds.iter().zip(new_args.iter()) {
                                 let formal_id = formal.name.clone();
-                                env.insert(formal_id, actual.clone()).unwrap();
+                                if state.env.insert(formal_id, actual.clone()).is_err() {
+                                    return Err(error(&exp.span, "internal error: duplicate binder"));
+                                }
                             }
-                            let prev_env = std::mem::replace(&mut state.env, env);
                             let e = eval_expr_internal(ctx, state, body);
-                            state.env = prev_env;
+                            state.env.pop_scope();
+                            state.env.pop_scope();
                             e
                         }
-                        _ => panic!(
-                            "Expected CallLambda's binder to contain a lambda.  Instead found {:?}",
+                        _ => Err(error(&exp.span, format!(
+                            "internal error: Expected CallLambda's binder to contain a lambda.  Instead found {:?}",
                             bnd
-                        ),
+                        ))),
                     },
                     _ => ok,
                 },
@@ -1977,11 +2350,18 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
         }
         Bind(bnd, e) => match &bnd.x {
             BndX::Let(bnds) => {
+                #[cfg(verus_only)]
+                proof_decl! { let ghost s_mid = *state; }
                 state.env.push_scope(true);
+                #[cfg_attr(verus_only, verus_spec(
+                    invariant frame(&s_mid, state, ctx, 1)
+                ))]
                 for b in bnds.iter() {
                     let id = b.name.clone();
                     let val = eval_expr_internal(ctx, state, &b.a)?;
-                    state.env.insert(id, val).unwrap();
+                    if state.env.insert(id, val).is_err() {
+                        return Err(error(&exp.span, "internal error: duplicate binder"));
+                    }
                 }
                 let e = eval_expr_internal(ctx, state, e);
                 state.env.pop_scope();
@@ -1992,48 +2372,21 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
                 env.extend(state.env.map().iter().map(|(k, v)| (k.clone(), v.clone())));
                 exp_new(Interp(InterpExp::Closure(exp.clone(), env)))
             }
-            BndX::Quant(quant_type, bnds, triggers, by_locals) => {
-                let mut substs = HashMap::new();
-                let bnds = Arc::new(
-                    bnds.iter()
-                        .map(|b| {
-                            if b.name.0.ends_with("$compute") {
-                                return b.clone();
-                            }
-                            let id = VarIdent(
-                                Arc::new(format!("{}$compute", b.name.0)),
-                                VarIdentDisambiguate::VirSubst(state.iterations),
-                            );
-                            let val = SpannedTyped::new(&e.span, &b.a, Var(id.clone()));
-                            substs.insert(b.name.clone(), val);
-                            b.rename(id)
-                        })
-                        .collect::<Vec<_>>(),
-                );
-                let empty_substs = HashMap::new();
-                let e = subst_exp(&empty_substs, &substs, e);
-                let triggers = Arc::new(
-                    triggers
-                        .iter()
-                        .map(|trig| {
-                            Arc::new(
-                                trig.iter().map(|e| subst_exp(&empty_substs, &substs, e)).collect(),
-                            )
-                        })
-                        .collect(),
-                );
-                let bnd = crate::def::Spanned::new(
-                    bnd.span.clone(),
-                    BndX::Quant(*quant_type, bnds.clone(), triggers, by_locals.clone()),
-                );
+            BndX::Quant(_quant_type, bnds, _triggers, _by_locals) => {
+                #[cfg(verus_only)]
+                proof_decl! { let ghost s_mid = *state; }
                 state.env.push_scope(true);
+                #[cfg_attr(verus_only, verus_spec(
+                    invariant frame(&s_mid, state, ctx, 1)
+                ))]
                 for b in bnds.iter() {
                     let id = b.name.clone();
-                    let val =
-                        SpannedTyped::new(&e.span, &b.a, Interp(InterpExp::FreeVar(id.clone())));
-                    state.env.insert(id, val).unwrap();
+                    let val = SpannedTyped::new(&e.span, &b.a, ExpX::Var(id.clone()));
+                    if state.env.insert(id, val).is_err() {
+                        return Err(error(&exp.span, "internal error: duplicate binder"));
+                    }
                 }
-                let e = eval_expr_internal(ctx, state, &e)?;
+                let e = eval_expr_internal(ctx, state, e)?;
                 state.env.pop_scope();
                 if let ExpX::Const(Constant::Bool(_)) = e.x {
                     // We simplified the body so far that we can eliminate the quantifier too
@@ -2043,48 +2396,25 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
                     exp_new(Bind(bnd.clone(), e))
                 }
             }
-            BndX::Choose(..) => {
-                let free_vars = free_vars_exp(exp);
-                if free_vars.is_empty() {
-                    ok
-                } else {
-                    let substs: Result<HashMap<UniqueIdent, Exp>, VirErr> = free_vars
-                        .keys()
-                        .filter_map(|id| {
-                            state.env.get(id).map(|e| cleanup_exp(e).map(|e| (id.clone(), e)))
-                        })
-                        .collect();
-                    let e = subst_exp(&HashMap::new(), &substs?, exp);
-                    let substs = free_vars_exp(&e)
-                        .into_iter()
-                        .map(|(id, typ)| {
-                            let var = SpannedTyped::new(
-                                &exp.span,
-                                &typ,
-                                Interp(InterpExp::FreeVar(id.clone())),
-                            );
-                            (id, var)
-                        })
-                        .collect();
-                    Ok(subst_exp(&HashMap::new(), &substs, &e))
-                }
-            }
+            _ => ok,
         },
         Ctor(path, id, bnds) => {
-            let new_bnds: Result<Vec<Binder<Exp>>, VirErr> = bnds
-                .iter()
-                .map(|b| {
-                    let name = b.name.clone();
-                    let a = eval_expr_internal(ctx, state, &b.a)?;
-                    Ok(Arc::new(BinderX { name, a }))
-                })
-                .collect();
-            let new_bnds = new_bnds?;
+            let mut new_bnds: Vec<Binder<Exp>> = Vec::new();
+            #[cfg(verus_only)]
+            proof_decl! { let ghost s_mid = *state; }
+            #[cfg_attr(verus_only, verus_spec(
+                invariant frame(&s_mid, state, ctx, 0)
+            ))]
+            for b in bnds.iter() {
+                let name = b.name.clone();
+                let a = eval_expr_internal(ctx, state, &b.a)?;
+                new_bnds.push(Arc::new(BinderX { name, a }));
+            }
             exp_new(Ctor(path.clone(), id.clone(), Arc::new(new_bnds)))
         }
         ArrayLiteral(exprs) => {
             let new_exprs: Result<Vec<Exp>, VirErr> =
-                exprs.iter().map(|e| eval_expr_internal(ctx, state, e)).collect();
+                eval_exps(ctx, state, exprs);
             let im_vec: Vector<Exp> = new_exprs?.into_iter().collect();
             exp_new(Interp(InterpExp::Array(im_vec)))
         }
@@ -2103,18 +2433,33 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
         ExecFnByName(_) => ok,
         FuelConst(_) => ok,
     };
+    // proof hints: the conjuncts of eval_post (with the depth still incremented)
+    #[cfg(verus_only)]
+    proof! {
+        assert(state_inv(state, ctx));
+        assert(state.steps.len() >= old(state).steps.len());
+        assert(state.open_steps@ == old(state).open_steps@);
+        assert(state.env.scope_keys().len() >= old(state).env.scope_keys().len());
+        assert(state.type_env.scope_keys().len() >= old(state).type_env.scope_keys().len());
+        assert(r is Ok ==> state.depth == old(state).depth + 1);
+        assert(r is Ok ==> state.env.scope_keys() == old(state).env.scope_keys());
+        assert(r is Ok ==> state.type_env.scope_keys() == old(state).type_env.scope_keys());
+        assert(r is Ok ==> state.iterations <= ctx.max_iterations + 1);
+    }
     let res = r?;
     state.depth -= 1;
-    state.log(format!("{}=> {:}", "\t".repeat(state.depth), res.x.to_user_string(&ctx.global)));
+    state.log(format!("{}=> {:}", "\t".repeat(state.depth), res.x.to_user_string(&ctx.global)))?;
     if state.enable_simplified_cache {
         state.simplified.insert(&res);
     }
     Ok(res)
 }
 
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
 fn cleanup_seq(span: &Span, typ: Typ, v: &Vector<Exp>) -> Result<Exp, VirErr> {
     match &*typ {
-        TypX::Datatype(_, typs, _) => {
+        TypX::Datatype(_, typs, _) if typs.len() >= 1 => {
             // Grab the type the sequence holds
             let inner_type = typs[0].clone();
             // Clean up any nested Interp nodes in the sequence elements
@@ -2129,15 +2474,19 @@ fn cleanup_seq(span: &Span, typ: Typ, v: &Vector<Exp>) -> Result<Exp, VirErr> {
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
 fn cleanup_array(span: &Span, typ: Typ, v: &Vector<Exp>) -> Result<Exp, VirErr> {
     array_to_sst(span, typ.clone(), v)
 }
 
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
 /// `cleanup_exp` for `--check-compute` steps: sequences as push chains
 fn cleanup_exp_for_check(exp: &Exp) -> Result<Exp, VirErr> {
     crate::sst_visitor::map_exp_visitor_result(exp, &mut |e| match &e.x {
         ExpX::Interp(InterpExp::Seq(v)) => match &*e.typ {
-            TypX::Datatype(_, typs, _) => {
+            TypX::Datatype(_, typs, _) if typs.len() >= 1 => {
                 let cleaned: Result<Vector<Exp>, VirErr> =
                     v.iter().map(|x| cleanup_exp_for_check(x)).collect();
                 seq_to_sst_with(&e.span, typs[0].clone(), &cleaned?, true)
@@ -2159,19 +2508,14 @@ fn cleanup_exp_for_check(exp: &Exp) -> Result<Exp, VirErr> {
     })
 }
 
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
 /// Restore the free variables we hid during interpretation
 /// and any sequence expressions we partially simplified during interpretation
 fn cleanup_exp(exp: &Exp) -> Result<Exp, VirErr> {
     crate::sst_visitor::map_exp_visitor_result(exp, &mut |e| match &e.x {
         ExpX::Interp(InterpExp::FreeVar(v)) => {
-            let x = if v.1 == VarIdentDisambiguate::TypParamBare {
-                ExpX::NullaryOpr(crate::ast::NullaryOpr::ConstGeneric(Arc::new(TypX::TypParam(
-                    v.0.clone(),
-                ))))
-            } else {
-                ExpX::Var(v.clone())
-            };
-            Ok(e.new_x(x))
+            Ok(SpannedTyped::new(&e.span, &e.typ, ExpX::Var(v.clone())))
         }
         ExpX::Interp(InterpExp::Array(v)) => cleanup_array(&e.span, e.typ.clone(), v),
         ExpX::Interp(InterpExp::Seq(v)) => cleanup_seq(&e.span, e.typ.clone(), v),
@@ -2183,6 +2527,7 @@ fn cleanup_exp(exp: &Exp) -> Result<Exp, VirErr> {
     })
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 enum SimplificationResult {
     /// Expression evaluated to true.
     True,
@@ -2195,6 +2540,7 @@ enum SimplificationResult {
     Complex(Exp),
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 /// Evaluate the result
 ///
 /// Includes a special case when the top-level operation is a binary op.
@@ -2202,14 +2548,14 @@ enum SimplificationResult {
 /// to `7 == 5` which evaluates to false, we return
 ///     SimplificationResult::False(Some(`7 == 5`))
 /// This lets the caller report a nicer error message
+#[cfg_attr(verus_only, verus_spec(r =>
+    requires eval_pre(old(state), ctx),
+    ensures eval_post(old(state), final(state), ctx, r is Ok)
+))]
 fn eval_expr_top(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<SimplificationResult, VirErr> {
     use BinaryOp::*;
     use ExpX::*;
     match &exp.x {
-        Binary(Eq, e1, e2) if e1.definitely_eq(e2) => Ok(SimplificationResult::True),
-        Binary(Ne, e1, e2) if e1.definitely_eq(e2) => {
-            Ok(SimplificationResult::False(Some(exp.clone())))
-        }
         Binary(op @ (Eq | Ne | Inequality(_)), e1, e2) => {
             let e1 = eval_expr_internal(ctx, state, e1)?;
             let e2 = eval_expr_internal(ctx, state, e2)?;
@@ -2244,6 +2590,7 @@ fn eval_expr_top(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Simplificati
     }
 }
 
+#[cfg_attr(verus_only, verus_verify(external_body))]
 /// We run the interpreter on a separate thread, so that we can give it a larger-than-default stack
 fn eval_expr_launch(
     global: &GlobalCtx,
@@ -2257,6 +2604,7 @@ fn eval_expr_launch(
     quiet: bool,
 ) -> Result<(Exp, Vec<Message>, ComputeTrace), VirErr> {
     let env = ScopeMap::new();
+    let type_env = ScopeMap::new();
     let cache = HashMap::new();
     let logging = log.is_some();
     let msgs = Vec::new();
@@ -2268,6 +2616,7 @@ fn eval_expr_launch(
         top_facts: vec![],
         depth: 0,
         env,
+        type_env,
         iterations: 1,
         msgs,
         log: log.take(),
@@ -2285,9 +2634,10 @@ fn eval_expr_launch(
         last_warning_time: now,
     };
     // Don't run for too long
-    let max_iterations = (rlimit as f64 * RLIMIT_MULTIPLIER as f64) as u64;
+    // (clamped: the counters must not overflow; 2^62 iterations are far beyond any rlimit)
+    let max_iterations = ((rlimit as f64 * RLIMIT_MULTIPLIER as f64) as u64).min(u64::MAX / 4);
     // Calculate max recursion depth as a fraction of rlimit
-    let max_depth = (rlimit as f64 * DEPTH_LIMIT_MULTIPLIER as f64) as usize;
+    let max_depth = ((rlimit as f64 * DEPTH_LIMIT_MULTIPLIER as f64) as usize).min(usize::MAX / 4);
     let ctx = Ctx {
         fun_ssts: &fun_ssts,
         max_iterations,
@@ -2298,7 +2648,7 @@ fn eval_expr_launch(
         report_long_running: global.report_long_running,
     };
     let result = eval_expr_top(&ctx, &mut state, &exp)?;
-    display_perf_stats(&state);
+    display_perf_stats(&state)?;
     let trace = {
         let mut t = ComputeTrace::default();
         let clean = |(a, b): &(Exp, Exp)| {
@@ -2374,7 +2724,7 @@ fn eval_expr_launch(
                                 exp.x.to_user_string(&ctx.global),
                             )
                         },
-                        |msg| state.msgs.push(msg),
+                        { let msgs = &mut state.msgs; move |msg| msgs.push(msg) },
                     );
                 }
                 Ok((res, state.msgs, trace))
@@ -2395,6 +2745,7 @@ fn eval_expr_launch(
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
 /// Symbolically evaluate an expression, simplifying it as much as possible
 pub fn eval_expr<D>(
     ctx: &crate::context::Ctx,
@@ -2412,6 +2763,7 @@ where
     eval_expr_with_trace(ctx, exp, diagnostics, fun_ssts, rlimit, arch, mode, log).map(|(e, _)| e)
 }
 
+#[cfg_attr(verus_only, verus_verify(external_body))]
 /// `eval_expr`, also returning the calls evaluated (empty unless `--check-compute`)
 pub fn eval_expr_with_trace<D>(
     ctx: &crate::context::Ctx,

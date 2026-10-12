@@ -26,6 +26,9 @@
 //!
 //! To ensure that VIR stays simple and easy to use, the vir crate does not depend on rustc.
 
+// Verus's attribute syntax (the interpreter's specifications) puts attributes on loops
+#![cfg_attr(verus_only, feature(proc_macro_hygiene))]
+
 pub mod assoc_types_to_air;
 pub mod ast;
 pub mod ast_simplify;

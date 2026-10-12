@@ -101,6 +101,7 @@ vir = { path = "vir" }
 unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(verus_keep_ghost)',
   'cfg(verus_verify_core)',
+  'cfg(verus_only)',
 ] }
 
 [workspace.lints.clippy]
