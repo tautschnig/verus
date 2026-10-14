@@ -1941,3 +1941,63 @@ fn builder_spawn_spec() {
         assert_eq!(h.join().unwrap(), k * 3);
     }
 }
+
+#[cfg(test)]
+/// vstd `string::char_seq_cmp`: lexicographic by code point, a proper prefix is smaller.
+fn spec_char_seq_cmp(a: &[char], b: &[char]) -> std::cmp::Ordering {
+    use std::cmp::Ordering::*;
+    match (a.split_first(), b.split_first()) {
+        (None, None) => Equal,
+        (None, Some(_)) => Less,
+        (Some(_), None) => Greater,
+        (Some((x, xs)), Some((y, ys))) => {
+            if (*x as u32) < (*y as u32) {
+                Less
+            } else if (*x as u32) > (*y as u32) {
+                Greater
+            } else {
+                spec_char_seq_cmp(xs, ys)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn str_cmp_is_char_lex() {
+    // UTF-8 encoding is strictly increasing in the code point, over every char: with the
+    // encoding being prefix-free, Rust's byte-wise order is the code-point order.
+    let mut prev: Option<Vec<u8>> = None;
+    for c in (0u32..=0x10FFFF).filter_map(char::from_u32) {
+        let mut buf = [0u8; 4];
+        let e = c.encode_utf8(&mut buf).as_bytes().to_vec();
+        if let Some(p) = &prev {
+            assert!(p.as_slice() < e.as_slice(), "utf8 order at {c:?}");
+        }
+        prev = Some(e);
+    }
+    // Strings of up to 3 chars from encoding-length boundaries, all pairs.
+    let alpha = ['\0', 'a', 'b', '\u{7f}', '\u{80}', '\u{7ff}', '\u{800}', '\u{d7ff}',
+        '\u{e000}', '\u{ffff}', '\u{10000}', '\u{10ffff}'];
+    let mut all: Vec<Vec<char>> = vec![vec![]];
+    for len in 1..=3usize {
+        let mut cur: Vec<Vec<char>> = vec![vec![]];
+        for _ in 0..len {
+            cur = cur.into_iter().flat_map(|p| alpha.iter().map(move |c| {
+                let mut q = p.clone(); q.push(*c); q })).collect();
+        }
+        all.extend(cur);
+    }
+    for a in &all {
+        let sa: String = a.iter().collect();
+        for b in &all {
+            let sb: String = b.iter().collect();
+            let want = spec_char_seq_cmp(a, b);
+            assert_eq!(sa.cmp(&sb), want, "{a:?} {b:?}");
+            assert_eq!(sa.as_str().cmp(sb.as_str()), want);
+            assert_eq!(sa.partial_cmp(&sb), Some(want));
+            assert_eq!(sa.as_str().partial_cmp(sb.as_str()), Some(want));
+            assert_eq!(sa == sb, a == b);
+        }
+    }
+}
