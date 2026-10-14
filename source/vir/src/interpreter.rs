@@ -8,8 +8,10 @@
 use vstd::prelude::*;
 #[cfg(verus_only)]
 verus! {
-broadcast use {verus_spec_num_bigint::group_bigint, verus_spec_im::group_im};
+broadcast use {verus_spec_num_bigint::group_bigint, verus_spec_im::group_im, air::scope_map::axiom_saved_views_len};
 }
+#[cfg(verus_only)]
+use crate::sst_sem::{fc, lemma_fc_refl};
 
 use crate::ast::{
     ArchWordBits, ArrayKind, BitwiseOp, ComputeMode, Constant, CrateId, Dt, Fun, FunX, Ident,
@@ -336,6 +338,8 @@ spec fn eval_post(pre: &State, post: &State, ctx: &Ctx, ok: bool) -> bool {
         &&& post.depth == pre.depth
         &&& post.env.scope_keys() == pre.env.scope_keys()
         &&& post.type_env.scope_keys() == pre.type_env.scope_keys()
+        &&& post.env.view() == pre.env.view()
+        &&& post.env.saved_views() == pre.env.saved_views()
     }
 }
 }
@@ -353,6 +357,9 @@ spec fn frame(pre: &State, post: &State, ctx: &Ctx, extra: nat) -> bool {
     &&& post.type_env.scope_keys() == pre.type_env.scope_keys()
     &&& post.env.scope_keys().len() == pre.env.scope_keys().len() + extra
     &&& post.env.scope_keys().subrange(0, pre.env.scope_keys().len() as int) =~= pre.env.scope_keys()
+    &&& post.env.saved_views().subrange(0, pre.env.saved_views().len() as int) =~= pre.env.saved_views()
+    &&& extra >= 1 ==> post.env.saved_views()[pre.env.saved_views().len() as int] == pre.env.view()
+    &&& extra == 0 ==> post.env.view() == pre.env.view() && post.env.saved_views() == pre.env.saved_views()
 }
 }
 
@@ -365,6 +372,7 @@ spec fn same_core(pre: &State, post: &State) -> bool {
     &&& post.steps.len() == pre.steps.len()
     &&& post.open_steps@ == pre.open_steps@
     &&& post.env.scope_keys() == pre.env.scope_keys() && post.env.all_shadowing() == pre.env.all_shadowing()
+    &&& post.env.view() == pre.env.view() && post.env.saved_views() == pre.env.saved_views()
     &&& post.type_env.scope_keys() == pre.type_env.scope_keys() && post.type_env.all_shadowing() == pre.type_env.all_shadowing()
 }
 }
@@ -2337,6 +2345,7 @@ fn eval_binary(
         final(env).scope_keys().subrange(0, old(env).scope_keys().len() - 1)
             =~= old(env).scope_keys().subrange(0, old(env).scope_keys().len() - 1),
         final(env).all_shadowing() == old(env).all_shadowing(),
+        r is Ok ==> final(env).saved_views() == old(env).saved_views(),
 ))]
 fn insert_context(env: &mut Env, context: &HashMap<UniqueIdent, Exp>) -> Result<(), ()> {
     #[cfg(verus_only)]
@@ -2347,6 +2356,7 @@ fn insert_context(env: &mut Env, context: &HashMap<UniqueIdent, Exp>) -> Result<
             env.scope_keys().subrange(0, e0.scope_keys().len() - 1)
                 =~= e0.scope_keys().subrange(0, e0.scope_keys().len() - 1),
             env.all_shadowing() == e0.all_shadowing(),
+            env.saved_views() == e0.saved_views(),
     ))]
     for (k, v) in context.iter() {
         env.insert(k.clone(), v.clone())?;
@@ -2410,10 +2420,18 @@ fn eval_call_lambda(
                         i += 1;
                     }
                     let e = eval_expr_internal(ctx, state, body);
+                    #[cfg(verus_only)]
+                    proof_decl! { let ghost s_body = *state; }
                     state.env.pop_scope();
                     state.env.pop_scope();
                     #[cfg(verus_only)]
-                    proof! { assert(e is Ok ==> state.env.scope_keys() =~= s_mid.env.scope_keys()); }
+                    proof! {
+                        assert(e is Ok ==> state.env.scope_keys() =~= s_mid.env.scope_keys());
+                        // the view saved by the first push, which the second pop restores
+                        assert(e is Ok ==> s_body.env.saved_views().drop_last().last()
+                            == s_body.env.saved_views()[s_mid.env.saved_views().len() as int]);
+                        assert(e is Ok ==> state.env.saved_views() =~= s_mid.env.saved_views());
+                    }
                     e
                 }
                 _ => Err(error(&exp.span, format!(
@@ -2530,6 +2548,40 @@ fn eval_exps(ctx: &Ctx, state: &mut State, exps: &[Exp]) -> Result<Vec<Exp>, Vir
     Ok(out)
 }
 
+#[cfg_attr(verus_only, verus_verify(external_body))]
+#[cfg_attr(verus_only, verus_spec(r =>
+    ensures r.x == x, r.span == *span, r.typ == *typ
+))]
+/// `SpannedTyped::new` with its (trusted) specification: the fields it is given
+fn spanned_typed(span: &Span, typ: &Typ, x: ExpX) -> Exp {
+    SpannedTyped::new(span, typ, x)
+}
+
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verus_spec(r =>
+    ensures r matches Ok(v) && v.x == x && v.span == exp.span && v.typ == exp.typ
+))]
+/// A node with `exp`'s span and type (was the closure `exp_new` in `eval_expr_internal`)
+fn exp_at(exp: &Exp, x: ExpX) -> Result<Exp, VirErr> {
+    Ok(spanned_typed(&exp.span, &exp.typ, x))
+}
+
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verus_spec(r =>
+    ensures r matches Ok(v) && v.x == ExpX::Const(Constant::Bool(b)) && v.span == exp.span && v.typ == exp.typ
+))]
+fn exp_bool(exp: &Exp, b: bool) -> Result<Exp, VirErr> {
+    exp_at(exp, ExpX::Const(Constant::Bool(b)))
+}
+
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verus_spec(r =>
+    ensures r matches Ok(v) && v.x == ExpX::Const(Constant::Int(i)) && v.span == exp.span && v.typ == exp.typ
+))]
+fn exp_int(exp: &Exp, i: BigInt) -> Result<Exp, VirErr> {
+    exp_at(exp, ExpX::Const(Constant::Int(i)))
+}
+
 #[cfg_attr(verus_only, verus_verify)]
 /// Symbolically execute the expression as far as we can,
 /// stopping when we hit a symbolic control-flow decision
@@ -2538,7 +2590,10 @@ fn eval_exps(ctx: &Ctx, state: &mut State, exps: &[Exp]) -> Result<Vec<Exp>, Vir
 #[cfg_attr(verus_only, verifier::loop_isolation(false))]
 #[cfg_attr(verus_only, verus_spec(r =>
     requires eval_pre(old(state), ctx),
-    ensures eval_post(old(state), final(state), ctx, r is Ok),
+    ensures
+        eval_post(old(state), final(state), ctx, r is Ok),
+        // plan/28 (FC): the result has the value of `exp` (`sst_sem::fc`)
+        r matches Ok(e2) ==> fc(old(state).env.view(), ctx.arch, *exp, e2),
     decreases ctx.max_iterations + 2 - old(state).iterations, 0int
 ))]
 fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, VirErr> {
@@ -2561,13 +2616,12 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
         state.ptr_hits = state.ptr_hits.saturating_add(1);
         state
             .log(format!("{}=> already simplified as far as it will go", "\t".repeat(state.depth)))?;
+        #[cfg(verus_only)]
+        proof! { lemma_fc_refl(old(state).env.view(), ctx.arch, *exp); }
         return Ok(exp.clone());
     }
     state.ptr_misses = state.ptr_misses.saturating_add(1);
     state.depth += 1;
-    let exp_new = |e: ExpX| Ok(SpannedTyped::new(&exp.span, &exp.typ, e));
-    let bool_new = |b: bool| exp_new(Const(Constant::Bool(b)));
-    let int_new = |i: BigInt| exp_new(Const(Constant::Int(i)));
     use ExpX::*;
     let r = match &exp.x {
         Const(_) => ok,
@@ -2576,7 +2630,7 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
                 state.log(format!("Failed to find a match for variable {:?}", id))?;
                 // "Hide" the variable, so that we don't accidentally
                 // mix free and bound variables while interpreting
-                exp_new(Interp(InterpExp::FreeVar(id.clone())))
+                exp_at(exp, Interp(InterpExp::FreeVar(id.clone())))
             }
             Some(e) => Ok(e.clone()),
         },
@@ -2594,7 +2648,7 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
                                     ))?;
                                     // "Hide" the variable, so that we don't accidentally
                                     // mix free and bound variables while interpreting
-                                    exp_new(Interp(InterpExp::FreeVar(var_id.clone())))
+                                    exp_at(exp, Interp(InterpExp::FreeVar(var_id.clone())))
                                 }
                                 Some(e) => Ok(e.clone()),
                             }
@@ -2610,7 +2664,7 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
         }
         UnaryOpr(op, e) => {
             let e = eval_expr_internal(ctx, state, e)?;
-            let ok = exp_new(UnaryOpr(op.clone(), e.clone()));
+            let ok = exp_at(exp, UnaryOpr(op.clone(), e.clone()));
             use crate::ast::UnaryOpr::*;
             match op {
                 Box(_) | Unbox(_) => Err(error(
@@ -2619,7 +2673,7 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
                 )),
                 HasType(_) => ok,
                 IsVariant { datatype, variant } => match &e.x {
-                    Ctor(dt, var, _) => bool_new(dt == datatype && var == variant),
+                    Ctor(dt, var, _) => exp_bool(exp, dt == datatype && var == variant),
                     _ => ok,
                 },
                 Field(f) => match &e.x {
@@ -2639,19 +2693,19 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
                             Some(i) if i <= 1024 => match kind {
                                 IntegerTypeBoundKind::ArchWordBits => match ctx.arch {
                                     ArchWordBits::Exactly(b) => {
-                                        int_new(BigInt::from_u32(b).unwrap())
+                                        exp_int(exp, BigInt::from_u32(b).unwrap())
                                     }
                                     _ => ok,
                                 },
-                                _ if i == 0 => int_new(BigInt::from_usize(0).unwrap()),
+                                _ if i == 0 => exp_int(exp, BigInt::from_usize(0).unwrap()),
                                 IntegerTypeBoundKind::UnsignedMax => {
-                                    int_new(BigInt::from_usize(2).unwrap().pow(i) - 1)
+                                    exp_int(exp, BigInt::from_usize(2).unwrap().pow(i) - 1)
                                 }
                                 IntegerTypeBoundKind::SignedMax => {
-                                    int_new(BigInt::from_usize(2).unwrap().pow(i - 1) - 1)
+                                    exp_int(exp, BigInt::from_usize(2).unwrap().pow(i - 1) - 1)
                                 }
                                 IntegerTypeBoundKind::SignedMin => {
-                                    int_new(-BigInt::from_usize(2).unwrap().pow(i - 1))
+                                    exp_int(exp, -BigInt::from_usize(2).unwrap().pow(i - 1))
                                 }
                             },
                             _ => ok,
@@ -2676,26 +2730,69 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
             let e2 = eval_expr_internal(ctx, state, e2)?;
             match op {
                 crate::ast::BinaryOpr::ExtEq(..) => match e1.syntactic_eq(&e2) {
-                    None => exp_new(BinaryOpr(op.clone(), e1.clone(), e2.clone())),
-                    Some(b) => bool_new(b),
+                    None => exp_at(exp, BinaryOpr(op.clone(), e1.clone(), e2.clone())),
+                    Some(b) => exp_bool(exp, b),
                 },
             }
         }
-        If(e1, e2, e3) => {
-            let e1 = eval_expr_internal(ctx, state, e1)?;
+        If(c, t, f) => {
+            let e1 = eval_expr_internal(ctx, state, c)?;
             match &e1.x {
                 Const(Constant::Bool(b)) => {
-                    if *b {
-                        eval_expr_internal(ctx, state, e2)
+                    let r0 = if *b {
+                        eval_expr_internal(ctx, state, t)
                     } else {
-                        eval_expr_internal(ctx, state, e3)
+                        eval_expr_internal(ctx, state, f)
+                    };
+                    // (FC): the condition has the value `b`, so `exp` has the branch's value
+                    #[cfg(verus_only)]
+                    proof! {
+                        let env0 = old(state).env.view();
+                        if r0 is Ok {
+                            let v = r0->Ok_0;
+                            reveal(fc);
+                            assert forall|sigma: Map<UniqueIdent, crate::sst_sem::Val>, m: crate::sst_sem::Model|
+                            crate::sst_sem::model_ok(m, ctx.arch) && crate::sst_sem::env_agrees(env0, sigma, m)
+                                && #[trigger] crate::sst_sem::denote(*exp, sigma, m) is Some
+                            implies crate::sst_sem::denote(v, sigma, m) == crate::sst_sem::denote(*exp, sigma, m) by {
+                                // the condition's value is `b`
+                                assert(crate::sst_sem::denote(*c, sigma, m) == crate::sst_sem::denote(e1, sigma, m));
+                                if *b {
+                                    assert(crate::sst_sem::denote(*exp, sigma, m) == crate::sst_sem::denote(*t, sigma, m));
+                                } else {
+                                    assert(crate::sst_sem::denote(*exp, sigma, m) == crate::sst_sem::denote(*f, sigma, m));
+                                }
+                            }
+                            assert(fc(env0, ctx.arch, *exp, v));
+                        }
                     }
+                    r0
                 }
                 _ => {
                     // We still try to simplify both branches, if we can
-                    let e2 = eval_expr_internal(ctx, state, e2)?;
-                    let e3 = eval_expr_internal(ctx, state, e3)?;
-                    exp_new(If(e1, e2, e3))
+                    let e2 = eval_expr_internal(ctx, state, t)?;
+                    let e3 = eval_expr_internal(ctx, state, f)?;
+                    let r0 = exp_at(exp, If(e1, e2, e3));
+                    // (FC): the same condition and the branches' values
+                    #[cfg(verus_only)]
+                    proof! {
+                        let env0 = old(state).env.view();
+                        let v = r0->Ok_0;
+                        reveal(fc);
+                        assert forall|sigma: Map<UniqueIdent, crate::sst_sem::Val>, m: crate::sst_sem::Model|
+                            crate::sst_sem::model_ok(m, ctx.arch) && crate::sst_sem::env_agrees(env0, sigma, m)
+                                && #[trigger] crate::sst_sem::denote(*exp, sigma, m) is Some
+                            implies crate::sst_sem::denote(v, sigma, m) == crate::sst_sem::denote(*exp, sigma, m) by {
+                            assert(crate::sst_sem::denote(*c, sigma, m) == crate::sst_sem::denote(e1, sigma, m));
+                            if crate::sst_sem::denote(*c, sigma, m) == Some(crate::sst_sem::Val::Bool(true)) {
+                                assert(crate::sst_sem::denote(*t, sigma, m) == crate::sst_sem::denote(e2, sigma, m));
+                            } else {
+                                assert(crate::sst_sem::denote(*f, sigma, m) == crate::sst_sem::denote(e3, sigma, m));
+                            }
+                        }
+                        assert(fc(env0, ctx.arch, *exp, v));
+                    }
+                    r0
                 }
             }
         }
@@ -2707,7 +2804,7 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
             let new_args: Result<Vec<Exp>, VirErr> =
                 eval_exps(ctx, state, args);
             let new_args = Arc::new(new_args?);
-            exp_new(Call(fun.clone(), typs.clone(), new_args.clone()))
+            exp_at(exp, Call(fun.clone(), typs.clone(), new_args.clone()))
         }
         CallLambda(lambda, args) => {
             eval_call_lambda(ctx, state, exp, lambda, args)
@@ -2727,13 +2824,13 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
                 let a = eval_expr_internal(ctx, state, &b.a)?;
                 new_bnds.push(Arc::new(BinderX { name, a }));
             }
-            exp_new(Ctor(path.clone(), id.clone(), Arc::new(new_bnds)))
+            exp_at(exp, Ctor(path.clone(), id.clone(), Arc::new(new_bnds)))
         }
         ArrayLiteral(exprs) => {
             let new_exprs: Result<Vec<Exp>, VirErr> =
                 eval_exps(ctx, state, exprs);
             let im_vec: Vector<Exp> = new_exprs?.into_iter().collect();
-            exp_new(Interp(InterpExp::Array(im_vec)))
+            exp_at(exp, Interp(InterpExp::Array(im_vec)))
         }
         Interp(e) => match e {
             InterpExp::FreeVar(_) => ok,
@@ -2741,15 +2838,55 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
             InterpExp::Closure(_, _) => ok,
             InterpExp::Array(_) => ok,
         },
-        WithTriggers(triggers, body) => {
-            let body = eval_expr_internal(ctx, state, body)?;
-            exp_new(WithTriggers(triggers.clone(), body))
+        WithTriggers(triggers, b) => {
+            let body = eval_expr_internal(ctx, state, b)?;
+            let r0 = exp_at(exp, WithTriggers(triggers.clone(), body));
+            #[cfg(verus_only)]
+            proof! {
+                let env0 = old(state).env.view();
+                reveal(fc);
+                let v = r0->Ok_0;
+                assert forall|sigma: Map<UniqueIdent, crate::sst_sem::Val>, m: crate::sst_sem::Model|
+                    crate::sst_sem::model_ok(m, ctx.arch) && crate::sst_sem::env_agrees(env0, sigma, m)
+                        && #[trigger] crate::sst_sem::denote(*exp, sigma, m) is Some
+                    implies crate::sst_sem::denote(v, sigma, m) == crate::sst_sem::denote(*exp, sigma, m) by {
+                    assert(crate::sst_sem::denote(*exp, sigma, m) == crate::sst_sem::denote(*b, sigma, m));
+                    assert(crate::sst_sem::denote(v, sigma, m) == crate::sst_sem::denote(body, sigma, m));
+                }
+                assert(fc(env0, ctx.arch, *exp, v));
+            }
+            r0
         }
         // Ignored by the interpreter at present (i.e., treated as symbolic)
         VarAt(..) | VarLoc(..) | Loc(..) | Old(..) | StaticVar(..) => ok,
         ExecFnByName(_) => ok,
         FuelConst(_) => ok,
     };
+    // (FC), plan/28 stage 0: proved for every node but the stage-1 operators and `let`, whose
+    // cases are assumed here (`eval_unary`, `eval_binary`, `eval_bind`)
+    #[cfg(verus_only)]
+    proof! {
+        if r is Ok {
+            let e2 = r->Ok_0;
+            let env0 = old(state).env.view();
+            reveal(fc);
+            match &exp.x {
+                ExpX::Unary(..) | ExpX::Binary(..) => {
+                    assume(fc(env0, ctx.arch, *exp, e2)); // stage 1
+                }
+                ExpX::Bind(bnd, _) => {
+                    if let BndX::Let(_) = &bnd.x {
+                        assume(fc(env0, ctx.arch, *exp, e2)); // stage 1
+                    }
+                }
+                // `If`, `WithTriggers`: proved in their arms. `Const`, `Var`, `Interp`: the result
+                // is the node itself, the variable's value in `env`, or `FreeVar` of it. Every
+                // other node is outside the fragment (`denote` is `None`).
+                _ => {}
+            }
+            assert(fc(env0, ctx.arch, *exp, e2));
+        }
+    }
     // proof hints: the conjuncts of eval_post (with the depth still incremented)
     #[cfg(verus_only)]
     proof! {

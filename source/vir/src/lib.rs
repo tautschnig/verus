@@ -50,6 +50,8 @@ pub mod expand_errors;
 pub mod headers;
 mod heuristics;
 pub mod interpreter;
+#[cfg(verus_only)]
+pub mod sst_sem;
 mod inv_masks;
 pub mod layout;
 pub mod messages;
