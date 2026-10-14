@@ -834,34 +834,37 @@ pub(crate) fn collect_external_trait_impls<'tcx>(
         }
     }
 
-    // An impl of a trait whose supertrait's impl for the same (non-generic) self type was
-    // skipped would be inconsistent: `impl DerefMut for anyhow::Error` without `impl Deref
+    // An impl of a trait whose supertrait's impl for the same (non-generic) trait reference
+    // was skipped would be inconsistent: `impl DerefMut for anyhow::Error` without `impl Deref
     // for anyhow::Error` (skipped because its `Target` is an unsupported `dyn` type) makes
     // the trait-conflict checker's model program ill-formed. Drop such impls, to a fixpoint.
-    let self_ty_of = |impl_id: DefId| tcx.impl_trait_ref(impl_id).skip_binder().self_ty();
-    // (Only for self types without generic parameters: `Option<T>` of one impl and `Option<T>`
-    // of another compare equal although their `T`s are unrelated.)
+    // The supertrait clause is instantiated with the impl's arguments and compared as a whole
+    // trait reference: `impl Eq for str` needs `str: PartialEq<str>`, and a skipped
+    // `impl PartialEq<OsString> for str` must not drop it.
+    // (Only for trait references without generic parameters: `Option<T>` of one impl and
+    // `Option<T>` of another compare equal although their `T`s are unrelated.)
     use rustc_middle::ty::TypeVisitableExt;
-    let mut skipped_pairs: HashSet<(DefId, rustc_middle::ty::Ty<'tcx>)> = skipped
-        .iter()
-        .filter(|i| !self_ty_of(**i).has_param())
-        .map(|i| (tcx.impl_trait_ref(*i).skip_binder().def_id, self_ty_of(*i)))
-        .collect();
+    let trait_ref_of = |impl_id: DefId| tcx.impl_trait_ref(impl_id).skip_binder();
+    let mut skipped_refs: HashSet<rustc_middle::ty::TraitRef<'tcx>> =
+        skipped.iter().map(|i| trait_ref_of(*i)).filter(|r| !r.has_param()).collect();
     loop {
         let before = pending.len();
         pending.retain(|(impl_id, _, _)| {
-            let trait_id = tcx.impl_trait_ref(*impl_id).skip_binder().def_id;
-            let self_ty = self_ty_of(*impl_id);
-            let drop = !self_ty.has_param()
-                && tcx.explicit_super_predicates_of(trait_id).skip_binder().iter().any(
-                |(clause, _)| {
-                    clause.as_trait_clause().map_or(false, |tc| {
-                        skipped_pairs.contains(&(tc.skip_binder().def_id(), self_ty))
-                    })
-                },
-            );
+            let trait_ref = trait_ref_of(*impl_id);
+            let drop = !trait_ref.has_param()
+                && tcx
+                    .explicit_super_predicates_of(trait_ref.def_id)
+                    .iter_instantiated_copied(tcx, trait_ref.args)
+                    .any(|c| {
+                        // (supertrait clauses of a non-generic trait reference: nothing to
+                        // normalize that would change the comparison below)
+                        let (clause, _) = c.skip_norm_wip();
+                        clause
+                            .as_trait_clause()
+                            .map_or(false, |tc| skipped_refs.contains(&tc.skip_binder().trait_ref))
+                    });
             if drop {
-                skipped_pairs.insert((trait_id, self_ty));
+                skipped_refs.insert(trait_ref);
             }
             !drop
         });
