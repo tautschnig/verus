@@ -47,6 +47,17 @@ pub struct ErasureInfo {
     pub(crate) local_invariant_bodies: Vec<rustc_mir_build_verus::verus::LocalInvariantBody>,
 }
 
+impl ErasureInfo {
+    /// A node that rust_to_vir generated, with no source HIR node, whatever its kind (local,
+    /// binder or ctor): the erasure check skips it. (Upstream's #3095 split the one id list
+    /// into three; an entry in a list for another kind of node is ignored.)
+    pub(crate) fn generated(&mut self, id: AstId) {
+        self.local_hir_vir_ids.push((None, id));
+        self.binder_hir_vir_ids.push((None, id));
+        self.ctor_hir_vir_ids.push((None, id));
+    }
+}
+
 type ErasureInfoRef = std::rc::Rc<std::cell::RefCell<ErasureInfo>>;
 
 pub type Context<'tcx> = Rc<ContextX<'tcx>>;
@@ -78,6 +89,10 @@ pub enum HeaderSetting {
 
 #[derive(Clone)]
 pub(crate) struct BodyCtxt<'tcx> {
+    /// For a labeled block `'l: { .. }` (lowered to a one-shot loop): the local that holds the
+    /// block's value, keyed by the block's HirId (a `break 'l e` assigns `e` to it).
+    pub(crate) loop_break_vars:
+        std::rc::Rc<std::cell::RefCell<HashMap<HirId, (vir::ast::VarIdent, vir::ast::Typ)>>>,
     pub(crate) ctxt: Context<'tcx>,
     pub(crate) types: &'tcx TypeckResults<'tcx>,
     pub(crate) fun_id: DefId,

@@ -1055,6 +1055,6 @@ pub fn func_sst_to_vacuity_air(
         &function.x.typ_bounds,
         &function.x.pars,
         func_check_sst,
-        &function.x.attrs.hidden,
+        &function.x.hidden,
     )
 }

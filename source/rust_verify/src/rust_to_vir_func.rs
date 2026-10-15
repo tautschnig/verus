@@ -345,6 +345,7 @@ fn mk_bctx<'tcx>(
         mode,
         external_body,
         in_ghost: mode != Mode::Exec,
+        loop_break_vars: std::rc::Rc::new(std::cell::RefCell::new(HashMap::new())),
         dual_const_body: false,
         atomically: None,
         migrate_postcondition_vars,
@@ -1590,6 +1591,8 @@ pub(crate) struct FunctionInfo<'tcx> {
     pub ret_typ_mode: Option<(Typ, Mode)>,
     pub autoderive_action: Option<AutomaticDeriveAction>,
     pub is_external_const: bool,
+    /// parameters written as patterns: (index, hidden parameter name, pattern)
+    pub param_patterns: Vec<(usize, VarIdent, &'tcx rustc_hir::Pat<'tcx>)>,
 }
 
 pub(crate) struct ConstInfo {
@@ -2220,7 +2223,10 @@ pub(crate) fn check_item_fn<'tcx>(
             // In an external const declaration, no returns means exec-only. An associated
             // const of an external trait specification keeps the default const mode
             // (spec + exec), as in a local trait.
-            assert!(mode == Mode::Exec || is_external_assoc_const);
+            assert!(
+                mode == Mode::Exec
+                    || matches!(ctxt.tcx.def_kind(id), rustc_hir::def::DefKind::AssocConst { .. })
+            );
             (vattrs.publish.clone(), mode, ItemKind::Const)
         }
         (_, _) => (vattrs.publish.clone(), mode, sig.item_kind()),
@@ -2297,6 +2303,7 @@ pub(crate) fn check_item_fn<'tcx>(
         ret_typ_mode,
         autoderive_action: autoderive_action,
         is_external_const,
+        param_patterns,
     }));
 
     if is_verus_spec { Ok(None) } else { Ok(Some(name)) }
@@ -2304,7 +2311,7 @@ pub(crate) fn check_item_fn<'tcx>(
 
 pub(crate) fn finish_item<'tcx>(
     ctxt: &Context<'tcx>,
-    info: FunctionOrConstInfo,
+    info: FunctionOrConstInfo<'tcx>,
     functions: &mut Vec<vir::ast::Function>,
 ) -> Result<(), VirErr> {
     match info {
@@ -2319,7 +2326,7 @@ pub(crate) fn finish_item<'tcx>(
 
 pub(crate) fn finish_function<'tcx>(
     ctxt: &Context<'tcx>,
-    function_info: FunctionInfo,
+    function_info: FunctionInfo<'tcx>,
     functions: &mut Vec<vir::ast::Function>,
 ) -> Result<(), VirErr> {
     let FunctionInfo {
@@ -2336,6 +2343,7 @@ pub(crate) fn finish_function<'tcx>(
         ret_typ_mode,
         autoderive_action,
         is_external_const,
+        param_patterns,
     } = function_info;
     let vir::ast::FunctionStubX {
         name,
@@ -2384,18 +2392,18 @@ pub(crate) fn finish_function<'tcx>(
             if !param_patterns.is_empty() {
                 let bctx = mk_bctx(
                     ctxt,
-                    id,
+                    def_id,
                     body_id,
                     mode,
                     external_body,
                     &external_trait_from_to,
                     migrate_postcondition_vars.clone(),
-                    vir_params.iter().map(|p| p.x.name.clone()).collect(),
+                    params.iter().map(|p| p.x.name.clone()).collect(),
                     assume_specification_opaque_type_map.clone(),
                 );
                 let mut decls: Vec<vir::ast::Stmt> = Vec::new();
                 for (idx, name, pat) in param_patterns.iter() {
-                    let param = &vir_params[*idx];
+                    let param = &params[*idx];
                     let pattern = crate::rust_to_vir_expr::pattern_to_vir(&bctx, pat)?;
                     if let Some(span) = vir::patterns::pattern_find_mut_binding(&pattern) {
                         return Err(vir::messages::error(
@@ -2409,7 +2417,7 @@ pub(crate) fn finish_function<'tcx>(
                         vir::ast::PlaceX::Local(name.clone()),
                     );
                     // the generated initializer has no source HIR node
-                    ctxt.erasure_info.borrow_mut().hir_vir_ids.push((None, init.span.id));
+                    ctxt.erasure_info.borrow_mut().generated(init.span.id);
                     decls.push(bctx.spanned_new(
                         pat.span,
                         vir::ast::StmtX::Decl {
@@ -2515,7 +2523,10 @@ pub(crate) fn finish_function<'tcx>(
             // In an external const declaration, no returns means exec-only. An associated
             // const of an external trait specification keeps the default const mode
             // (spec + exec), as in a local trait.
-            assert!(mode == Mode::Exec || is_external_assoc_const);
+            assert!(
+                mode == Mode::Exec
+                    || matches!(ctxt.tcx.def_kind(def_id), rustc_hir::def::DefKind::AssocConst { .. })
+            );
             ((ensure0, ensure1), None, body)
         }
         (_, returns) => ((ensure0, ensure1), returns, body),
@@ -2620,8 +2631,8 @@ pub(crate) fn finish_function<'tcx>(
             let f_var = ctxt.spanned_typed_new_vir(&span, &p.x.typ, vir::ast::ExprX::Var(p.x.name.clone()));
             let a_var = ctxt.spanned_typed_new_vir(&span, &args_typ, vir::ast::ExprX::Var(a.clone()));
             // generated nodes: known ids, no source HIR
-            ctxt.erasure_info.borrow_mut().hir_vir_ids.push((None, f_var.span.id));
-            ctxt.erasure_info.borrow_mut().hir_vir_ids.push((None, a_var.span.id));
+            ctxt.erasure_info.borrow_mut().generated(f_var.span.id);
+            ctxt.erasure_info.borrow_mut().generated(a_var.span.id);
             let call = ctxt.spanned_typed_new_vir(
                 &span,
                 &vir::ast_util::bool_typ(),

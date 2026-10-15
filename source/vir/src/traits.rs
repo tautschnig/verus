@@ -391,7 +391,7 @@ pub fn demote_external_traits(
                                     for (x, t) in tps.iter().zip(rest.iter()) {
                                         substs.insert(x.clone(), t.clone());
                                     }
-                                    let r = crate::sst_util::subst_typ(&substs, &decl.x.ret.x.typ);
+                                    let r = crate::sst_util::subst_typ(&substs, &decl.x.outer_ret.x.typ);
                                     let key = crate::ast_util::undecorate_typ(&e.typ);
                                     opaque_repl.borrow_mut().push((key, r));
                                 }
@@ -2633,7 +2633,7 @@ pub fn synthesize_default_extension_impls(
             } else {
                 None
             };
-            if body_const.is_some() && !matches!(&*d.x.ret.x.typ, TypX::Bool) {
+            if body_const.is_some() && !matches!(&*d.x.outer_ret.x.typ, TypX::Bool) {
                 continue;
             }
             let body = body_const.map(|b| {
@@ -2654,7 +2654,7 @@ pub fn synthesize_default_extension_impls(
                 .iter()
                 .map(|p| p.new_x(crate::ast::ParamX { typ: sub(&p.x.typ), ..p.x.clone() }))
                 .collect();
-            let ret = d.x.ret.new_x(crate::ast::ParamX { typ: sub(&d.x.ret.x.typ), ..d.x.ret.x.clone() });
+            let ret = d.x.outer_ret.new_x(crate::ast::ParamX { typ: sub(&d.x.outer_ret.x.typ), ..d.x.outer_ret.x.clone() });
             let mut attrs = (*d.x.attrs).clone();
             attrs.is_external_body = body.is_none();
             let fx = FunctionX {
@@ -2674,7 +2674,8 @@ pub fn synthesize_default_extension_impls(
                 typ_params: Arc::new(typ_params),
                 typ_bounds: ti.x.typ_bounds.clone(),
                 params: Arc::new(params),
-                ret,
+                outer_ret: ret.clone(),
+                inner_ret: ret,
                 body,
                 attrs: Arc::new(attrs),
                 item_kind: ItemKind::Function,
@@ -3123,7 +3124,7 @@ pub fn synthesize_derived_fmt_impls(
             .iter()
             .map(|p| p.new_x(crate::ast::ParamX { typ: sub(&p.x.typ), ..p.x.clone() }))
             .collect();
-        let ret = decl.x.ret.new_x(crate::ast::ParamX { typ: sub(&decl.x.ret.x.typ), ..decl.x.ret.x.clone() });
+        let ret = decl.x.outer_ret.new_x(crate::ast::ParamX { typ: sub(&decl.x.outer_ret.x.typ), ..decl.x.outer_ret.x.clone() });
         let own_typ_params: Vec<Ident> = decl.x.typ_params.iter().skip(1).cloned().collect();
         let mut attrs = (*decl.x.attrs).clone();
         attrs.is_external_body = false;
@@ -3163,7 +3164,8 @@ pub fn synthesize_derived_fmt_impls(
             typ_params: Arc::new(dt_params.iter().cloned().chain(own_typ_params.into_iter()).collect()),
             typ_bounds: Arc::new(dt_bounds.clone()),
             params: Arc::new(params),
-            ret,
+            outer_ret: ret.clone(),
+            inner_ret: ret,
             body: Some(body),
             attrs: Arc::new(attrs),
             item_kind: ItemKind::Function,

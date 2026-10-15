@@ -535,12 +535,6 @@ pub assume_specification<T>[ Option::<T>::unwrap_unchecked ](option: Option<T>) 
         res == option.unwrap(),
 ;
 
-pub assume_specification<'a, T: Copy>[ Option::<&'a T>::copied ](opt: Option<&'a T>) -> (res: Option<T>)
-    ensures
-        opt.is_none() ==> res.is_none(),
-        opt.is_some() ==> res == Some(*opt.unwrap()),
-;
-
 pub assume_specification<T: core::ops::Deref>[ Option::<T>::as_deref ](option: &Option<T>) -> (res: Option<&<T as core::ops::Deref>::Target>)
     ensures
         option.is_none() ==> res.is_none(),

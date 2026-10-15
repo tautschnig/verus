@@ -4131,7 +4131,7 @@ pub fn check_crate(krate: &Krate) -> Result<(Krate, ErasureModes), Vec<VirErr>> 
             let is_dual_const = matches!(function.x.item_kind, ItemKind::Const)
                 && matches!(function.x.kind, crate::ast::FunctionKind::Static)
                 && function.x.mode == Mode::Spec
-                && function.x.ret.x.mode == Mode::Exec
+                && function.x.outer_ret.x.mode == Mode::Exec
                 && function.x.body.is_some();
             if !is_dual_const {
                 continue;
@@ -4140,7 +4140,7 @@ pub fn check_crate(krate: &Krate) -> Result<(Krate, ErasureModes), Vec<VirErr>> 
             ctxt.fun_mode = function.x.mode;
             let mut state = State {
                 vars: ScopeMap::new(),
-                in_forall_stmt: false,
+                in_assert_by_body: false,
                 in_proof_in_spec: false,
                 block_ghostness: Ghost::Exec,
                 ret_mode: None,
@@ -4150,7 +4150,7 @@ pub fn check_crate(krate: &Krate) -> Result<(Krate, ErasureModes), Vec<VirErr>> 
             };
             let mut typing = Typing::new(&mut state);
             let mut scratch = Record {
-                erasure_modes: ErasureModes { var_modes: vec![], ctor_modes: vec![] },
+                erasure_modes: ErasureModes { local_modes: vec![], binder_modes: vec![], ctor_modes: vec![] },
                 type_inv_info: TypeInvInfo { ctor_needs_check: HashMap::new() },
                 read_kind_finals: HashMap::new(),
                 var_modes: HashMap::new(),

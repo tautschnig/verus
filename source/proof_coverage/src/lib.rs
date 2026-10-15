@@ -3432,7 +3432,7 @@ impl VerificationObserver for CoverageProducer {
                             Self::source_body_inventory(
                                 &verus::fun_identity(&function.x.name),
                                 body,
-                                function.x.ens_has_return,
+                                true, // (upstream #3019 removed ens_has_return: ensures may always name the return value)
                             )
                         })
                         .unwrap_or_default(),

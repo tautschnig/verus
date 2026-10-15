@@ -241,7 +241,7 @@ fn clone_add_post_condition<'tcx>(
         }
     };
 
-    let ensure = cleanup_span_ids(ctxt, span, hir_id, &ensure);
+    let ensure = cleanup_span_ids(ctxt, span, &ensure);
 
     // The fieldwise postcondition names the datatype's fields, which a public method's
     // `ensures` may not do when some field is not public. So the postcondition is a call to
@@ -277,17 +277,17 @@ fn clone_add_post_condition<'tcx>(
         )
     };
     let ret_spec_param = Spanned::new(
-        functionx.ret.span.clone(),
+        functionx.inner_ret.span.clone(),
         vir::ast::ParamX {
             name: ret_spec_name.clone(),
-            typ: functionx.ret.x.typ.clone(),
+            typ: functionx.inner_ret.x.typ.clone(),
             mode: Mode::Spec,
             unwrapped_info: None,
             user_mut: false,
         },
     );
     let bool_ret = Spanned::new(
-        functionx.ret.span.clone(),
+        functionx.inner_ret.span.clone(),
         vir::ast::ParamX {
             name: vir::ast_util::air_unique_var(vir::def::RETURN_VALUE),
             typ: vir::ast_util::bool_typ(),
@@ -310,8 +310,8 @@ fn clone_add_post_condition<'tcx>(
             typ_params: functionx.typ_params.clone(),
             typ_bounds: functionx.typ_bounds.clone(),
             params: Arc::new(vec![mk_spec_param(self_param), ret_spec_param]),
-            ret: bool_ret,
-            ens_has_return: true,
+            outer_ret: bool_ret.clone(),
+            inner_ret: bool_ret,
             require: Arc::new(vec![]),
             ensure: (Arc::new(vec![]), Arc::new(vec![])),
             returns: None,
@@ -326,7 +326,7 @@ fn clone_add_post_condition<'tcx>(
             attrs: Default::default(),
             body: Some(ensure),
             extra_dependencies: vec![],
-            async_ret: None,
+            hidden: Arc::new(vec![]),
         },
     );
     // ensures clone_spec(self, ret)
@@ -368,7 +368,7 @@ fn clone_add_post_condition<'tcx>(
             body: None,
         },
     );
-    let call = cleanup_span_ids(ctxt, span, hir_id, &call);
+    let call = cleanup_span_ids(ctxt, span, &call);
     functionx.ensure.0 = Arc::new(vec![call]);
     Ok(Some(spec_fn))
 }
@@ -462,8 +462,9 @@ fn fieldwise_cloned<'tcx>(
     Some(conjuncts)
 }
 
-// TODO better place for this
-fn cleanup_span_ids<'tcx>(ctxt: &Context<'tcx>, span: Span, hir_id: HirId, expr: &Expr) -> Expr {
+/// Give each node a unique ID. This inserts 'None' for every var into the local_hir_vir_ids
+/// list, so it's only safe for pure expressions (e.g., in asserts or signatures).
+fn cleanup_span_ids<'tcx>(ctxt: &Context<'tcx>, span: Span, expr: &Expr) -> Expr {
     vir::ast_visitor::map_expr_place_visitor(
         expr,
         &|e: &Expr| {

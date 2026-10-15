@@ -916,17 +916,6 @@ pub assume_specification<T>[ <[T]>::swap ](s: &mut [T], a: usize, b: usize)
         final(s)@ == old(s)@.update(a as int, old(s)@[b as int]).update(b as int, old(s)@[a as int]),
 ;
 
-pub assume_specification<T>[ <[T]>::reverse ](s: &mut [T])
-    ensures
-        final(s)@ == old(s)@.reverse(),
-;
-
-pub assume_specification<T: PartialEq>[ <[T]>::contains ](s: &[T], x: &T) -> (res: bool)
-    ensures
-        <T as super::cmp::PartialEqSpec>::obeys_eq_spec() ==> (res <==> exists|i: int|
-            0 <= i < s@.len() && #[trigger] <T as super::cmp::PartialEqSpec>::eq_spec(&s@[i], x)),
-;
-
 #[cfg(all(feature = "alloc", not(verus_verify_core)))]
 pub assume_specification<T: Clone>[ <[T]>::to_vec ](s: &[T]) -> (res: alloc::vec::Vec<T>)
     ensures

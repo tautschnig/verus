@@ -9,7 +9,7 @@ use crate::ast::{
     Stmt, Trait, TraitId, TraitX, Typ, TypX, UnaryOp, UnaryOpr,
 };
 use crate::ast_util::{
-    array_kind_of_typ, is_body_visible_to, is_visible_to, is_visible_to_or_true,
+    is_body_visible_to, is_visible_to, is_visible_to_or_true,
 };
 use crate::ast_visitor::{VisitorControlFlow, VisitorScopeMap};
 use crate::datatype_to_air::is_datatype_transparent;

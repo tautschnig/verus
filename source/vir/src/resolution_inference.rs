@@ -2175,6 +2175,17 @@ fn moves_and_muts_for_pattern(
                 moves_and_muts_for_pattern_rec(&pat2, projs, out, datatypes, modes, errors);
             }
             PatternX::Expr(..) | PatternX::Range(..) => {}
+            PatternX::Slice { kind: ArrayKind::Array, prefix, has_rest: false, suffix }
+                if suffix.is_empty() =>
+            {
+                // `[p_0, .., p_n]` on an array: element i is projection Index(i) (as upstream)
+                let elem_typ = crate::ast_util::array_kind_of_typ(&pattern.typ).1;
+                for (i, sub_pat) in prefix.iter().enumerate() {
+                    projs.push(ProjectionTyped::Index(i, elem_typ.clone()));
+                    moves_and_muts_for_pattern_rec(sub_pat, projs, out, datatypes, modes, errors);
+                    projs.pop();
+                }
+            }
             PatternX::Slice { prefix, suffix, .. } => {
                 // Element places have no projection representation here. Over-approximate:
                 // a move or mutable borrow of any element counts as a move or mutable
@@ -2236,6 +2247,11 @@ fn check_illegal_muts(
         PatternX::Expr(_e) => {}
         PatternX::Range(_lower, _upper) => {}
         PatternX::ImmutRef(p) | PatternX::MutRef(p) => check_illegal_muts(p, datatypes, errors),
+        PatternX::Slice { prefix, suffix, .. } => {
+            for p in prefix.iter().chain(suffix.iter()) {
+                check_illegal_muts(p, datatypes, errors);
+            }
+        }
     }
 }
 

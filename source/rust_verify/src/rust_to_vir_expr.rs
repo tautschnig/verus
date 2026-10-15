@@ -753,7 +753,7 @@ fn ctor_fn_value_to_vir<'tcx>(
         &mut (),
         &mut |_, _, ex: &vir::ast::Expr| {
             if ex.span.id != e.span.id {
-                bctx.ctxt.erasure_info.borrow_mut().hir_vir_ids.push((None, ex.span.id));
+                bctx.ctxt.erasure_info.borrow_mut().generated(ex.span.id);
             }
             Ok(())
         },
@@ -761,7 +761,7 @@ fn ctor_fn_value_to_vir<'tcx>(
         &mut |_, _, _pat| Ok(()),
         &mut |_, _, _typ, _span| Ok(()),
         &mut |_, _, place| {
-            bctx.ctxt.erasure_info.borrow_mut().hir_vir_ids.push((None, place.span.id));
+            bctx.ctxt.erasure_info.borrow_mut().generated(place.span.id);
             Ok(())
         },
     );
@@ -2252,6 +2252,14 @@ fn let_chain_conjuncts<'a, 'tcx>(cond: &'a Expr<'tcx>) -> Option<Vec<&'a Expr<'t
 /// which evaluates the conjuncts left to right, stops at the first that fails, binds each
 /// `let`'s pattern for the rest of the chain and for `A`, and evaluates `B` once. The
 /// compiled code is rustc's own lowering of the chain, unchanged.
+/// If `ty` is a reference type, return the referent; otherwise return `ty` unchanged.
+fn strip_ref<'tcx>(ty: rustc_middle::ty::Ty<'tcx>) -> rustc_middle::ty::Ty<'tcx> {
+    match ty.kind() {
+        TyKind::Ref(_, inner_ty, _) => *inner_ty,
+        _ => ty,
+    }
+}
+
 fn let_chain_to_vir<'a, 'tcx>(
     bctx: &BodyCtxt<'tcx>,
     expr: &'a Expr<'tcx>,
@@ -2267,7 +2275,7 @@ fn let_chain_to_vir<'a, 'tcx>(
     let label = bctx.fresh_label(expr.hir_id, &None);
     let name = vir::def::break_value_var(expr.hir_id.local_id.index());
     let res_ty = bctx.types.node_type(expr.hir_id);
-    let generated = |id| bctx.ctxt.erasure_info.borrow_mut().hir_vir_ids.push((None, id));
+    let generated = |id| bctx.ctxt.erasure_info.borrow_mut().generated(id);
     let res_place = || {
         let p = bctx.spanned_typed_new(expr.span, typ, PlaceX::Local(name.clone()));
         generated(p.span.id);
@@ -2289,7 +2297,7 @@ fn let_chain_to_vir<'a, 'tcx>(
         let brk = bctx.spanned_typed_new(
             span,
             &unit,
-            ExprX::BreakOrContinue { label: label.clone(), is_break: true },
+            ExprX::BreakOrContinue { label: label.clone(), is_break: true, value: None },
         );
         bctx.spanned_typed_new(
             span,
@@ -2440,7 +2448,7 @@ fn labeled_block_to_vir<'tcx>(
     let vlabel = bctx.fresh_label(body.hir_id, &Some(*label));
     let res_ty = bctx.types.node_type(expr.hir_id);
     let typ = bctx.mid_ty_to_vir(expr.span, &res_ty)?;
-    let generated = |id| bctx.ctxt.erasure_info.borrow_mut().hir_vir_ids.push((None, id));
+    let generated = |id| bctx.ctxt.erasure_info.borrow_mut().generated(id);
     let has_value = !(res_ty.is_unit() || res_ty.is_never());
     let name = vir::def::break_value_var(expr.hir_id.local_id.index());
     // registered even without a value, so that loops inside that break out to the block are
@@ -2451,7 +2459,7 @@ fn labeled_block_to_vir<'tcx>(
     let brk = bctx.spanned_typed_new(
         expr.span,
         &unit,
-        ExprX::BreakOrContinue { label: vlabel.clone(), is_break: true },
+        ExprX::BreakOrContinue { label: vlabel.clone(), is_break: true, value: None },
     );
     generated(brk.span.id);
     let res_place = || {
@@ -4014,7 +4022,7 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
                         bctx.spanned_typed_new(
                             span,
                             &body_ty,
-                            ExprX::BreakOrContinue { label: label.clone(), is_break: true },
+                            ExprX::BreakOrContinue { label: label.clone(), is_break: true, value: None },
                         )
                     };
                     let mut inner = body;
@@ -4045,8 +4053,7 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
                                 bctx.ctxt
                                     .erasure_info
                                     .borrow_mut()
-                                    .hir_vir_ids
-                                    .push((None, wild.span.id));
+                                    .generated(wild.span.id);
                                 let arm2 = bctx.spanned_new(
                                     c.span,
                                     ArmX { pattern: wild, guard: tru, body: brk(c.span) },
@@ -4124,6 +4131,32 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
                 Some(expr) => Some(expr_to_vir_consume(bctx, expr)?),
             };
             mk_expr(ExprX::Return(expr))
+        }
+        ExprKind::Break(dest, Some(value))
+            if dest.target_id.is_ok_and(|t| bctx.loop_break_vars.borrow().contains_key(&t)) =>
+        {
+            // `break 'l v` out of a labeled block: { %r = v; break 'l } (see labeled_block_to_vir)
+            let label = bctx.label_from_dest(expr.span, dest)?;
+            let target = dest.target_id.expect("checked above");
+            let (name, typ) = bctx.loop_break_vars.borrow().get(&target).cloned().expect("checked");
+            let vir_rhs = expr_to_vir_consume(bctx, value)?;
+            let place = bctx.spanned_typed_new(expr.span, &typ, PlaceX::Local(name));
+            bctx.ctxt.erasure_info.borrow_mut().generated(place.span.id);
+            let unit = vir::ast_util::unit_typ();
+            let assign = bctx.spanned_typed_new(
+                expr.span,
+                &unit,
+                ExprX::Assign { place, rhs: vir_rhs, op: None, resolve: false, typ },
+            );
+            let brk = bctx.spanned_typed_new(
+                expr.span,
+                &expr_typ()?,
+                ExprX::BreakOrContinue { label, is_break: true, value: None },
+            );
+            mk_expr(ExprX::Block(
+                Arc::new(vec![bctx.spanned_new(expr.span, StmtX::Expr(assign))]),
+                Some(brk),
+            ))
         }
         ExprKind::Break(dest, value) => {
             let label = bctx.label_from_dest(expr.span, dest)?;

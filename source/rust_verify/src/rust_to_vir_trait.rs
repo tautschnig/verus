@@ -803,5 +803,6 @@ fn make_trait_decl<'tcx>(
         ret_typ_mode: spec_method_info.ret_typ_mode.clone(),
         autoderive_action: None,
         is_external_const: false,
+        param_patterns: spec_method_info.param_patterns.clone(),
     })
 }

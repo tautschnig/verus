@@ -424,7 +424,7 @@ pub(crate) fn setup_verus_ctxt_for_thir_erasure<'tcx>(
     // Owners (items) whose bodies contain anything that erasure changes. A body outside this
     // set is erased to itself.
     let mut ghost_owners = HashSet::<LocalDefId>::new();
-    for (hir_id, v) in vars.iter() {
+    for (hir_id, v) in locals.iter().chain(binders.iter()) {
         if !matches!(v, VarErasure::Keep) {
             ghost_owners.insert(hir_id.owner.def_id);
         }

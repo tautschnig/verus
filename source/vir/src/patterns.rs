@@ -1,8 +1,5 @@
 use crate::ast::*;
-use crate::ast_util::{
-    array_kind_of_typ, bool_typ, conjoin, disjoin, if_then_else, int_typ, mk_eq, mk_ineq,
-    mk_int_lit_from_usize, place_to_spec_expr,
-};
+use crate::ast_util::{bool_typ, conjoin, disjoin, if_then_else, mk_eq, mk_ineq, place_to_spec_expr};
 use crate::context::GlobalCtx;
 use crate::def::Spanned;
 use crate::messages::{Span, error};
@@ -13,7 +10,7 @@ pub fn pattern_to_exprs(
     ctx: &GlobalCtx,
     place: &Place,
     pattern: &Pattern,
-    has_guard: bool,
+    _has_guard: bool,
     decls: &mut Vec<Stmt>,
 ) -> Result<Expr, VirErr> {
     let mut pattern_bound_decls = vec![];

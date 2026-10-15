@@ -677,7 +677,7 @@ fn loop_has_breaks(loop_label: &Label, expr: &Expr) -> (usize, usize) {
 fn body_ends_with_break(loop_label: &Label, body: &Expr) -> bool {
     match &body.x {
         ExprX::Block(_, Some(tail)) => body_ends_with_break(loop_label, tail),
-        ExprX::BreakOrContinue { label, is_break: true } => label == loop_label,
+        ExprX::BreakOrContinue { label, is_break: true, .. } => label == loop_label,
         _ => false,
     }
 }
@@ -686,7 +686,7 @@ fn body_ends_with_break(loop_label: &Label, body: &Expr) -> bool {
 fn loop_has_continue(loop_label: &Label, expr: &Expr) -> bool {
     let mut found = false;
     let _ = crate::ast_visitor::expr_visitor_check(expr, &mut |_scope_map, e: &Expr| {
-        if let ExprX::BreakOrContinue { label, is_break: false } = &e.x {
+        if let ExprX::BreakOrContinue { label, is_break: false, .. } = &e.x {
             if label == loop_label {
                 found = true;
             }
@@ -4304,7 +4304,7 @@ pub(crate) fn assume_fp_postcondition(
     let typ_args = Arc::new(vec![float_typ.clone()]);
     let expx = ExpX::Call(call_fun, typ_args, Arc::new(vec![e1.clone(), e2.clone(), xvar.clone()]));
     let exp = SpannedTyped::new(span, &Arc::new(TypX::Bool), expx);
-    Spanned::new(span.clone(), StmX::Assume(exp))
+    Spanned::new(span.clone(), StmX::Assume(AssumeIntent::VarEquality, exp))
 }
 
 /// Stms and Exps needed to execute a 2-phase borrow.
@@ -4453,8 +4453,8 @@ fn mut_ref_to_dyn_sst(
         sst_equal(span, &sst_mut_ref_current(span, &out), &to_dyn(sst_mut_ref_current(span, src)));
     let fut =
         sst_equal(span, &sst_mut_ref_future(span, &out), &to_dyn(sst_mut_ref_future(span, src)));
-    stms.push(Spanned::new(span.clone(), StmX::Assume(cur)));
-    stms.push(Spanned::new(span.clone(), StmX::Assume(fut)));
+    stms.push(Spanned::new(span.clone(), StmX::Assume(AssumeIntent::MutRefCurrent, cur)));
+    stms.push(Spanned::new(span.clone(), StmX::Assume(AssumeIntent::MutRefCurrent, fut)));
     out
 }
 
