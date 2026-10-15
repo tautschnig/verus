@@ -581,7 +581,8 @@ fn typs_syntactic_eq(l: &Typs, r: &Typs) -> Option<bool> {
 
 /// `SyntacticEquality` for `Exps`
 #[cfg_attr(verus_only, verus_verify)]
-#[cfg_attr(verus_only, verus_spec(decreases l))]
+// (no `decreases`: `quant_alpha_eq` recurses on a renamed body, which is not a subterm)
+#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
 fn exps_syntactic_eq(l: &Exps, r: &Exps) -> Option<bool> {
     if l.len() != r.len() {
         return Some(false);
@@ -605,7 +606,8 @@ fn exps_syntactic_eq(l: &Exps, r: &Exps) -> Option<bool> {
 
 /// `SyntacticEquality` for `Vector<Exp>`
 #[cfg_attr(verus_only, verus_verify)]
-#[cfg_attr(verus_only, verus_spec(decreases l))]
+// (no `decreases`: `quant_alpha_eq` recurses on a renamed body, which is not a subterm)
+#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
 fn vector_exps_syntactic_eq(l: &Vector<Exp>, r: &Vector<Exp>) -> Option<bool> {
     if l.len() != r.len() {
         return Some(false);
@@ -647,7 +649,8 @@ fn binders_typ_syntactic_eq(l: &Binders<Typ>, r: &Binders<Typ>) -> Option<bool> 
 
 /// `SyntacticEquality` for `Binders<Exp>` (pairs up to the shorter length, as `zip`)
 #[cfg_attr(verus_only, verus_verify)]
-#[cfg_attr(verus_only, verus_spec(decreases l))]
+// (no `decreases`: `quant_alpha_eq` recurses on a renamed body, which is not a subterm)
+#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
 fn binders_exp_syntactic_eq(l: &Binders<Exp>, r: &Binders<Exp>) -> Option<bool> {
     // Constructor fields may appear in any source order (upstream #3047): each field of `l`
     // is compared with the field of `r` that has its name.
@@ -665,7 +668,7 @@ fn binders_exp_syntactic_eq(l: &Binders<Exp>, r: &Binders<Exp>) -> Option<bool> 
         let mut j: usize = 0;
         let mut found: Option<usize> = None;
         #[cfg_attr(verus_only, verus_spec(
-            invariant n == r@.len(), j <= n, found matches Some(k) ==> k < n,
+            invariant n == l@.len(), n == r@.len(), i < n, j <= n, found matches Some(k) ==> k < n,
             decreases n - j
         ))]
         while j < n {
@@ -709,7 +712,8 @@ fn var_binders_typ_syntactic_eq(l: &VarBinders<Typ>, r: &VarBinders<Typ>) -> Opt
 
 /// `SyntacticEquality` for `VarBinders<Exp>` (pairs up to the shorter length, as `zip`)
 #[cfg_attr(verus_only, verus_verify)]
-#[cfg_attr(verus_only, verus_spec(decreases l))]
+// (no `decreases`: `quant_alpha_eq` recurses on a renamed body, which is not a subterm)
+#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
 fn var_binders_exp_syntactic_eq(l: &VarBinders<Exp>, r: &VarBinders<Exp>) -> Option<bool> {
     if l.len() != r.len() {
         return None;
@@ -779,7 +783,8 @@ fn typ_syntactic_eq(l: &Typ, r: &Typ) -> Option<bool> {
 
 /// `SyntacticEquality` for `Bnd`
 #[cfg_attr(verus_only, verus_verify)]
-#[cfg_attr(verus_only, verus_spec(decreases l))]
+// (no `decreases`: `quant_alpha_eq` recurses on a renamed body, which is not a subterm)
+#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
 fn bnd_syntactic_eq(l: &Bnd, r: &Bnd) -> Option<bool> {
     use BndX::*;
     match (&l.x, &r.x) {
@@ -849,7 +854,8 @@ fn quant_alpha_eq(
 /// `SyntacticEquality` for `Exp`. We expect to only call this after eval_expr has been called
 /// on both expressions
 #[cfg_attr(verus_only, verus_verify)]
-#[cfg_attr(verus_only, verus_spec(decreases l))]
+// (no `decreases`: `quant_alpha_eq` recurses on a renamed body, which is not a subterm)
+#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
 fn exp_syntactic_eq(l: &Exp, r: &Exp) -> Option<bool> {
     // Easy case where the pointers match
     if Arc::ptr_eq(l, r) {
@@ -2626,6 +2632,7 @@ fn hide_free_vars(env: &Env, exp: &Exp) -> Result<Exp, VirErr> {
         return Ok(exp.clone());
     }
     let mut substs: HashMap<UniqueIdent, Exp> = HashMap::new();
+    #[cfg_attr(verus_only, verus_spec(invariant true))]
     for (id, _typ) in free_vars.iter() {
         if let Some(e) = env.get(id) {
             let e = cleanup_exp(e)?;
@@ -2633,11 +2640,15 @@ fn hide_free_vars(env: &Env, exp: &Exp) -> Result<Exp, VirErr> {
         }
     }
     let e = subst_exp(&HashMap::new(), &substs, exp);
-    let mut hide: HashMap<UniqueIdent, Exp> = HashMap::new();
-    for (id, typ) in crate::sst_util::free_vars_exp(&e).iter() {
-        let var = SpannedTyped::new(&exp.span, typ, ExpX::Interp(InterpExp::FreeVar(id.clone())));
-        hide.insert(id.clone(), var);
-    }
+    let free_after = crate::sst_util::free_vars_exp(&e);
+    let span = exp.span.clone();
+    let hide: HashMap<UniqueIdent, Exp> = free_after
+        .into_iter()
+        .map(|(id, t)| {
+            let fv = InterpExp::FreeVar(id.clone());
+            (id, SpannedTyped::new(&span, &t, ExpX::Interp(fv)))
+        })
+        .collect();
     Ok(subst_exp(&HashMap::new(), &hide, &e))
 }
 
@@ -3101,8 +3112,6 @@ fn cleanup_exp_for_check(exp: &Exp) -> Result<Exp, VirErr> {
 }
 
 #[cfg_attr(verus_only, verus_verify)]
-#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
-#[cfg_attr(verus_only, verus_verify)]
 /// The SST of a free variable hidden as `InterpExp::FreeVar`: a const generic (`TypParamBare`)
 /// is `ConstGeneric(TypParam)`, any other is `Var` (as upstream's `cleanup_exp`)
 fn free_var_exp(v: &UniqueIdent) -> ExpX {
@@ -3113,6 +3122,8 @@ fn free_var_exp(v: &UniqueIdent) -> ExpX {
     }
 }
 
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
 /// Restore the free variables we hid during interpretation
 /// and any sequence expressions we partially simplified during interpretation
 fn cleanup_exp(exp: &Exp) -> Result<Exp, VirErr> {
