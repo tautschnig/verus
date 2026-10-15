@@ -649,15 +649,37 @@ fn binders_typ_syntactic_eq(l: &Binders<Typ>, r: &Binders<Typ>) -> Option<bool> 
 #[cfg_attr(verus_only, verus_verify)]
 #[cfg_attr(verus_only, verus_spec(decreases l))]
 fn binders_exp_syntactic_eq(l: &Binders<Exp>, r: &Binders<Exp>) -> Option<bool> {
-    let n = if l.len() < r.len() { l.len() } else { r.len() };
+    // Constructor fields may appear in any source order (upstream #3047): each field of `l`
+    // is compared with the field of `r` that has its name.
+    if l.len() != r.len() {
+        return Some(false);
+    }
+    let n = l.len();
     let mut acc = true;
     let mut i: usize = 0;
     #[cfg_attr(verus_only, verus_spec(
-        invariant n <= l@.len(), n <= r@.len(), i <= n,
+        invariant n == l@.len(), n == r@.len(), i <= n,
         decreases n - i
     ))]
     while i < n {
-        acc = acc && l[i].name == r[i].name && exp_syntactic_eq(&l[i].a, &r[i].a)?;
+        let mut j: usize = 0;
+        let mut found: Option<usize> = None;
+        #[cfg_attr(verus_only, verus_spec(
+            invariant n == r@.len(), j <= n, found matches Some(k) ==> k < n,
+            decreases n - j
+        ))]
+        while j < n {
+            if found.is_none() && l[i].name == r[j].name {
+                found = Some(j);
+            }
+            j += 1;
+        }
+        match found {
+            None => return Some(false),
+            Some(k) => {
+                acc = acc && exp_syntactic_eq(&l[i].a, &r[k].a)?;
+            }
+        }
         i += 1;
     }
     Some(acc)
@@ -666,6 +688,11 @@ fn binders_exp_syntactic_eq(l: &Binders<Exp>, r: &Binders<Exp>) -> Option<bool> 
 /// `SyntacticEquality` for `VarBinders<Typ>` (pairs up to the shorter length, as `zip`)
 #[cfg_attr(verus_only, verus_verify)]
 fn var_binders_typ_syntactic_eq(l: &VarBinders<Typ>, r: &VarBinders<Typ>) -> Option<bool> {
+    // binder lists of different lengths are not known equal (upstream #3126; `zip` compared
+    // only the shorter prefix)
+    if l.len() != r.len() {
+        return None;
+    }
     let n = if l.len() < r.len() { l.len() } else { r.len() };
     let mut acc = true;
     let mut i: usize = 0;
@@ -684,6 +711,9 @@ fn var_binders_typ_syntactic_eq(l: &VarBinders<Typ>, r: &VarBinders<Typ>) -> Opt
 #[cfg_attr(verus_only, verus_verify)]
 #[cfg_attr(verus_only, verus_spec(decreases l))]
 fn var_binders_exp_syntactic_eq(l: &VarBinders<Exp>, r: &VarBinders<Exp>) -> Option<bool> {
+    if l.len() != r.len() {
+        return None;
+    }
     let n = if l.len() < r.len() { l.len() } else { r.len() };
     let mut acc = true;
     let mut i: usize = 0;
@@ -760,17 +790,60 @@ fn bnd_syntactic_eq(l: &Bnd, r: &Bnd) -> Option<bool> {
                 None
             }
         }
+        // (upstream #3050: different quantifiers are not known to differ)
         (Quant(q_l, bnds_l, _trigs_l, _), Quant(q_r, bnds_r, _trigs_r, _)) => {
-            Some(q_l == q_r && var_binders_typ_conservative_eq(bnds_l, bnds_r)?)
+            if q_l == q_r { var_binders_typ_conservative_eq(bnds_l, bnds_r) } else { None }
         }
         (Lambda(bnds_l, _trigs_l), Lambda(bnds_r, _trigs_r)) => {
             var_binders_typ_conservative_eq(bnds_l, bnds_r)
         }
+        // (upstream #3046: different predicates may choose the same value)
         (Choose(bnds_l, _trigs_l, e_l), Choose(bnds_r, _trigs_r, e_r)) => {
-            Some(var_binders_typ_conservative_eq(bnds_l, bnds_r)? && exp_syntactic_eq(e_l, e_r)?)
+            let b = var_binders_typ_conservative_eq(bnds_l, bnds_r)?;
+            if b && matches!(exp_syntactic_eq(e_l, e_r), Some(true)) { Some(true) } else { None }
         }
         _ => None,
     }
+}
+
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
+/// Two quantifiers, equal up to renaming their bound variables (upstream #3126): the left body,
+/// with its binders renamed to the right's, equals the right body. `Some(true)` or `None`.
+/// (Its recursion through `exp_syntactic_eq` is on a renamed body, which is not a subterm, so
+/// its termination is not proved, like the cleanup group's.)
+fn quant_alpha_eq(
+    q_l: &crate::ast::Quant,
+    bnds_l: &VarBinders<Typ>,
+    e_l: &Exp,
+    q_r: &crate::ast::Quant,
+    bnds_r: &VarBinders<Typ>,
+    e_r: &Exp,
+) -> Option<bool> {
+    if q_l != q_r || bnds_l.len() != bnds_r.len() {
+        return None;
+    }
+    let e_l = cleanup_exp(e_l).ok()?;
+    let e_r = cleanup_exp(e_r).ok()?;
+    let mut free_vars = crate::sst_util::free_vars_exp(&e_l);
+    let mut i: usize = 0;
+    while i < bnds_l.len() {
+        free_vars.remove(&bnds_l[i].name);
+        i += 1;
+    }
+    let mut substs: HashMap<UniqueIdent, Exp> = HashMap::new();
+    let mut j: usize = 0;
+    while j < bnds_l.len() && j < bnds_r.len() {
+        let (b_l, b_r) = (&bnds_l[j], &bnds_r[j]);
+        if !types_equal(&b_l.a, &b_r.a) || free_vars.contains_key(&b_r.name) {
+            return None;
+        }
+        let var = SpannedTyped::new(&e_l.span, &b_r.a, ExpX::Var(b_r.name.clone()));
+        substs.insert(b_l.name.clone(), var);
+        j += 1;
+    }
+    let e_l = subst_exp(&HashMap::new(), &substs, &e_l);
+    if matches!(exp_syntactic_eq(&e_l, &e_r), Some(true)) { Some(true) } else { None }
 }
 
 /// `SyntacticEquality` for `Exp`. We expect to only call this after eval_expr has been called
@@ -819,8 +892,15 @@ fn exp_syntactic_eq(l: &Exp, r: &Exp) -> Option<bool> {
                 None
             }
         }
+        // (upstream #3108: unequal arguments do not make two applications differ)
         (CallLambda(exp_l, exps_l), CallLambda(exp_r, exps_r)) => {
-            Some(exp_syntactic_eq(exp_l, exp_r)? && exps_syntactic_eq(exps_l, exps_r)?)
+            if matches!(exp_syntactic_eq(exp_l, exp_r), Some(true))
+                && matches!(exps_syntactic_eq(exps_l, exps_r), Some(true))
+            {
+                Some(true)
+            } else {
+                None
+            }
         }
 
         (Ctor(path_l, id_l, bnds_l), Ctor(path_r, id_r, bnds_r)) => {
@@ -838,7 +918,13 @@ fn exp_syntactic_eq(l: &Exp, r: &Exp) -> Option<bool> {
                 Some(false)
             }
         }
-        (Unary(op_l, e_l), Unary(op_r, e_r)) => def_eq(op_l == op_r && exp_syntactic_eq(e_l, e_r)?),
+        // A cast's target type is recorded in the expression's type, so it is compared too
+        // (upstream #3151, issue #3136: `f as u8` and `f as i8`)
+        (Unary(op_l, e_l), Unary(op_r, e_r)) => def_eq(
+            op_l == op_r
+                && types_equal(&undecorate_typ(&l.typ), &undecorate_typ(&r.typ))
+                && exp_syntactic_eq(e_l, e_r)?,
+        ),
         (UnaryOpr(op_l, e_l), UnaryOpr(op_r, e_r)) => {
             use crate::ast::UnaryOpr::*;
             let op_eq = match (op_l, op_r) {
@@ -855,15 +941,25 @@ fn exp_syntactic_eq(l: &Exp, r: &Exp) -> Option<bool> {
         (Binary(op_l, e1_l, e2_l), Binary(op_r, e1_r, e2_r)) => {
             def_eq(op_l == op_r && exp_syntactic_eq(e1_l, e1_r)? && exp_syntactic_eq(e2_l, e2_r)?)
         }
-        (If(e1_l, e2_l, e3_l), If(e1_r, e2_r, e3_r)) => Some(
-            exp_syntactic_eq(e1_l, e1_r)?
-                && exp_syntactic_eq(e2_l, e2_r)?
-                && exp_syntactic_eq(e3_l, e3_r)?,
-        ),
-        (WithTriggers(_trigs_l, e_l), WithTriggers(_trigs_r, e_r)) => exp_syntactic_eq(e_l, e_r),
-        (Bind(bnd_l, e_l), Bind(bnd_r, e_r)) => {
-            Some(bnd_syntactic_eq(bnd_l, bnd_r)? && exp_syntactic_eq(e_l, e_r)?)
+        // (upstream #3049: different conditions do not make the ifs differ, and equal
+        // conditions with unequal branches decide nothing about the ifs)
+        (If(e1_l, e2_l, e3_l), If(e1_r, e2_r, e3_r)) => {
+            if !matches!(exp_syntactic_eq(e1_l, e1_r), Some(true)) {
+                return None;
+            }
+            let then_eq = exp_syntactic_eq(e2_l, e2_r)?;
+            let else_eq = exp_syntactic_eq(e3_l, e3_r)?;
+            if then_eq == else_eq { Some(then_eq) } else { None }
         }
+        (WithTriggers(_trigs_l, e_l), WithTriggers(_trigs_r, e_r)) => exp_syntactic_eq(e_l, e_r),
+        // (upstream #3050: binders that are not known equal decide nothing; #3126:
+        // quantifiers are compared up to renaming of their bound variables)
+        (Bind(bnd_l, e_l), Bind(bnd_r, e_r)) => match (&bnd_l.x, &bnd_r.x) {
+            (BndX::Quant(q_l, bnds_l, ..), BndX::Quant(q_r, bnds_r, ..)) => {
+                quant_alpha_eq(q_l, bnds_l, e_l, q_r, bnds_r, e_r)
+            }
+            _ => def_eq(bnd_syntactic_eq(bnd_l, bnd_r)? && exp_syntactic_eq(e_l, e_r)?),
+        },
         (Interp(a), Interp(b)) => match (a, b) {
             (InterpExp::FreeVar(a), InterpExp::FreeVar(b)) => def_eq(a == b),
             (InterpExp::Seq(a), InterpExp::Seq(b)) => vector_exps_syntactic_eq(a, b),
@@ -944,16 +1040,9 @@ fn hash_var_binders_typ<H: Hasher>(state: &mut H, xs: &VarBinders<Typ>) {
 #[cfg_attr(verus_only, verus_verify)]
 #[cfg_attr(verus_only, verus_spec(decreases xs))]
 fn hash_binders_exp<H: Hasher>(state: &mut H, xs: &Binders<Exp>) {
-    let mut i: usize = 0;
-    #[cfg_attr(verus_only, verus_spec(
-        invariant i <= xs@.len(),
-        decreases xs@.len() - i
-    ))]
-    while i < xs.len() {
-        xs[i].name.hash(state);
-        hash_exp(state, &xs[i].a);
-        i += 1;
-    }
+    // Equality ignores the order of constructor fields (upstream #3047), so the hash must too;
+    // hashing less is always safe.
+    xs.len().hash(state);
 }
 
 #[cfg_attr(verus_only, verus_verify)]
@@ -984,9 +1073,8 @@ fn hash_bnd<H: Hasher>(state: &mut H, bnd: &Bnd) {
     }
     match &bnd.x {
         Let(bnds) => dohash!(0; hash_var_binders_exp(bnds)),
-        Quant(quant, bnds, trigs, _) => {
-            dohash!(1, quant; hash_var_binders_typ(bnds), hash_trigs(trigs))
-        }
+        // alpha-equivalent quantifiers must hash alike (upstream #3126)
+        Quant(quant, bnds, _, _) => dohash!(1, quant, bnds.len()),
         Lambda(bnds, trigs) => dohash!(2; hash_var_binders_typ(bnds), hash_trigs(trigs)),
         Choose(bnds, trigs, e) => dohash!(3;
                     hash_var_binders_typ(bnds), hash_trigs(trigs), hash_exp(e)),
@@ -1031,7 +1119,13 @@ fn hash_exp<H: Hasher>(state: &mut H, exp: &Exp) {
         BinaryOpr(op, e1, e2) => dohash!(111, op; hash_exp(e1), hash_exp(e2)),
         If(e1, e2, e3) => dohash!(12; hash_exp(e1), hash_exp(e2), hash_exp(e3)),
         WithTriggers(trigs, e) => dohash!(13; hash_trigs(trigs), hash_exp(e)),
-        Bind(bnd, e) => dohash!(14; hash_bnd(bnd), hash_exp(e)),
+        Bind(bnd, e) => {
+            dohash!(14; hash_bnd(bnd));
+            // alpha-equivalent quantifiers must hash alike (upstream #3126)
+            if !matches!(&bnd.x, BndX::Quant(..)) {
+                hash_exp(state, e);
+            }
+        }
         Interp(e) => {
             dohash!(15);
             match e {
@@ -2381,15 +2475,19 @@ fn eval_call_lambda(
     args: &Exps,
 ) -> Result<Exp, VirErr> {
     use ExpX::*;
-    let ok: Result<Exp, VirErr> = Ok(exp.clone());
     let lambda = eval_expr_internal(ctx, state, lambda)?;
+    // The arguments are evaluated whatever the callee is, and an application that is not
+    // reduced is rebuilt from the evaluated parts (upstream #3108): the original expression
+    // would bring its unevaluated arguments into a context where their names mean something
+    // else.
+    let new_args: Result<Vec<Exp>, VirErr> = eval_exps(ctx, state, args);
+    let new_args = Arc::new(new_args?);
+    let ok: Result<Exp, VirErr> =
+        Ok(SpannedTyped::new(&exp.span, &exp.typ, CallLambda(lambda.clone(), new_args.clone())));
     match &lambda.x {
         Interp(InterpExp::Closure(lambda, context)) => match &lambda.x {
             Bind(bnd, body) => match &bnd.x {
                 BndX::Lambda(bnds, _trigs) => {
-                    let new_args: Result<Vec<Exp>, VirErr> =
-                        eval_exps(ctx, state, args);
-                    let new_args = Arc::new(new_args?);
                     #[cfg(verus_only)]
                     proof_decl! { let ghost s_mid = *state; }
                     state.env.push_scope(true);
@@ -2462,7 +2560,6 @@ fn eval_bind(
     e: &Exp,
 ) -> Result<Exp, VirErr> {
     use ExpX::*;
-    let ok: Result<Exp, VirErr> = Ok(exp.clone());
     let exp_new = |e: ExpX| -> Result<Exp, VirErr> { Ok(SpannedTyped::new(&exp.span, &exp.typ, e)) };
     match &bnd.x {
     BndX::Let(bnds) => {
@@ -2512,8 +2609,36 @@ fn eval_bind(
             exp_new(Bind(bnd.clone(), e))
         }
     }
-    _ => ok,
+    // A `choose` is left as it is, but its free variables must not escape their scope
+    // (upstream #3108): those bound in `env` are replaced by their values, the others are
+    // hidden as `FreeVar`
+    BndX::Choose(..) => hide_free_vars(&state.env, exp),
     }
+}
+
+#[cfg_attr(verus_only, verus_verify)]
+#[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
+/// `exp` with each free variable bound in `env` replaced by its (cleaned-up) value and every
+/// other free variable hidden as `InterpExp::FreeVar` (upstream #3108)
+fn hide_free_vars(env: &Env, exp: &Exp) -> Result<Exp, VirErr> {
+    let free_vars = crate::sst_util::free_vars_exp(exp);
+    if free_vars.is_empty() {
+        return Ok(exp.clone());
+    }
+    let mut substs: HashMap<UniqueIdent, Exp> = HashMap::new();
+    for (id, _typ) in free_vars.iter() {
+        if let Some(e) = env.get(id) {
+            let e = cleanup_exp(e)?;
+            substs.insert(id.clone(), e);
+        }
+    }
+    let e = subst_exp(&HashMap::new(), &substs, exp);
+    let mut hide: HashMap<UniqueIdent, Exp> = HashMap::new();
+    for (id, typ) in crate::sst_util::free_vars_exp(&e).iter() {
+        let var = SpannedTyped::new(&exp.span, typ, ExpX::Interp(InterpExp::FreeVar(id.clone())));
+        hide.insert(id.clone(), var);
+    }
+    Ok(subst_exp(&HashMap::new(), &hide, &e))
 }
 
 #[cfg_attr(verus_only, verus_verify)]
@@ -2638,6 +2763,19 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
             match op {
                 crate::ast::NullaryOpr::ConstGeneric(typ) => {
                     match &**typ {
+                        // concrete const generics (upstream #3107), clipped to the declared type
+                        TypX::ConstInt(i) => match crate::ast_util::int_range_from_type(&exp.typ) {
+                            Some(IntRange::Int) => exp_int(exp, i.clone()),
+                            Some(range) => {
+                                let value = exp.new_x(Const(Constant::Int(i.clone())));
+                                let clipped = exp
+                                    .new_x(Unary(UnaryOp::Clip { range, truncate: false }, value));
+                                let value = eval_expr_internal(ctx, state, &clipped)?;
+                                if matches!(&value.x, Const(Constant::Int(_))) { Ok(value) } else { ok }
+                            }
+                            None => ok,
+                        },
+                        TypX::ConstBool(b) => exp_bool(exp, *b),
                         TypX::TypParam(id) => {
                             let var_id = VarIdent(id.clone(), VarIdentDisambiguate::TypParamBare);
                             match state.env.get(&var_id) {
@@ -2677,7 +2815,8 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
                     _ => ok,
                 },
                 Field(f) => match &e.x {
-                    Ctor(_dt, _var, binders) => {
+                    // (upstream #3048: a field of another variant is not this one's)
+                    Ctor(_dt, var, binders) if var == &f.variant => {
                         match binders.iter().position(|b| b.name == f.field) {
                             None => ok,
                             Some(i) => Ok(binders.get(i).unwrap().a.clone()),
@@ -2713,12 +2852,13 @@ fn eval_expr_internal(ctx: &Ctx, state: &mut State, exp: &Exp) -> Result<Exp, Vi
                         _ => ok,
                     }
                 }
-                ToDyn(_) => Ok(e),
+                // (upstream #3170, issue #3164: neither reduces to its operand)
+                ToDyn(_) => ok,
                 CustomErr(_) => Ok(e),
                 AutoDecreases => Ok(e),
                 AutoLoopEnsures => Ok(e),
                 ProofNote(_) => Ok(e),
-                HasResolved(_) => Ok(e),
+                HasResolved(_) => ok,
                 LoopIsolationBoundary(_) => Ok(e),
             }
         }
@@ -2947,9 +3087,7 @@ fn cleanup_exp_for_check(exp: &Exp) -> Result<Exp, VirErr> {
             }
             _ => Err(error(&e.span, "Internal error: sequence without a sequence type")),
         },
-        ExpX::Interp(InterpExp::FreeVar(v)) => {
-            Ok(SpannedTyped::new(&e.span, &e.typ, ExpX::Var(v.clone())))
-        }
+        ExpX::Interp(InterpExp::FreeVar(v)) => Ok(SpannedTyped::new(&e.span, &e.typ, free_var_exp(v))),
         ExpX::Interp(InterpExp::Array(v)) => {
             let cleaned: Result<Vector<Exp>, VirErr> =
                 v.iter().map(|x| cleanup_exp_for_check(x)).collect();
@@ -2964,13 +3102,22 @@ fn cleanup_exp_for_check(exp: &Exp) -> Result<Exp, VirErr> {
 
 #[cfg_attr(verus_only, verus_verify)]
 #[cfg_attr(verus_only, verifier::exec_allows_no_decreases_clause)]
+#[cfg_attr(verus_only, verus_verify)]
+/// The SST of a free variable hidden as `InterpExp::FreeVar`: a const generic (`TypParamBare`)
+/// is `ConstGeneric(TypParam)`, any other is `Var` (as upstream's `cleanup_exp`)
+fn free_var_exp(v: &UniqueIdent) -> ExpX {
+    if v.1 == VarIdentDisambiguate::TypParamBare {
+        ExpX::NullaryOpr(crate::ast::NullaryOpr::ConstGeneric(Arc::new(TypX::TypParam(v.0.clone()))))
+    } else {
+        ExpX::Var(v.clone())
+    }
+}
+
 /// Restore the free variables we hid during interpretation
 /// and any sequence expressions we partially simplified during interpretation
 fn cleanup_exp(exp: &Exp) -> Result<Exp, VirErr> {
     crate::sst_visitor::map_exp_visitor_result(exp, &mut |e| match &e.x {
-        ExpX::Interp(InterpExp::FreeVar(v)) => {
-            Ok(SpannedTyped::new(&e.span, &e.typ, ExpX::Var(v.clone())))
-        }
+        ExpX::Interp(InterpExp::FreeVar(v)) => Ok(SpannedTyped::new(&e.span, &e.typ, free_var_exp(v))),
         ExpX::Interp(InterpExp::Array(v)) => cleanup_array(&e.span, e.typ.clone(), v),
         ExpX::Interp(InterpExp::Seq(v)) => cleanup_seq(&e.span, e.typ.clone(), v),
         ExpX::Interp(InterpExp::Closure(..)) => Err(error(
