@@ -2284,6 +2284,14 @@ pub(crate) fn check_item_fn<'tcx>(
     if let Some(f) = &autospec.new_func {
         state.insert_fun_warn_config(ctxt, &f.x.name, id);
     }
+    if autoderive_action.is_some() {
+        // the `clone_spec` predicate that `automatic_derive::modify_derived_item` may
+        // synthesize in `finish_function` (same name as there)
+        let spec_name = Arc::new(vir::ast::FunX {
+            path: function.x.name.path.pop_segment().push_segment(Arc::new("clone_spec".to_string())),
+        });
+        state.insert_fun_warn_config(ctxt, &spec_name, id);
+    }
 
     infos.push(FunctionOrConstInfo::Function(FunctionInfo {
         function,
@@ -2732,7 +2740,7 @@ pub(crate) fn finish_function<'tcx>(
         functions.push(finish_autospec(sig.span, &function, f)?);
     }
 
-    // (the derived predicate's warning config: see the fixups of the rebase onto upstream)
+    // (its warning config was recorded with the stub, in `check_item_fn`)
     if let Some(f) = derived_spec_fn {
         functions.push(f);
     }
@@ -4013,7 +4021,13 @@ fn get_async_inner_return_ty<'tcx>(
     let rustc_middle::ty::TyKind::Alias(_, al_ty) = output.kind() else {
         crate::internal_err!(span, "get_async_inner_return_ty");
     };
-    let alias_def_id = al_ty.kind.try_to_opaque().expect("alias kind");
+    // `impl Future` of a free or inherent async fn (an opaque type), or the synthesized
+    // associated type of an async fn in a trait (a projection)
+    let alias_def_id = match al_ty.kind {
+        rustc_middle::ty::AliasTyKind::Opaque { def_id }
+        | rustc_middle::ty::AliasTyKind::Projection { def_id } => def_id,
+        _ => crate::internal_err!(span, "get_async_inner_return_ty: alias kind"),
+    };
     let typing_env = TypingEnv::non_body_analysis(ctxt.tcx, alias_def_id);
     let instantiated_bounds = ctxt.tcx.normalize_erasing_regions(
         typing_env,
@@ -4028,8 +4042,12 @@ fn get_async_inner_return_ty<'tcx>(
                 AliasTermKind::ProjectionTy { def_id } => {
                     if Some(def_id) == ctxt.tcx.lang_items().future_output()
                         && pc.projection_term.args.len() == 1
-                        && let rustc_middle::ty::TyKind::Alias(_, al_ty) = output.kind()
-                        && al_ty.kind.try_to_opaque() == Some(alias_def_id)
+                        && matches!(pc.projection_term.args.type_at(0).kind(),
+                            rustc_middle::ty::TyKind::Alias(_, a)
+                                if matches!(a.kind,
+                                    rustc_middle::ty::AliasTyKind::Opaque { def_id }
+                                    | rustc_middle::ty::AliasTyKind::Projection { def_id }
+                                        if def_id == alias_def_id))
                     {
                         Some(pc.term.expect_type())
                     } else {

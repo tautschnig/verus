@@ -544,7 +544,23 @@ fn patexpr_unsupported_type_err<'tcx>(
     pat: &Pat<'tcx>,
 ) -> Result<(), VirErr> {
     let pat_ty = bctx.types.node_type(pat.hir_id);
-    if !crate::rust_to_vir_base::ty_has_smt_equality(bctx, span, pat_ty)? {
+    // Besides the types `ty_has_smt_equality` admits: `&str` (vstd's
+    // `axiom_str_view_injective`) and slices and arrays of such elements (`axiom_slice_ext_equal`,
+    // `axiom_array_ext_equal`), which Rust compares element-wise. A literal pattern of these
+    // types (`"abc"`, `b"TALB"`) is then decided by SMT equality, as Rust decides it.
+    fn ok<'tcx>(
+        bctx: &BodyCtxt<'tcx>,
+        span: Span,
+        ty: rustc_middle::ty::Ty<'tcx>,
+    ) -> Result<bool, VirErr> {
+        match ty.kind() {
+            TyKind::Ref(_, t, rustc_ast::Mutability::Not) => ok(bctx, span, *t),
+            TyKind::Str => Ok(true),
+            TyKind::Slice(t) | TyKind::Array(t, _) => ok(bctx, span, *t),
+            _ => crate::rust_to_vir_base::ty_has_smt_equality(bctx, span, ty),
+        }
+    }
+    if !ok(bctx, span, pat_ty)? {
         unsupported_err!(span, format!("equality-testing this type in pattern: {:?}", pat_ty));
     }
     Ok(())
@@ -621,6 +637,12 @@ pub(crate) fn patexpr_to_vir<'tcx>(
             match res {
                 Res::Def(DefKind::Const { is_type_const: _ }, id) => {
                     patexpr_unsupported_type_err(bctx, span, pat)?;
+                    // the deprecated module constants (`core::u16::MIN`) are int intrinsics
+                    if let Some(vir_expr) =
+                        int_intrinsic_constant_to_vir(&bctx.ctxt, pat.span, &pat_typ, id)
+                    {
+                        return Ok(PatternX::Expr(vir_expr));
+                    }
                     let node_substs = bctx.types.node_args(pat_expr.hir_id);
                     let x = const_var_to_vir(bctx, None, id, node_substs, &pat_expr.hir_id, span)?;
                     let expr = bctx.spanned_typed_new(pat.span, &pat_typ, x.x.clone());
@@ -3627,6 +3649,19 @@ pub(crate) fn expr_to_vir_innermost<'tcx>(
                     }
                 }
                 (Res::Def(DefKind::Const { is_type_const: _ }, id), _) => {
+                    // the deprecated module constants (`core::u32::MAX`) are int intrinsics
+                    if let Some(vir_expr) =
+                        int_intrinsic_constant_to_vir(&bctx.ctxt, expr.span, &expr_typ()?, id)
+                    {
+                        let mut erasure_info = bctx.ctxt.erasure_info.borrow_mut();
+                        erasure_info.resolved_calls.push((
+                            expr.hir_id,
+                            expr.span.data(),
+                            ResolvedCall::MiscCall(MiscCall::IntIntrinsic),
+                            bctx.in_ghost,
+                        ));
+                        return Ok(ExprOrPlace::Expr(vir_expr));
+                    }
                     let node_substs = bctx.types.node_args(expr.hir_id);
                     let e = const_var_to_vir(
                         bctx,

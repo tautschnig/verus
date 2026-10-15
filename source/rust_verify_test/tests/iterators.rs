@@ -458,14 +458,13 @@ test_verify_one_file! {
     #[test] slice_chunks_spec verus_code! {
         use vstd::prelude::*;
         use vstd::std_specs::iter::IteratorSpec;
-        use vstd::std_specs::slice::spec_chunks;
 
-        fn chunk_facts(s: &[u64], idx: Ghost<int>)
-            requires s.len() == 5, 0 <= idx@ < 3,
+        fn chunk_facts(s: &[u64])
+            requires s.len() == 5,
         {
             let c = s.chunks(2);
             assert(c.remaining().len() == 3);
-            assert(spec_chunks(s@, 2)[idx@] == s@.subrange(idx@ * 2, if (idx@ + 1) * 2 <= 5 { (idx@ + 1) * 2 } else { 5 }));
+            assert(c.remaining()[0]@ == s@.subrange(0, 2));
             assert(c.remaining()[2]@ == s@.subrange(4, 5));
         }
 

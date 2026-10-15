@@ -1729,6 +1729,9 @@ test_verify_one_file! {
         "equality-testing this type in pattern: f64",
         "equality-testing this type in pattern: f64",
     ])
+}
+
+test_verify_one_file! {
     #[test] slice_patterns verus_code! {
         use vstd::prelude::*;
         fn head_or_zero(s: &[u64]) -> (r: u64)

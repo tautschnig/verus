@@ -806,7 +806,9 @@ test_verify_one_file! {
 }
 
 
-// dyn Trait<Assoc = T>: the binding is part of the dyn type's identity
+// dyn Trait<Assoc = T>: the binding is part of the dyn type's identity.
+// Upstream (#3052, for #3051) rejects `Self::Assoc` in the contracts of a dyn trait's methods,
+// so these traits are not Verus dyn-compatible; the tests record that.
 
 const DYN_PROJ_COMMON: &str = verus_code_str! {
     trait Producer {
@@ -855,7 +857,7 @@ test_verify_one_file! {
             let b = use_dyn_b(&f);
             assert(b);
         }
-    } => Ok(())
+    } => Err(err) => assert_any_vir_error_msg(err, "Trait is not Verus dyn-compatible")
 }
 
 test_verify_one_file! {
@@ -878,7 +880,7 @@ test_verify_one_file! {
             let s = sum(&v);
             assert(s == 3);
         }
-    } => Ok(())
+    } => Err(err) => assert_any_vir_error_msg(err, "Trait is not Verus dyn-compatible")
 }
 
 test_verify_one_file! {
@@ -888,7 +890,7 @@ test_verify_one_file! {
         {
             p.next()
         }
-    } => Err(err) => assert_one_fails(err)
+    } => Err(err) => assert_any_vir_error_msg(err, "Trait is not Verus dyn-compatible")
 }
 
 test_verify_one_file! {
@@ -899,7 +901,7 @@ test_verify_one_file! {
         proof fn no_false(a: &dyn Producer<Item = u64>, b: &dyn Producer<Item = bool>) {
             assert(false); // FAILS
         }
-    } => Err(err) => assert_one_fails(err)
+    } => Err(err) => assert_any_vir_error_msg(err, "Trait is not Verus dyn-compatible")
 }
 
 test_verify_one_file! {
@@ -925,7 +927,7 @@ test_verify_one_file! {
             let r = via(&w, 5);
             assert(r == 5);
         }
-    } => Ok(())
+    } => Err(err) => assert_any_vir_error_msg(err, "Trait is not Verus dyn-compatible")
 }
 
 test_verify_one_file! {

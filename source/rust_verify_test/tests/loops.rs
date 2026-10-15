@@ -2158,8 +2158,9 @@ test_verify_one_file! {
     #[test] test_break_with_value verus_code! {
         use vstd::prelude::*;
 
-        // `loop { .. break v .. }` is lowered to a result local assigned at each break; the
-        // loop is not isolated, so what is known at the break reaches the result
+        // upstream supports `break v` in loops without isolation only
+        #[verifier::loop_isolation(false)]
+        #[verifier::allow_complex_invariants]
         fn find(v: &Vec<u32>, x: u32) -> (r: Option<usize>)
             ensures r matches Some(i) ==> i < v@.len() && v@[i as int] == x,
         {
@@ -2176,6 +2177,8 @@ test_verify_one_file! {
         }
 
         // labeled break out of a nested loop
+        #[verifier::loop_isolation(false)]
+        #[verifier::allow_complex_invariants]
         fn nested() -> (r: u32)
             ensures r == 7,
         {
@@ -2195,6 +2198,8 @@ test_verify_one_file! {
         }
 
         // a non-Copy value
+        #[verifier::loop_isolation(false)]
+        #[verifier::allow_complex_invariants]
         fn build(n: usize) -> (r: Vec<u8>)
             requires n < 100,
             ensures r@.len() == n,
@@ -2210,6 +2215,8 @@ test_verify_one_file! {
             r
         }
 
+        #[verifier::loop_isolation(false)]
+        #[verifier::allow_complex_invariants]
         fn wrong() -> (r: u32)
             ensures r == 2, // FAILS
         {
