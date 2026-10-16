@@ -5078,3 +5078,21 @@ test_verify_one_file! {
         };
     } => Err(err) => assert_one_fails(err)
 }
+
+test_verify_one_file! {
+    // two fn-local items of the same name in different blocks (as macros like
+    // `tracing::info!` generate) used to get the same path
+    #[test] test_same_named_local_items verus_code! {
+        fn f(b: bool) -> (r: u8)
+            ensures r == 1 || r == 2
+        {
+            if b {
+                fn helper() -> (r: u8) ensures r == 1 { 1 }
+                helper()
+            } else {
+                fn helper() -> (r: u8) ensures r == 2 { 2 }
+                helper()
+            }
+        }
+    } => Ok(())
+}
