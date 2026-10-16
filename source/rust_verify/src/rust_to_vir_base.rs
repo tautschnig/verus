@@ -48,6 +48,12 @@ pub(crate) fn def_path_to_vir_path<'tcx>(tcx: TyCtxt<'tcx>, def_path: DefPath) -
     for d in def_path.data.iter() {
         use rustc_hir::definitions::DefPathData;
         match &d.data {
+            DefPathData::ValueNs(symbol) if symbol.as_str() == "_" => {
+                // Anonymous `const _: () = { ... };` items (what derive macros such as serde's
+                // expand to) all have the name `_`; only the disambiguator tells them apart.
+                // Without it, items inside two such blocks get the same path.
+                segments.push(Arc::new(format!("_&%{}", d.disambiguator)));
+            }
             DefPathData::ValueNs(symbol) | DefPathData::TypeNs(symbol) => {
                 segments.push(Arc::new(symbol.to_string()));
             }
