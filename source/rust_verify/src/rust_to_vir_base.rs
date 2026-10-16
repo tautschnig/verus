@@ -54,6 +54,13 @@ pub(crate) fn def_path_to_vir_path<'tcx>(tcx: TyCtxt<'tcx>, def_path: DefPath) -
                 // Without it, items inside two such blocks get the same path.
                 segments.push(Arc::new(format!("_&%{}", d.disambiguator)));
             }
+            DefPathData::ValueNs(symbol) | DefPathData::TypeNs(symbol) if d.disambiguator != 0 => {
+                // Two items of the same name in one parent, e.g. fn-local items in different
+                // blocks of a function (`tracing::info!` declares `static __CALLSITE` in each
+                // invocation). Items with a unique name have disambiguator 0 and keep their
+                // plain path.
+                segments.push(Arc::new(format!("{}&%{}", symbol, d.disambiguator)));
+            }
             DefPathData::ValueNs(symbol) | DefPathData::TypeNs(symbol) => {
                 segments.push(Arc::new(symbol.to_string()));
             }
